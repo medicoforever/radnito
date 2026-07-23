@@ -48,7 +48,7 @@ export const generateRadnitoPDF = () => {
   doc.setTextColor(37, 99, 235);
   doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
-  const webUrl = 'https://medicoforever.github.io/radiology-dictation-app/';
+  const webUrl = 'https://medicoforever.github.io/radnito/';
   doc.textWithLink(webUrl, margin + 4, y + 12, { url: webUrl });
 
   y += 22;
