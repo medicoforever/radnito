@@ -98,16 +98,16 @@ export const processAudio = async (
 
   if (isReprocessing) {
       basePrompt = REPROCESS_GEMINI_PROMPT;
-  } else if (useTemplate) {
+  } else if (customPrompt && customPrompt.trim().length > 0) {
       const selectedTemplate = REPORT_TEMPLATES.find(t =>
-          customPrompt!.toLowerCase().includes(t.name.toLowerCase())
+          customPrompt.toLowerCase().includes(t.name.toLowerCase())
       );
 
       if (selectedTemplate) {
           const templateContent = `## ${selectedTemplate.name} Normal Report Template\n${selectedTemplate.content}`;
           basePrompt = TEMPLATE_GEMINI_PROMPT.replace('[INSERT_TEMPLATE_HERE]', templateContent);
       } else {
-          basePrompt = TEMPLATE_GEMINI_PROMPT.replace('[INSERT_TEMPLATE_HERE]', '// Template mentioned in custom instructions was not found.');
+          basePrompt = TEMPLATE_GEMINI_PROMPT.replace('[INSERT_TEMPLATE_HERE]', `## User Provided Template & Custom Instructions\n${customPrompt}`);
       }
   } else {
       basePrompt = DEFAULT_GEMINI_PROMPT;
@@ -467,9 +467,11 @@ export const createChat = async (
   audioBlob: Blob, 
   initialFindings: string[], 
   customPrompt?: string,
-  customImages?: Array<{ data: string; mimeType: string }> | null
+  customImages?: Array<{ data: string; mimeType: string }> | null,
+  model: string = 'gemini-3.6-flash'
 ): Promise<Chat> => {
   const base64Audio = await blobToBase64(audioBlob);
+  const targetModel = model || 'gemini-3.6-flash';
   
   const userMessageParts: any[] = [];
 
@@ -502,7 +504,7 @@ export const createChat = async (
   }
 
   const chat = getAiClient().client.chats.create({
-    model: 'gemini-2.5-pro',
+    model: targetModel,
     config: {
       systemInstruction: systemInstruction,
     },
@@ -517,8 +519,10 @@ export const createChat = async (
 export const createChatFromText = async (
   initialFindings: string[], 
   customPrompt?: string,
-  customImages?: Array<{ data: string; mimeType: string }> | null
+  customImages?: Array<{ data: string; mimeType: string }> | null,
+  model: string = 'gemini-3.6-flash'
 ): Promise<Chat> => {
+  const targetModel = model || 'gemini-3.6-flash';
   const userMessageParts: any[] = [];
   
   if (customImages && customImages.length > 0) {
@@ -543,7 +547,7 @@ export const createChatFromText = async (
   }
 
   const chat = getAiClient().client.chats.create({
-    model: 'gemini-2.5-pro',
+    model: targetModel,
     config: {
       systemInstruction: systemInstruction,
     },

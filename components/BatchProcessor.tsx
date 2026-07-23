@@ -251,7 +251,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                         if (savedBatch.status === 'complete' && savedBatch.findings && audioBlobs.length > 0) {
                             try {
                                 const mergedBlob = new Blob(audioBlobs, { type: audioBlobs[0]?.type || 'audio/webm' });
-                                chat = await createChat(mergedBlob, savedBatch.findings, savedBatch.customPrompt);
+                                chat = await createChat(mergedBlob, savedBatch.findings, savedBatch.customPrompt, savedBatch.customImages || [], savedBatch.selectedModel);
                             } catch (e) {
                                 console.error(`Failed to recreate chat for batch ${savedBatch.name}:`, e);
                             }
@@ -816,7 +816,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                 const mergedBlob = new Blob(batch.audioBlobs, { type: mimeType });
                 const findings = await processAudio(mergedBlob, batch.selectedModel, batch.customPrompt, batch.customImages || []);
                 
-                const chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || []);
+                const chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || [], batch.selectedModel);
                 const aiGreeting = "I have reviewed the audio and transcript for this dictation. How can I help you further?";
                 const initialChatHistory = [{ author: 'AI' as const, text: `${findings.join('\n\n')}\n\n${aiGreeting}` }];
 
@@ -843,7 +843,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
             const mergedBlob = new Blob(batch.audioBlobs, { type: mimeType });
             const findings = await processAudio(mergedBlob, batch.selectedModel, batch.customPrompt, batch.customImages || []);
             
-            const chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || []);
+            const chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || [], batch.selectedModel);
             const aiGreeting = "I have reviewed the audio and transcript for this dictation. How can I help you further?";
             const initialChatHistory = [{ author: 'AI' as const, text: `${findings.join('\n\n')}\n\n${aiGreeting}` }];
 
@@ -1398,14 +1398,14 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
             setUndoStates(prev => ({ ...prev, [batchId]: [...batch.findings!] }));
 
             try {
-                const newFindings = await processAudio(newAudioBlob, batch.selectedModel, batch.customPrompt);
+                const newFindings = await processAudio(newAudioBlob, batch.selectedModel, batch.customPrompt, batch.customImages || []);
                 const updatedFindings = [...batch.findings, ...newFindings];
                 
                 const updatedAudioBlobs = [...batch.audioBlobs, newAudioBlob];
                 const mimeType = updatedAudioBlobs[0].type;
                 const mergedBlob = new Blob(updatedAudioBlobs, { type: mimeType });
 
-                const chatSession = await createChat(mergedBlob, updatedFindings, batch.customPrompt);
+                const chatSession = await createChat(mergedBlob, updatedFindings, batch.customPrompt, batch.customImages || [], batch.selectedModel);
                 const aiGreeting = "I have updated the transcript with your new dictation. How can I help you further?";
                 const updatedChatHistory = [{ author: 'AI' as const, text: `${updatedFindings.join('\n\n')}\n\n${aiGreeting}` }];
 
@@ -1463,7 +1463,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                 
                 const mimeType = batchToModify.audioBlobs[0]?.type || 'audio/webm';
                 const mergedBlob = new Blob(batchToModify.audioBlobs, { type: mimeType });
-                const chatSession = await createChat(mergedBlob, newFindings, batchToModify.customPrompt);
+                const chatSession = await createChat(mergedBlob, newFindings, batchToModify.customPrompt, batchToModify.customImages || [], batchToModify.selectedModel);
                 const aiGreeting = "I have updated the transcript with your new dictation. How can I help you further?";
                 const updatedChatHistory = [{ author: 'AI' as const, text: `${newFindings.join('\n\n')}\n\n${aiGreeting}` }];
     
