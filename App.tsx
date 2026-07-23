@@ -399,9 +399,6 @@ const App: React.FC = () => {
           <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-blue-700 dark:text-blue-400 drop-shadow-sm">
             RADNITO
           </h1>
-          <p className="text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400 mt-0.5">
-            AI Radiology Dictation Corrector
-          </p>
           <p className="text-slate-600 dark:text-slate-400 mt-2 text-sm">
             {getPageDescription()}
           </p>
