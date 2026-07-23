@@ -198,37 +198,79 @@ export const useAudioRecorder = (): AudioRecorderResult => {
 
   const stopRecording = useCallback((): Promise<Blob> => {
     return new Promise((resolve, reject) => {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-            const recorder = mediaRecorderRef.current;
+      const recorder = mediaRecorderRef.current;
+      
+      const forceCleanup = () => {
+        try {
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+          }
+        } catch (e) {}
+        mediaRecorderRef.current = null;
+        setIsRecording(false);
+        setIsPaused(false);
+      };
 
-            const cleanupAndSetState = async () => {
-                streamRef.current?.getTracks().forEach(track => track.stop());
-                streamRef.current = null;
-                mediaRecorderRef.current = null;
-                setIsRecording(false);
-                setIsPaused(false);
-            };
-            
-            recorder.addEventListener("stop", async () => {
-                const newAudioBlob = new Blob(audioChunksRef.current, { type: mimeTypeRef.current });
-                await cleanupAndSetState();
-                // Save complete recording & clear active session chunks
-                await saveCompletedRecording(newAudioBlob, mimeTypeRef.current);
-                await clearActiveSession();
-                setUnsavedSession(null);
-                resolve(newAudioBlob);
-            }, { once: true });
+      if (recorder && recorder.state !== 'inactive') {
+        try {
+          // Flush any buffered audio data before stopping
+          recorder.requestData();
+        } catch (e) {}
 
-            recorder.addEventListener("error", async (event) => {
-                console.error("MediaRecorder error:", event);
-                await cleanupAndSetState();
-                reject(new Error("An error occurred during recording."));
-            }, { once: true });
+        const handleStopEvent = async () => {
+          forceCleanup();
 
-            recorder.stop();
-        } else {
-            resolve(new Blob([], { type: mimeTypeRef.current }));
-        }
+          let finalBlob = new Blob(audioChunksRef.current, { type: mimeTypeRef.current || 'audio/webm' });
+
+          // Fallback if chunks array is empty
+          if (finalBlob.size === 0) {
+            const unsaved = await getUnsavedActiveSession();
+            if (unsaved && unsaved.chunks.length > 0) {
+              finalBlob = new Blob(unsaved.chunks, { type: unsaved.mimeType || 'audio/webm' });
+            }
+          }
+
+          if (finalBlob.size > 0) {
+            await saveCompletedRecording(finalBlob, mimeTypeRef.current);
+            await clearActiveSession();
+            setUnsavedSession(null);
+          }
+
+          resolve(finalBlob);
+        };
+
+        recorder.addEventListener("stop", handleStopEvent, { once: true });
+        recorder.addEventListener("error", async (event) => {
+          console.error("MediaRecorder error:", event);
+          forceCleanup();
+          reject(new Error("An error occurred during recording."));
+        }, { once: true });
+
+        // Small delay to allow requestData to flush to dataavailable
+        setTimeout(() => {
+          try {
+            if (recorder.state !== 'inactive') {
+              recorder.stop();
+            } else {
+              handleStopEvent();
+            }
+          } catch (e) {
+            handleStopEvent();
+          }
+        }, 50);
+      } else {
+        forceCleanup();
+        // Check if unsaved session exists in IndexedDB
+        getUnsavedActiveSession().then(unsaved => {
+          if (unsaved && unsaved.chunks.length > 0) {
+            const fallbackBlob = new Blob(unsaved.chunks, { type: unsaved.mimeType || 'audio/webm' });
+            resolve(fallbackBlob);
+          } else {
+            resolve(new Blob(audioChunksRef.current, { type: mimeTypeRef.current || 'audio/webm' }));
+          }
+        });
+      }
     });
   }, []);
 

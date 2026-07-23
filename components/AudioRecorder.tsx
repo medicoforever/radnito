@@ -87,9 +87,12 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ status, setStatus, onReco
   };
   
   const handleStop = async () => {
-    const audioBlob = await stopRecording();
-    if (audioBlob) {
+    setStatus(AppStatus.Processing);
+    try {
+      const audioBlob = await stopRecording();
       onRecordingComplete(audioBlob);
+    } catch (e) {
+      console.error("Stop recording failed:", e);
     }
   };
 
