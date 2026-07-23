@@ -92,34 +92,28 @@ export const processAudio = async (
 ): Promise<string[]> => {
   const base64Audio = await blobToBase64(audioBlob);
 
-  const useTemplate = customPrompt?.toLowerCase().includes('report template');
-  let basePrompt: string;
+  const hasCustomImages = customImages && customImages.length > 0;
+  const hasCustomText = customPrompt && customPrompt.trim().length > 0;
   const isReprocessing = existingFindings && existingFindings.length > 0;
+
+  let basePrompt: string;
 
   if (isReprocessing) {
       basePrompt = REPROCESS_GEMINI_PROMPT;
-  } else if (customPrompt && customPrompt.trim().length > 0) {
-      const selectedTemplate = REPORT_TEMPLATES.find(t =>
-          customPrompt.toLowerCase().includes(t.name.toLowerCase())
-      );
-
-      if (selectedTemplate) {
-          const templateContent = `## ${selectedTemplate.name} Normal Report Template\n${selectedTemplate.content}`;
-          basePrompt = TEMPLATE_GEMINI_PROMPT.replace('[INSERT_TEMPLATE_HERE]', templateContent);
-      } else {
-          basePrompt = TEMPLATE_GEMINI_PROMPT.replace('[INSERT_TEMPLATE_HERE]', `## User Provided Template & Custom Instructions\n${customPrompt}`);
+  } else if (hasCustomImages || hasCustomText) {
+      basePrompt = STRICT_CUSTOM_TEMPLATE_GEMINI_PROMPT;
+      if (hasCustomText) {
+          basePrompt += `\n\n--- MANDATORY REPORT TEMPLATE & CUSTOM INSTRUCTIONS ---\n${customPrompt}\n--- END TEMPLATE ---`;
       }
   } else {
       basePrompt = DEFAULT_GEMINI_PROMPT;
   }
   
-  const prompt = customPrompt 
-    ? `${basePrompt}\n\nCustom Instructions (Reminder):\n${customPrompt}` 
-    : basePrompt;
+  const prompt = basePrompt;
 
   const parts: any[] = [];
 
-  if (customImages && customImages.length > 0) {
+  if (hasCustomImages) {
     for (const customImage of customImages) {
         parts.push({
             inlineData: {
@@ -129,7 +123,7 @@ export const processAudio = async (
         });
     }
     parts.push({
-      text: `The user has provided ${customImages.length > 1 ? 'images' : 'an image'}. Use ${customImages.length > 1 ? 'them' : 'it'} as a strict visual guide for the structure, layout, and formatting of the final report. The following instructions and audio dictation should be used to populate this template.`
+      text: `STRICT VISUAL LAYOUT DIRECTIVE: The user provided ${customImages.length > 1 ? 'images' : 'an image'} of their exact report template structure above. You MUST strictly follow the exact layout, headings, and formatting shown in ${customImages.length > 1 ? 'these images' : 'this image'} to structure your response.`
     });
   }
   

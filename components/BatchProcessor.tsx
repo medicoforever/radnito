@@ -495,6 +495,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
             isChatting: false,
             selectedModel: selectedModel,
             customPrompt: globalCustomPrompt,
+            customImages: [...globalCustomImages],
         };
         setBatches(prev => [...prev, newBatch]);
     };
@@ -675,6 +676,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                     status: 'complete',
                     selectedModel: selectedModel,
                     customPrompt: globalCustomPrompt,
+                    customImages: [...globalCustomImages],
                 }));
                 setBatches(prev => [...prev, ...newBatches]);
             }
@@ -731,6 +733,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                     status: 'complete',
                     selectedModel: selectedModel,
                     customPrompt: globalCustomPrompt,
+                    customImages: [...globalCustomImages],
                 }));
                 setBatches(prev => [...prev, ...newBatches]);
             }
@@ -784,6 +787,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                 status: 'complete',
                 selectedModel: selectedModel,
                 customPrompt: globalCustomPrompt,
+                customImages: [...globalCustomImages],
             };
             setBatches(prev => [newBatch, ...prev]);
         }
@@ -1905,61 +1909,83 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                                 )}
                             </div>
                             {!isBatchReorderMode && (
-                              <div className="flex-grow flex items-center justify-center sm:justify-end gap-2 flex-wrap">
-                                  {(batch.status === 'idle' || batch.status === 'paused' || batch.status === 'complete' || batch.status === 'error') && batch.findings === null && (
-                                      <>
-                                          {batch.audioBlobs.length === 0 && (
-                                              <>
-                                                  <button onClick={() => handleRecordOrResume(batch)} className="flex items-center gap-2 bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700 transition-colors text-sm px-3 disabled:bg-blue-300 disabled:cursor-wait" disabled={isBusy && activeBatchId !== batch.id}>
-                                                      <MicIcon className="w-4 h-4"/> Record
-                                                  </button>
-                                                  <button onClick={() => triggerUpload(batch.id)} className="flex items-center gap-2 bg-slate-200 text-slate-700 p-2 rounded-lg hover:bg-slate-300 transition-colors text-sm px-3 disabled:bg-slate-100 disabled:cursor-wait dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600">
-                                                      <UploadIcon className="w-4 h-4" /> Upload
-                                                  </button>
-                                              </>
-                                          )}
-                                          {batch.audioBlobs.length > 0 && (
-                                              <>
-                                                  <span className="text-xs font-semibold px-2.5 py-1 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-full border border-slate-300 dark:border-slate-600">
-                                                      {batch.audioBlobs.length} {batch.audioBlobs.length === 1 ? 'audio clip' : 'audio clips'}
-                                                  </span>
-                                                  <button onClick={() => handleRecordOrResume(batch)} className="flex items-center gap-2 bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700 transition-colors text-sm px-3 disabled:bg-blue-300 disabled:cursor-wait" disabled={isBusy && activeBatchId !== batch.id} title="Record and append another audio clip to this batch">
-                                                      <MicPlusIcon className="w-4 h-4"/> Append Audio
-                                                  </button>
-                                                  <button onClick={() => triggerUpload(batch.id)} className="flex items-center gap-2 bg-slate-200 text-slate-700 p-2 rounded-lg hover:bg-slate-300 transition-colors text-sm px-3 disabled:bg-slate-100 disabled:cursor-wait dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600" title="Upload another audio file to this batch">
-                                                      <UploadIcon className="w-4 h-4" /> Upload
-                                                  </button>
-                                                  <button onClick={() => handleDownload(batch)} className="flex items-center gap-2 bg-slate-500 text-white p-2 rounded-lg hover:bg-slate-600 transition-colors text-sm px-3" aria-label={`Download audio for ${batch.name}`}>
-                                                      <DownloadIcon className="w-4 h-4" /> Download
-                                                  </button>
-                                              </>
-                                          )}
-                                      </>
-                                  )}
-                                  {batch.status === 'recording' && (
-                                      <>
-                                          <button onClick={handlePauseToggle} className={`flex items-center gap-2 text-white p-2 rounded-lg transition-colors text-sm px-3 disabled:cursor-wait ${isMainPaused ? 'bg-green-500 hover:bg-green-600' : 'bg-yellow-500 hover:bg-yellow-600'}`} disabled={isBusy}>
-                                              {isMainPaused ? <ResumeIcon className="w-4 h-4" /> : <PauseIcon className="w-4 h-4" />}
-                                              {isMainPaused ? 'Resume' : 'Pause'}
-                                          </button>
-                                          <button onClick={handleStop} className="flex items-center gap-2 bg-red-600 text-white p-2 rounded-lg hover:bg-red-700 transition-colors text-sm px-3 disabled:cursor-wait" disabled={isBusy}>
-                                              <StopIcon className="w-4 h-4"/> Stop
-                                          </button>
-                                      </>
-                                  )}
-                                  {(batch.status === 'complete') && batch.audioBlobs.length > 0 && batch.findings === null && <span className="text-green-600 dark:text-green-400 font-semibold text-sm">Ready to Process</span>}
-                                  {batch.status === 'processing' && (
-                                      <div className="flex items-center gap-2">
-                                          <Spinner className="w-6 h-6" />
-                                          {batch.audioBlobs.length > 0 && (
-                                              <button onClick={() => handleDownload(batch)} className="flex items-center gap-2 bg-slate-500 text-white p-2 rounded-lg hover:bg-slate-600 transition-colors text-sm px-3" aria-label={`Download audio for ${batch.name}`}>
-                                                  <DownloadIcon className="w-4 h-4" /> Download
-                                              </button>
-                                          )}
-                                      </div>
-                                  )}
-                                  {batch.status === 'error' && !batch.findings && <span className="text-red-600 dark:text-red-400 font-semibold text-sm">Error</span>}
-                                  {batch.findings && <span className="text-blue-600 dark:text-blue-400 font-semibold text-sm">Processed</span>}
+                              <div className="w-full flex flex-col gap-3">
+                                <div className="flex-grow flex items-center justify-center sm:justify-end gap-2 flex-wrap">
+                                    {(batch.status === 'idle' || batch.status === 'paused' || batch.status === 'complete' || batch.status === 'error') && batch.findings === null && (
+                                        <>
+                                            {batch.audioBlobs.length === 0 && (
+                                                <>
+                                                    <button onClick={() => handleRecordOrResume(batch)} className="flex items-center gap-2 bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700 transition-colors text-sm px-3 disabled:bg-blue-300 disabled:cursor-wait" disabled={isBusy && activeBatchId !== batch.id}>
+                                                        <MicIcon className="w-4 h-4"/> Record
+                                                    </button>
+                                                    <button onClick={() => triggerUpload(batch.id)} className="flex items-center gap-2 bg-slate-200 text-slate-700 p-2 rounded-lg hover:bg-slate-300 transition-colors text-sm px-3 disabled:bg-slate-100 disabled:cursor-wait dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600">
+                                                        <UploadIcon className="w-4 h-4" /> Upload
+                                                    </button>
+                                                </>
+                                            )}
+                                            {batch.audioBlobs.length > 0 && (
+                                                <>
+                                                    <span className="text-xs font-semibold px-2.5 py-1 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-full border border-slate-300 dark:border-slate-600">
+                                                        {batch.audioBlobs.length} {batch.audioBlobs.length === 1 ? 'audio clip' : 'audio clips'}
+                                                    </span>
+                                                    <button onClick={() => handleRecordOrResume(batch)} className="flex items-center gap-2 bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700 transition-colors text-sm px-3 disabled:bg-blue-300 disabled:cursor-wait" disabled={isBusy && activeBatchId !== batch.id} title="Record and append another audio clip to this batch">
+                                                        <MicPlusIcon className="w-4 h-4"/> Append Audio
+                                                    </button>
+                                                    <button onClick={() => triggerUpload(batch.id)} className="flex items-center gap-2 bg-slate-200 text-slate-700 p-2 rounded-lg hover:bg-slate-300 transition-colors text-sm px-3 disabled:bg-slate-100 disabled:cursor-wait dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600" title="Upload another audio file to this batch">
+                                                        <UploadIcon className="w-4 h-4" /> Upload
+                                                    </button>
+                                                    <button onClick={() => handleDownload(batch)} className="flex items-center gap-2 bg-slate-500 text-white p-2 rounded-lg hover:bg-slate-600 transition-colors text-sm px-3" aria-label={`Download audio for ${batch.name}`}>
+                                                        <DownloadIcon className="w-4 h-4" /> Download
+                                                    </button>
+                                                </>
+                                            )}
+                                        </>
+                                    )}
+                                    {batch.status === 'recording' && (
+                                        <>
+                                            <button onClick={handlePauseToggle} className={`flex items-center gap-2 text-white p-2 rounded-lg transition-colors text-sm px-3 disabled:cursor-wait ${isMainPaused ? 'bg-green-500 hover:bg-green-600' : 'bg-yellow-500 hover:bg-yellow-600'}`} disabled={isBusy}>
+                                                {isMainPaused ? <ResumeIcon className="w-4 h-4" /> : <PauseIcon className="w-4 h-4" />}
+                                                {isMainPaused ? 'Resume' : 'Pause'}
+                                            </button>
+                                            <button onClick={handleStop} className="flex items-center gap-2 bg-red-600 text-white p-2 rounded-lg hover:bg-red-700 transition-colors text-sm px-3 disabled:cursor-wait" disabled={isBusy}>
+                                                <StopIcon className="w-4 h-4"/> Stop
+                                            </button>
+                                        </>
+                                    )}
+                                    {(batch.status === 'complete') && batch.audioBlobs.length > 0 && batch.findings === null && <span className="text-green-600 dark:text-green-400 font-semibold text-sm">Ready to Process</span>}
+                                    {batch.status === 'processing' && (
+                                        <div className="flex items-center gap-2">
+                                            <Spinner className="w-6 h-6" />
+                                            {batch.audioBlobs.length > 0 && (
+                                                <button onClick={() => handleDownload(batch)} className="flex items-center gap-2 bg-slate-500 text-white p-2 rounded-lg hover:bg-slate-600 transition-colors text-sm px-3" aria-label={`Download audio for ${batch.name}`}>
+                                                    <DownloadIcon className="w-4 h-4" /> Download
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
+                                    {batch.status === 'error' && !batch.findings && <span className="text-red-600 dark:text-red-400 font-semibold text-sm">Error</span>}
+                                    {batch.findings && <span className="text-blue-600 dark:text-blue-400 font-semibold text-sm">Processed</span>}
+                                </div>
+
+                                <div className="w-full pt-3 border-t border-slate-200 dark:border-slate-700">
+                                    <div className="flex items-center justify-between mb-1.5">
+                                        <span className="text-xs font-bold text-slate-600 dark:text-slate-400">
+                                            Template & Custom Instructions for {batch.name}:
+                                        </span>
+                                        {(batch.customPrompt || (batch.customImages && batch.customImages.length > 0)) && (
+                                            <span className="text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 px-2 py-0.5 rounded-full">
+                                                Custom Template Attached
+                                            </span>
+                                        )}
+                                    </div>
+                                    <CustomPromptInput
+                                        prompt={batch.customPrompt}
+                                        onPromptChange={(p) => updateBatchCustomPrompt(batch.id, p)}
+                                        images={batch.customImages || []}
+                                        onImagesChange={(imgs) => updateBatchCustomImages(batch.id, imgs)}
+                                        className="w-full"
+                                    />
+                                </div>
                               </div>
                             )}
                         </div>

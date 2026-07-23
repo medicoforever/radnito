@@ -32,6 +32,7 @@ const CustomPromptInput: React.FC<{
 
   // Template Management States
   const [templateName, setTemplateName] = useState<string>('');
+  const [templateTextToSave, setTemplateTextToSave] = useState<string>('');
   const [savedTemplates, setSavedTemplates] = useState<CustomTemplate[]>([]);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
   const [isSavedTemplatesOpen, setIsSavedTemplatesOpen] = useState<boolean>(false);
@@ -117,18 +118,24 @@ const CustomPromptInput: React.FC<{
 
   const handleSaveCurrentTemplate = async () => {
     if (!templateName.trim()) {
-      alert("Please enter a name for your template (e.g., 'Chest CT Standard Template').");
+      alert("Please enter a name for your template (e.g., 'Chest CT Standard Format').");
       return;
     }
-    if (!prompt.trim() && images.length === 0) {
-      alert("Please provide template text or upload at least one screenshot image before saving.");
+    const finalTemplateText = templateTextToSave.trim() || prompt.trim();
+
+    if (!finalTemplateText && images.length === 0) {
+      alert("Please enter template text or upload at least one screenshot image before saving.");
       return;
     }
 
-    const saved = await saveCustomTemplate(templateName, prompt, images);
+    const saved = await saveCustomTemplate(templateName, finalTemplateText, images);
     if (saved) {
       setSaveSuccessMsg(`Template "${saved.name}" saved permanently in browser storage!`);
       setTemplateName('');
+      setTemplateTextToSave('');
+      if (finalTemplateText && !prompt.trim()) {
+        onPromptChange(finalTemplateText);
+      }
       await refreshSavedTemplates();
       setTimeout(() => setSaveSuccessMsg(null), 4000);
     }
@@ -290,15 +297,19 @@ const CustomPromptInput: React.FC<{
             </div>
           )}
 
+          {/* ACTIVE INSTRUCTIONS / TEMPLATE TEXTAREA */}
           <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              Active Template Text & Custom Rules:
+            </label>
             <div className="relative">
               <textarea
                 value={prompt}
                 onChange={(e) => onPromptChange(e.target.value)}
-                placeholder="e.g., 'Always use metric units.' or paste your standard report template text..."
+                placeholder="Paste your standard report template text or custom rules here (e.g., 'CHEST CT REPORT\nFINDINGS:...')."
                 className="w-full p-3 pr-12 border border-slate-300 rounded-xl text-sm bg-white text-slate-900 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none dark:bg-slate-900 dark:text-white dark:border-slate-600 dark:placeholder-slate-400"
-                rows={3}
-                aria-label="Custom instructions for the AI model"
+                rows={4}
+                aria-label="Custom instructions and template text"
               />
               <button
                 onClick={handleMicClick}
@@ -327,19 +338,13 @@ const CustomPromptInput: React.FC<{
           </div>
           
           <div className="pt-3 border-t border-slate-200 dark:border-slate-700 space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-300">
-                Provide a Template (Text, Screenshots, or Both):
-              </p>
-            </div>
-
             {/* SCREENSHOT EXPLANATION NOTE */}
             <div className="p-3 bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-xl text-xs text-blue-900 dark:text-blue-200 space-y-1">
               <p className="font-bold flex items-center gap-1">
                 <span>💡 How to replicate your report template:</span>
               </p>
               <p>
-                To replicate any template or report format you use, take 1 or 2 screenshots of your template and upload them below. If your template is long, take multiple screenshots and add them together under a single template name! You can also paste template text alongside your images.
+                To replicate any report format, take 1 or 2 screenshots of your template and upload them below. If your template is long, take multiple screenshots and save them under a single template name! You can also paste template text alongside your images.
               </p>
             </div>
 
@@ -391,26 +396,42 @@ const CustomPromptInput: React.FC<{
               )}
             </div>
 
-            {/* SAVE TEMPLATE SECTION */}
-            <div className="p-3 bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 rounded-xl space-y-2">
-              <span className="text-xs font-bold text-emerald-900 dark:text-emerald-300 flex items-center gap-1">
-                💾 <span>Save This Template Permanently in Your Browser:</span>
+            {/* SAVE TEMPLATE SECTION WITH DEDICATED TEXT AREA */}
+            <div className="p-3.5 bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800/80 rounded-xl space-y-3 shadow-sm">
+              <span className="text-xs font-bold text-emerald-950 dark:text-emerald-200 flex items-center gap-1.5">
+                💾 <span>Save New Template Permanently in Browser:</span>
               </span>
-              <div className="flex flex-col sm:flex-row gap-2">
+
+              <div className="space-y-2">
                 <input
                   type="text"
                   value={templateName}
                   onChange={(e) => setTemplateName(e.target.value)}
-                  placeholder="Enter Template Name (e.g., 'Chest CT Format')"
-                  className="flex-1 p-2 text-xs border border-emerald-300 dark:border-emerald-700 rounded-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  placeholder="Template Name (e.g., 'Chest CT Standard Format')"
+                  className="w-full p-2.5 text-xs border border-emerald-300 dark:border-emerald-700 rounded-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-semibold"
                 />
-                <button
-                  onClick={handleSaveCurrentTemplate}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-lg transition-colors shadow flex items-center justify-center gap-1"
-                >
-                  <span>Save Template</span>
-                </button>
+
+                <textarea
+                  value={templateTextToSave}
+                  onChange={(e) => setTemplateTextToSave(e.target.value)}
+                  placeholder="Paste or type template text structure here (Optional if using screenshots, or type custom rules to save alongside screenshots)..."
+                  className="w-full p-2.5 text-xs border border-emerald-300 dark:border-emerald-700 rounded-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  rows={3}
+                />
+
+                <div className="flex justify-between items-center pt-1">
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                    {images.length > 0 ? `🖼️ Includes ${images.length} screenshot image(s)` : '📷 Screenshots can be attached above'}
+                  </span>
+                  <button
+                    onClick={handleSaveCurrentTemplate}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-lg transition-colors shadow flex items-center gap-1"
+                  >
+                    <span>Save Template Permanently</span>
+                  </button>
+                </div>
               </div>
+
               {saveSuccessMsg && (
                 <p className="text-xs text-emerald-700 dark:text-emerald-300 font-bold">{saveSuccessMsg}</p>
               )}

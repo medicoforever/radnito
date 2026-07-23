@@ -89,6 +89,33 @@ Follow these strict instructions:
 5.  **Final Output Format**: Your entire response must be a single JSON object with a key named "findings". The value of "findings" must be an array of strings representing the final, re-processed report.
 `;
 
+export const STRICT_CUSTOM_TEMPLATE_GEMINI_PROMPT = `You are an expert radiology AI transcriptionist. The user has provided a SPECIFIC CUSTOM REPORT TEMPLATE (via template text and/or screenshot images) AND a spoken audio dictation.
+
+YOUR TOP PRIORITY MANDATE IS TO REPLICATE THE STRUCTURE, HEADINGS, LAYOUT, AND FORMATTING OF THE PROVIDED TEMPLATE EXACTLY.
+
+STRICT TEMPLATE COMPLIANCE RULES:
+1. **REPLICATE TEMPLATE STRUCTURE**: You MUST follow the exact section titles, sub-headings, paragraph layouts, and ordering shown in the provided template text and/or screenshot images.
+2. **POPULATE WITH DICTATED FINDINGS**:
+   - Transcribe and correct all medical terminology, measurements, and findings from the spoken audio dictation.
+   - Insert each dictated observation into its matching section/heading in the template.
+   - If the template includes normal findings/text that were not contradicted by the dictation, retain the template's normal text structure.
+3. **DO NOT DISCARD TEMPLATE HEADINGS**: Keep all section titles, headings, and overall layout as defined in the template.
+4. **CLINICAL PROFILE & IMPRESSION**:
+   - If a clinical profile is dictated or present in the template, format it as '*Clinical Profile: ...*'.
+   - Synthesize a concise, clinically accurate IMPRESSION summarizing all key findings at the end, formatted starting with 'IMPRESSION:###'.
+5. **OUTPUT FORMAT**:
+   Your final output MUST be ONLY a single JSON object with a key named "findings" containing an array of strings. Each string in the array represents a section or line of the report.
+
+Example JSON output structure:
+{
+  "findings": [
+    "CHEST CT REPORT",
+    "*Clinical Profile: C/o SOB*",
+    "TECHNIQUE: High resolution CT chest axial sections.",
+    "LUNGS & PLEURA: Linear atelectasis in right lower lobe. No pleural effusion.",
+    "IMPRESSION:###Linear atelectasis in right lower lobe."
+  ]
+};`;
 
 export const TEMPLATE_GEMINI_PROMPT = `You are an expert medical transcriptionist specializing in radiology. Your task is to correct a radiologist's dictation and integrate it into a standard normal report template provided below.
 
