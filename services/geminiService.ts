@@ -1,12 +1,16 @@
 import { GoogleGenAI, Type, GenerateContentResponse, Chat } from "@google/genai";
 import { DEFAULT_GEMINI_PROMPT, REPROCESS_GEMINI_PROMPT, TEMPLATE_GEMINI_PROMPT, REPORT_TEMPLATES, ERROR_IDENTIFIER_PROMPT, INITIAL_AGENT_PROMPT, REFINEMENT_AGENT_PROMPT, SYNTHESIZER_AGENT_PROMPT } from '../constants';
 import { IdentifiedError } from "../types";
+import { getStoredApiKey } from './apiKeyStore';
 
-if (!process.env.API_KEY) {
-    throw new Error("API_KEY environment variable not set");
-}
+export const getAiClient = () => {
+  const key = getStoredApiKey();
+  if (!key) {
+    throw new Error("Gemini API Key is missing. Please click 'Set API Key' in the top bar or use the Free API Key Guide to add your key.");
+  }
+  return new GoogleGenAI({ apiKey: key });
+};
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const blobToBase64 = (blob: Blob): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -129,7 +133,7 @@ export const processAudio = async (
   });
   
   try {
-    const response: GenerateContentResponse = await ai.models.generateContent({
+    const response: GenerateContentResponse = await getAiClient().models.generateContent({
       model: model,
       contents: { parts },
       config: {
@@ -196,7 +200,7 @@ Follow these strict instructions to produce a clean and accurate continuation:
   };
 
   try {
-    const response: GenerateContentResponse = await ai.models.generateContent({
+    const response: GenerateContentResponse = await getAiClient().models.generateContent({
       model: 'gemini-flash-lite-latest',
       contents: { parts: [textPart, audioPart] },
     });
@@ -251,7 +255,7 @@ Now, listen to the audio and provide the single, updated finding text.`;
   };
 
   try {
-    const response: GenerateContentResponse = await ai.models.generateContent({
+    const response: GenerateContentResponse = await getAiClient().models.generateContent({
       model: 'gemini-2.5-flash',
       contents: { parts: [textPart, audioPart] },
     });
@@ -381,7 +385,7 @@ ${JSON.stringify({ findings: currentFindings })}
   });
   
   try {
-    const response: GenerateContentResponse = await ai.models.generateContent({
+    const response: GenerateContentResponse = await getAiClient().models.generateContent({
       model: model,
       contents: { parts },
       config: {
@@ -426,7 +430,7 @@ export const transcribeAudioForPrompt = async (audioBlob: Blob): Promise<string>
   };
   
   try {
-    const response: GenerateContentResponse = await ai.models.generateContent({
+    const response: GenerateContentResponse = await getAiClient().models.generateContent({
       model: 'gemini-2.5-flash',
       contents: { parts: [textPart, audioPart] },
     });
@@ -484,7 +488,7 @@ export const createChat = async (
       systemInstruction += `\n\nAdditionally, follow these custom instructions from the user:\n${customPrompt}`;
   }
 
-  const chat = ai.chats.create({
+  const chat = getAiClient().chats.create({
     model: 'gemini-2.5-pro',
     config: {
       systemInstruction: systemInstruction,
@@ -525,7 +529,7 @@ export const createChatFromText = async (
       systemInstruction += `\n\nAdditionally, follow these custom instructions from the user:\n${customPrompt}`;
   }
 
-  const chat = ai.chats.create({
+  const chat = getAiClient().chats.create({
     model: 'gemini-2.5-pro',
     config: {
       systemInstruction: systemInstruction,
@@ -571,7 +575,7 @@ export const identifyPotentialErrors = async (findings: string[], model: string)
     };
 
     try {
-        const response: GenerateContentResponse = await ai.models.generateContent({
+        const response: GenerateContentResponse = await getAiClient().models.generateContent({
             model: model, // use the same model as the main transcription for consistency
             contents: { parts: [textPart] },
             config: {
@@ -614,7 +618,7 @@ export async function runAgenticAnalysis(content: string): Promise<{ finalResult
         // Step 1: Parallel Initial Analysis
         agenticSteps += "--- STEP 1: Initial Analysis (Fact-Checker Agents) ---\n\n";
         const initialPromises = Array.from({ length: 3 }, () => 
-            ai.models.generateContent({
+            getAiClient().models.generateContent({
                 model: 'gemini-2.5-pro',
                 contents: `${INITIAL_AGENT_PROMPT}\n\n--- CONTENT TO ANALYZE ---\n\n${content}`,
                 config: { tools: [{ googleSearch: {} }] }
@@ -629,7 +633,7 @@ export async function runAgenticAnalysis(content: string): Promise<{ finalResult
         // Step 2: Parallel Refinement
         agenticSteps += "--- STEP 2: Refinement (Peer Reviewer Agents) ---\n\n";
         const refinementPromises = initialAnalyses.map(analysis => 
-            ai.models.generateContent({
+            getAiClient().models.generateContent({
                 model: 'gemini-2.5-pro',
                 contents: `${REFINEMENT_AGENT_PROMPT}\n\n--- ORIGINAL CONTENT ---\n\n${content}\n\n--- INITIAL ANALYSIS TO REFINE ---\n\n${analysis}`,
                 config: { tools: [{ googleSearch: {} }] }
@@ -659,7 +663,7 @@ export async function runAgenticAnalysis(content: string): Promise<{ finalResult
             // Step 1: Sequential Initial Analysis
             agenticSteps += "--- STEP 1: Initial Analysis (Fact-Checker Agents) [SEQUENTIAL] ---\n\n";
             for (let i = 0; i < 3; i++) {
-                const response = await ai.models.generateContent({
+                const response = await getAiClient().models.generateContent({
                     model: 'gemini-2.5-pro',
                     contents: `${INITIAL_AGENT_PROMPT}\n\n--- CONTENT TO ANALYZE ---\n\n${content}`,
                     config: { tools: [{ googleSearch: {} }] }
@@ -673,7 +677,7 @@ export async function runAgenticAnalysis(content: string): Promise<{ finalResult
             agenticSteps += "--- STEP 2: Refinement (Peer Reviewer Agents) [SEQUENTIAL] ---\n\n";
             for (let i = 0; i < initialAnalyses.length; i++) {
                 const analysis = initialAnalyses[i];
-                const response = await ai.models.generateContent({
+                const response = await getAiClient().models.generateContent({
                     model: 'gemini-2.5-pro',
                     contents: `${REFINEMENT_AGENT_PROMPT}\n\n--- ORIGINAL CONTENT ---\n\n${content}\n\n--- INITIAL ANALYSIS TO REFINE ---\n\n${analysis}`,
                     config: { tools: [{ googleSearch: {} }] }
@@ -699,7 +703,7 @@ export async function runAgenticAnalysis(content: string): Promise<{ finalResult
     try {
         // Step 3: Final Synthesis
         agenticSteps += "--- STEP 3: Final Synthesis (Master Editor Agent) ---\n\n";
-        const synthesizerResponse = await ai.models.generateContent({
+        const synthesizerResponse = await getAiClient().models.generateContent({
             model: 'gemini-2.5-pro',
             contents: `${SYNTHESIZER_AGENT_PROMPT}\n\n--- ORIGINAL CONTENT ---\n\n${content}\n\n--- REFINED ANALYSES ---\n\n${refinedAnalyses.join('\n\n---\n\n')}`,
             config: {
@@ -774,7 +778,7 @@ ${expertNotesContent}
 
 Now, generate the complete report including the new impression in the specified JSON format.`;
 
-    const response = await ai.models.generateContent({
+    const response = await getAiClient().models.generateContent({
         model: 'gemini-2.5-pro',
         contents: impressionPrompt,
         config: {

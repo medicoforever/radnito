@@ -16,6 +16,9 @@ import WaveformIcon from './components/icons/WaveformIcon';
 import SunIcon from './components/icons/SunIcon';
 import MoonIcon from './components/icons/MoonIcon';
 import CustomPromptInput from './components/ui/CustomPromptInput';
+import ApiKeyModal from './components/ApiKeyModal';
+import ApiKeyGuideTab from './components/ApiKeyGuideTab';
+import { hasApiKey } from './services/apiKeyStore';
 
 interface ChatMessage {
   author: 'You' | 'AI';
@@ -28,20 +31,16 @@ const ERROR_CHECK_ENABLED_KEY = 'radiologyErrorCheckEnabled';
 const getCleanMimeType = (blob: Blob): string => {
     let mimeType = blob.type;
     if (!mimeType) {
-        // Fallback for files without a MIME type, maintaining original behavior.
         return 'audio/ogg';
     }
-    // Handle WebM variations. It can be audio/webm or video/webm for audio-only files.
-    // Also, strip codec information which might not be supported by the API.
     if (mimeType.startsWith('audio/webm') || mimeType.startsWith('video/webm')) {
         return 'audio/webm';
     }
-    // For other types, just strip potential codec/parameter info
     return mimeType.split(';')[0];
 };
 
 const App: React.FC = () => {
-  const [mode, setMode] = useState<'single' | 'batch' | 'live'>('single');
+  const [mode, setMode] = useState<'single' | 'batch' | 'live' | 'guide'>('single');
   const [status, setStatus] = useState<AppStatus>(AppStatus.Idle);
   const [findings, setFindings] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -49,11 +48,14 @@ const App: React.FC = () => {
   const [chat, setChat] = useState<Chat | null>(null);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [isChatting, setIsChatting] = useState<boolean>(false);
-  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.1-pro-preview');
+  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.6-flash');
   const [customPrompt, setCustomPrompt] = useState<string>('');
   const [customImages, setCustomImages] = useState<Array<{ data: string; mimeType: string }>>([]);
   const [identifiedErrors, setIdentifiedErrors] = useState<IdentifiedError[]>([]);
   const [errorCheckStatus, setErrorCheckStatus] = useState<'idle' | 'checking' | 'complete'>('idle');
+  const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState<boolean>(false);
+  const [keySaved, setKeySaved] = useState<boolean>(() => hasApiKey());
+
   const [theme, setTheme] = useState(() => {
     const storedTheme = localStorage.getItem('theme');
     if (storedTheme) {
@@ -530,83 +532,164 @@ const App: React.FC = () => {
                 />;
       case 'live':
         return <LiveDictation onComplete={handleLiveDictationComplete} onBack={() => setMode('single')} />;
+      case 'guide':
+        return <ApiKeyGuideTab onKeySaved={() => { setKeySaved(true); setMode('single'); }} />;
       default:
         return renderSingleModeContent();
     }
-  }
+  };
 
   const getPageDescription = () => {
     if (mode === 'batch') return 'Manage and transcribe multiple dictations efficiently.';
     if (mode === 'live') return 'Dictate in real-time and get an instant, corrected transcript.';
+    if (mode === 'guide') return 'Simple step-by-step tutorial to get your free Gemini API Key.';
     return 'Record your findings, and let AI provide a clean, corrected transcript.';
   };
-
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-900 flex flex-col items-center justify-center p-4 font-sans transition-colors duration-300">
       <div className="w-full max-w-3xl mx-auto">
-        <header className="text-center mb-8 relative">
-          <h1 className="text-4xl font-bold text-slate-800 dark:text-slate-100">Radiology Dictation Corrector</h1>
-          <p className="text-slate-600 dark:text-slate-400 mt-2">
-            {getPageDescription()}
-          </p>
-          <div className="absolute top-0 right-0">
+        <header className="text-center mb-6 relative">
+          <div className="flex items-center justify-between mb-4">
+            <button
+              onClick={() => setIsApiKeyModalOpen(true)}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all shadow-sm flex items-center space-x-1.5 ${
+                keySaved
+                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 hover:bg-emerald-200'
+                  : 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border border-rose-300 dark:border-rose-800 hover:bg-rose-200 animate-pulse'
+              }`}
+            >
+              <span>{keySaved ? '🟢 Gemini API Key Active' : '🔴 Set Gemini API Key'}</span>
+            </button>
+
             <button
               onClick={toggleTheme}
               className="p-2 rounded-full text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
               aria-label="Toggle theme"
             >
-              {theme === 'light' ? <MoonIcon className="w-6 h-6" /> : <SunIcon className="w-6 h-6" />}
+              {theme === 'light' ? <MoonIcon className="w-5 h-5" /> : <SunIcon className="w-5 h-5" />}
             </button>
           </div>
-            <div className="mt-4 flex flex-wrap justify-center items-center gap-x-6 gap-y-2">
-                {status === AppStatus.Idle && (mode === 'single' || mode === 'batch') && (
-                    <div className="flex items-center gap-2">
-                        <label htmlFor="model-select" className="text-sm font-medium text-slate-700 dark:text-slate-300">AI Model:</label>
-                        <select 
-                            id="model-select"
-                            value={selectedModel}
-                            onChange={(e) => setSelectedModel(e.target.value)}
-                            className="bg-white border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white"
-                        >
-                            <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
-                            <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
-                            <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
-                            <option value="gemini-3-flash-preview">Gemini 3 Flash</option>
-                            <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-                            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                            <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite</option>
-                        </select>
-                    </div>
-                )}
-                 <div className="flex items-center gap-2">
-                    <label htmlFor="error-check-toggle" className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                        Automatic Error Finding
-                    </label>
-                    <button
-                        onClick={() => setIsErrorCheckEnabled(!isErrorCheckEnabled)}
-                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900 ${
-                        isErrorCheckEnabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-slate-600'
-                        }`}
-                        role="switch"
-                        aria-checked={isErrorCheckEnabled}
-                        id="error-check-toggle"
-                    >
-                        <span
-                        className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                            isErrorCheckEnabled ? 'translate-x-5' : 'translate-x-0'
-                        }`}
-                        />
-                    </button>
-                </div>
+
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-800 dark:text-slate-100">
+            Radiology Dictation Corrector
+          </h1>
+          <p className="text-slate-600 dark:text-slate-400 mt-1 text-sm sm:text-base">
+            {getPageDescription()}
+          </p>
+
+          {/* Navigation Tabs */}
+          <div className="flex flex-wrap justify-center gap-2 mt-4 p-1 bg-slate-200/60 dark:bg-slate-800 rounded-xl">
+            <button
+              onClick={() => setMode('single')}
+              className={`px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all ${
+                mode === 'single'
+                  ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              🎙️ Single Mode
+            </button>
+            <button
+              onClick={() => setMode('batch')}
+              className={`px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all ${
+                mode === 'batch'
+                  ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              📂 Batch Mode
+            </button>
+            <button
+              onClick={() => setMode('live')}
+              className={`px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all ${
+                mode === 'live'
+                  ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              ⚡ Live Mode
+            </button>
+            <button
+              onClick={() => setMode('guide')}
+              className={`px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all ${
+                mode === 'guide'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400 hover:bg-blue-100'
+              }`}
+            >
+              🔑 Free API Key Guide
+            </button>
+          </div>
+
+          {!keySaved && mode !== 'guide' && (
+            <div className="mt-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-xs p-3 rounded-xl flex items-center justify-between">
+              <span>⚠️ No Gemini API Key configured. Please add your key to dictate.</span>
+              <button
+                onClick={() => setMode('guide')}
+                className="ml-2 bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1 rounded-lg text-xs"
+              >
+                Get Key Guide
+              </button>
             </div>
+          )}
+
+          <div className="mt-4 flex flex-wrap justify-center items-center gap-x-6 gap-y-2">
+            {status === AppStatus.Idle && (mode === 'single' || mode === 'batch') && (
+              <div className="flex items-center gap-2">
+                <label htmlFor="model-select" className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  AI Model:
+                </label>
+                <select 
+                  id="model-select"
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                  className="bg-white border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white"
+                >
+                  <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
+                  <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+                  <option value="gemini-3-flash-preview">Gemini 3 Flash</option>
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                  <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite</option>
+                </select>
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <label htmlFor="error-check-toggle" className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                Automatic Error Finding
+              </label>
+              <button
+                onClick={() => setIsErrorCheckEnabled(!isErrorCheckEnabled)}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900 ${
+                  isErrorCheckEnabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-slate-600'
+                }`}
+                role="switch"
+                aria-checked={isErrorCheckEnabled}
+                id="error-check-toggle"
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    isErrorCheckEnabled ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
         </header>
+
         <main className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-4 sm:p-8 min-h-[300px]">
           {renderContent()}
         </main>
+
         <footer className="text-center mt-8 text-sm text-slate-500 dark:text-slate-500">
-          <p>Powered by Gemini AI</p>
+          <p>Powered by Gemini AI • 24/7 High Speed Dictation</p>
         </footer>
+
+        <ApiKeyModal
+          isOpen={isApiKeyModalOpen}
+          onClose={() => setIsApiKeyModalOpen(false)}
+          onKeyChange={() => setKeySaved(hasApiKey())}
+        />
       </div>
     </div>
   );

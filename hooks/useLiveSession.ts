@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { GoogleGenAI, Type } from '@google/genai';
 import { GEMINI_FLASH_LITE_MODEL, LIVE_DICTATION_FLASH_LITE_PROMPT } from '../constants';
+import { getStoredApiKey } from '../services/apiKeyStore';
 
 export function processLiveTranscript(rawTextOrFindings: string | string[]): string[] {
   let inputLines: string[] = [];
@@ -128,7 +129,12 @@ export const useLiveSession = () => {
       const base64Audio = await base64Promise;
       if (!base64Audio) return;
 
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const apiKey = getStoredApiKey();
+      if (!apiKey) {
+        setError("Gemini API Key is missing. Please click 'Set API Key' in the top bar to add your key.");
+        return;
+      }
+      const ai = new GoogleGenAI({ apiKey: apiKey });
 
       let systemPrompt = LIVE_DICTATION_FLASH_LITE_PROMPT;
       if (customPrompt) {
