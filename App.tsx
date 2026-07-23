@@ -96,8 +96,10 @@ const App: React.FC = () => {
         if (savedStateJSON) {
           const savedState = JSON.parse(savedStateJSON);
           if (savedState.findings && savedState.findings.length > 0) {
-            let blob: Blob | null = null;
-            blob = await getAudioBlob('single_mode_audio');
+            let blob: Blob | null = await getAudioBlob('single_mode_audio');
+            if (blob && (!(blob instanceof Blob) || blob.size === 0)) {
+              blob = null;
+            }
             
             setFindings(savedState.findings);
             setAudioBlob(blob);

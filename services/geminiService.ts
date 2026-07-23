@@ -18,14 +18,23 @@ export const getAiClient = (lastFailedKey?: string) => {
 
 export const blobToBase64 = (blob: Blob): Promise<string> => {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64data = reader.result as string;
-      // remove the "data:audio/ogg;base64," part
-      resolve(base64data.split(',')[1]);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
+    if (!blob || !(blob instanceof Blob) || blob.size === 0) {
+      return reject(new Error("Audio file parameter is missing or not a valid Blob. Please re-record or upload a valid audio file."));
+    }
+    try {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64data = reader.result as string;
+        if (!base64data) {
+          return reject(new Error("Failed to read audio file contents."));
+        }
+        resolve(base64data.split(',')[1] || base64data);
+      };
+      reader.onerror = () => reject(new Error("FileReader error while reading audio file."));
+      reader.readAsDataURL(blob);
+    } catch (e) {
+      reject(new Error("Audio file parameter is not a valid Blob. Please re-record or upload a valid audio file."));
+    }
   });
 };
 
