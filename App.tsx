@@ -89,16 +89,29 @@ const App: React.FC = () => {
 
   const [isRestored, setIsRestored] = useState(false);
 
+  const [unsavedSession, setUnsavedSession] = useState<any>(null);
+
   useEffect(() => {
     const loadState = async () => {
       try {
+        // Check for crashed or unsaved audio recording session first
+        const unsaved = await getUnsavedActiveSession();
+        if (unsaved && unsaved.chunks.length > 0 && unsaved.totalBytes > 0) {
+          setUnsavedSession(unsaved);
+        }
+
         const savedStateJSON = localStorage.getItem(SINGLE_MODE_STORAGE_KEY);
         if (savedStateJSON) {
           const savedState = JSON.parse(savedStateJSON);
           if (savedState.findings && savedState.findings.length > 0) {
             let blob: Blob | null = await getAudioBlob('single_mode_audio');
-            if (blob && (!(blob instanceof Blob) || blob.size === 0)) {
-              blob = null;
+            if (!blob || !(blob instanceof Blob) || blob.size === 0) {
+              const lastCompleted = await getLastCompletedRecording();
+              if (lastCompleted && lastCompleted.blob instanceof Blob && lastCompleted.blob.size > 0) {
+                blob = lastCompleted.blob;
+              } else {
+                blob = null;
+              }
             }
             
             setFindings(savedState.findings);
@@ -112,10 +125,16 @@ const App: React.FC = () => {
             if (savedState.chatHistory && savedState.chatHistory.length > 0) {
               setChatHistory(savedState.chatHistory);
               if (blob) {
-                const base64 = await blobToBase64(blob);
-                const cleanMime = getCleanMimeType(blob);
-                const newChat = await createChat(base64, cleanMime, savedState.selectedModel, savedState.customPrompt);
-                setChat(newChat);
+                try {
+                  const base64 = await blobToBase64(blob);
+                  const cleanMime = getCleanMimeType(blob);
+                  const newChat = await createChat(base64, cleanMime, savedState.selectedModel, savedState.customPrompt);
+                  setChat(newChat);
+                } catch {
+                  const fullTextReport = savedState.findings.join('\n');
+                  const newChat = await createChatFromText(fullTextReport, savedState.selectedModel, savedState.customPrompt);
+                  setChat(newChat);
+                }
               } else {
                 const fullTextReport = savedState.findings.join('\n');
                 const newChat = await createChatFromText(fullTextReport, savedState.selectedModel, savedState.customPrompt);
@@ -149,10 +168,11 @@ const App: React.FC = () => {
           chatHistory
         };
         localStorage.setItem(SINGLE_MODE_STORAGE_KEY, JSON.stringify(stateToSave));
-        if (audioBlob) {
+        if (audioBlob && audioBlob instanceof Blob && audioBlob.size > 0) {
           await saveAudioBlob('single_mode_audio', audioBlob);
+          await saveCompletedRecording(audioBlob, audioBlob.type || 'audio/webm');
         }
-      } else {
+      } else if (status === AppStatus.Idle && findings.length === 0) {
         localStorage.removeItem(SINGLE_MODE_STORAGE_KEY);
         await deleteAudioBlob('single_mode_audio');
       }
@@ -161,8 +181,40 @@ const App: React.FC = () => {
     saveState();
   }, [status, findings, audioBlob, selectedModel, customPrompt, customImages, identifiedErrors, errorCheckStatus, chatHistory, isRestored]);
 
-  const handleRecordingComplete = useCallback(async (blob: Blob) => {
-    setAudioBlob(blob);
+  const handleRecordingComplete = useCallback(async (incomingBlob: Blob) => {
+    let validBlob: Blob | null = incomingBlob;
+
+    if (!validBlob || !(validBlob instanceof Blob) || validBlob.size === 0) {
+      // Fallback 1: Check in-memory audioBlob
+      if (audioBlob && audioBlob instanceof Blob && audioBlob.size > 0) {
+        validBlob = audioBlob;
+      } else {
+        // Fallback 2: Check IndexedDB last completed recording
+        const lastCompleted = await getLastCompletedRecording();
+        if (lastCompleted && lastCompleted.blob instanceof Blob && lastCompleted.blob.size > 0) {
+          validBlob = lastCompleted.blob;
+        } else {
+          // Fallback 3: Check IndexedDB saved single mode audio
+          const savedBlob = await getAudioBlob('single_mode_audio');
+          if (savedBlob && savedBlob instanceof Blob && savedBlob.size > 0) {
+            validBlob = savedBlob;
+          } else {
+            validBlob = null;
+          }
+        }
+      }
+    }
+
+    if (!validBlob) {
+      setError('No valid audio recording detected. Please click the microphone button to record or upload an audio file.');
+      setStatus(AppStatus.Error);
+      return;
+    }
+
+    setAudioBlob(validBlob);
+    await saveAudioBlob('single_mode_audio', validBlob);
+    await saveCompletedRecording(validBlob, validBlob.type || 'audio/webm');
+
     setStatus(AppStatus.Processing);
     setError(null);
     setChat(null);
@@ -171,12 +223,12 @@ const App: React.FC = () => {
     setErrorCheckStatus('idle');
 
     try {
-      const resultFindings = await processAudio(blob, selectedModel, customPrompt, customImages);
+      const resultFindings = await processAudio(validBlob, selectedModel, customPrompt, customImages);
       setFindings(resultFindings);
       setStatus(AppStatus.Success);
 
-      const base64 = await blobToBase64(blob);
-      const cleanMime = getCleanMimeType(blob);
+      const base64 = await blobToBase64(validBlob);
+      const cleanMime = getCleanMimeType(validBlob);
       const newChat = await createChat(base64, cleanMime, selectedModel, customPrompt);
       setChat(newChat);
 
@@ -196,7 +248,7 @@ const App: React.FC = () => {
       setError(err.message || 'An unexpected error occurred during transcription.');
       setStatus(AppStatus.Error);
     }
-  }, [selectedModel, customPrompt, customImages, isErrorCheckEnabled]);
+  }, [audioBlob, selectedModel, customPrompt, customImages, isErrorCheckEnabled]);
 
   const handleLiveDictationComplete = useCallback(async (liveFindings: string[]) => {
     if (liveFindings.length === 0) {
@@ -242,11 +294,59 @@ const App: React.FC = () => {
       case AppStatus.Idle:
       case AppStatus.Recording:
         return (
-          <AudioRecorder
-            status={status}
-            setStatus={setStatus}
-            onRecordingComplete={handleRecordingComplete}
-          />
+          <div className="space-y-4">
+            {unsavedSession && status === AppStatus.Idle && (
+              <div className="bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700 p-4 rounded-xl shadow-sm space-y-3">
+                <div className="flex items-center space-x-2 text-amber-900 dark:text-amber-200 font-bold text-sm">
+                  <span>⚠️ Unsaved Dictation Recording Detected (From Previous Session / Refresh)</span>
+                </div>
+                <p className="text-xs text-amber-800 dark:text-amber-300">
+                  RADNITO automatically saved your interrupted audio session in browser storage ({((unsavedSession.totalBytes || 0) / 1024).toFixed(1)} KB). You can recover and transcribe it below!
+                </p>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <button
+                    onClick={async () => {
+                      const recoveredBlob = new Blob(unsavedSession.chunks, { type: unsavedSession.mimeType || 'audio/webm' });
+                      await clearActiveSession();
+                      setUnsavedSession(null);
+                      handleRecordingComplete(recoveredBlob);
+                    }}
+                    className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-4 py-1.5 rounded-lg text-xs transition-colors shadow"
+                  >
+                    🔄 Recover & Transcribe Recording
+                  </button>
+                  <button
+                    onClick={() => {
+                      const recoveredBlob = new Blob(unsavedSession.chunks, { type: unsavedSession.mimeType || 'audio/webm' });
+                      const url = URL.createObjectURL(recoveredBlob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `RADNITO_Recovered_Dictation_${Date.now()}.webm`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-1.5 rounded-lg text-xs transition-colors shadow"
+                  >
+                    ⬇️ Download Audio
+                  </button>
+                  <button
+                    onClick={async () => {
+                      await clearActiveSession();
+                      setUnsavedSession(null);
+                    }}
+                    className="bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 rounded-lg text-xs hover:bg-slate-300 transition-colors"
+                  >
+                    Discard
+                  </button>
+                </div>
+              </div>
+            )}
+            <AudioRecorder
+              status={status}
+              setStatus={setStatus}
+              onRecordingComplete={handleRecordingComplete}
+            />
+          </div>
         );
       case AppStatus.Processing:
         return (
@@ -259,16 +359,41 @@ const App: React.FC = () => {
         return (
           <div className="flex flex-col items-center justify-center p-8 space-y-4 text-center">
             <div className="text-rose-500 text-4xl">⚠️</div>
-            <p className="text-rose-600 dark:text-rose-400 font-semibold">{error}</p>
+            <p className="text-rose-600 dark:text-rose-400 font-semibold max-w-lg">{error}</p>
             <p className="text-xs text-slate-500 max-w-md">
-              💡 Tip: If a model hits a quota limit, try switching to a lower model like Gemini 3.5 Flash Lite or adding another API key.
+              💡 Tip: If a model hits a quota limit, try switching to a lower model like Gemini 3.5 Flash Lite or Gemini 2.5 Flash in the AI Model dropdown above.
             </p>
-            <button
-              onClick={resetSingleMode}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg transition-colors text-sm"
-            >
-              Try Again
-            </button>
+            <div className="flex flex-wrap justify-center gap-3 pt-2">
+              {audioBlob && audioBlob instanceof Blob && audioBlob.size > 0 && (
+                <button
+                  onClick={() => handleRecordingComplete(audioBlob)}
+                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-5 rounded-lg transition-colors text-sm shadow"
+                >
+                  🔄 Retry Processing Audio
+                </button>
+              )}
+              {audioBlob && audioBlob instanceof Blob && audioBlob.size > 0 && (
+                <button
+                  onClick={() => {
+                    const url = URL.createObjectURL(audioBlob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `RADNITO_Saved_Audio_${Date.now()}.webm`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-5 rounded-lg transition-colors text-sm shadow"
+                >
+                  ⬇️ Download Saved Audio
+                </button>
+              )}
+              <button
+                onClick={resetSingleMode}
+                className="bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200 font-bold py-2 px-5 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors text-sm"
+              >
+                🎙️ Start New Recording
+              </button>
+            </div>
           </div>
         );
       case AppStatus.Success:
