@@ -42,6 +42,7 @@ interface Batch {
     status: BatchStatus;
     selectedModel: string;
     customPrompt: string;
+    customImages?: Array<{ data: string; mimeType: string }>;
     error?: string;
     chat?: Chat | null;
     chatHistory?: ChatMessage[];
@@ -166,6 +167,11 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
     const [globalCustomPrompt, setGlobalCustomPrompt] = useState<string>(() => {
         return localStorage.getItem(BATCH_GLOBAL_PROMPT_KEY) || '';
     });
+    const [globalCustomImages, setGlobalCustomImages] = useState<Array<{ data: string; mimeType: string }>>([]);
+
+    const updateBatchCustomImages = (id: string, images: Array<{ data: string; mimeType: string }>) => {
+        setBatches(prev => prev.map(b => b.id === id ? { ...b, customImages: images } : b));
+    };
     const [isMakingSelection, setIsMakingSelection] = useState<boolean>(false);
 
     // State for 'Complex Impression Generation' per batch
@@ -808,9 +814,9 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
             try {
                 const mimeType = batch.audioBlobs[0].type;
                 const mergedBlob = new Blob(batch.audioBlobs, { type: mimeType });
-                const findings = await processAudio(mergedBlob, batch.selectedModel, batch.customPrompt);
+                const findings = await processAudio(mergedBlob, batch.selectedModel, batch.customPrompt, batch.customImages || []);
                 
-                const chatSession = await createChat(mergedBlob, findings, batch.customPrompt);
+                const chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || []);
                 const aiGreeting = "I have reviewed the audio and transcript for this dictation. How can I help you further?";
                 const initialChatHistory = [{ author: 'AI' as const, text: `${findings.join('\n\n')}\n\n${aiGreeting}` }];
 
@@ -835,9 +841,9 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
         try {
             const mimeType = batch.audioBlobs[0].type;
             const mergedBlob = new Blob(batch.audioBlobs, { type: mimeType });
-            const findings = await processAudio(mergedBlob, batch.selectedModel, batch.customPrompt);
+            const findings = await processAudio(mergedBlob, batch.selectedModel, batch.customPrompt, batch.customImages || []);
             
-            const chatSession = await createChat(mergedBlob, findings, batch.customPrompt);
+            const chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || []);
             const aiGreeting = "I have reviewed the audio and transcript for this dictation. How can I help you further?";
             const initialChatHistory = [{ author: 'AI' as const, text: `${findings.join('\n\n')}\n\n${aiGreeting}` }];
 
@@ -1739,7 +1745,6 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                 {copyNotification.text}
                 </div>
             )}
-            <button onClick={onBack} className="text-sm text-blue-600 hover:underline dark:text-blue-400 dark:hover:text-blue-300 mb-4 inline-block">&larr; Back to Single Dictation</button>
             <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept="audio/*" multiple aria-hidden="true" />
 
             {/* General Drag and Drop Dropzone for New Batches */}
@@ -1827,6 +1832,8 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                 <CustomPromptInput
                     prompt={globalCustomPrompt}
                     onPromptChange={setGlobalCustomPrompt}
+                    images={globalCustomImages}
+                    onImagesChange={setGlobalCustomImages}
                 />
             </div>
 
@@ -2063,6 +2070,8 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                                                 <CustomPromptInput 
                                                     prompt={batch.customPrompt}
                                                     onPromptChange={(p) => updateBatchCustomPrompt(batch.id, p)}
+                                                    images={batch.customImages || []}
+                                                    onImagesChange={(imgs) => updateBatchCustomImages(batch.id, imgs)}
                                                     className="mb-6"
                                                 />
                                                 <p className="text-slate-600 dark:text-slate-400 mb-6 text-sm">Click any finding to copy it. To select multiple, click the circle on the left. The 'Continue Dictation' button below adds new findings to this batch.</p>
