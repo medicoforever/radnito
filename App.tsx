@@ -12,7 +12,7 @@ const ERROR_CHECK_ENABLED_KEY = 'radiologyErrorCheckEnabled';
 
 const App: React.FC = () => {
   const [mode, setMode] = useState<'batch' | 'guide'>('batch');
-  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.6-flash');
+  const [selectedModel, setSelectedModel] = useState<string>('gemini-2.5-flash');
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState<boolean>(false);
   const [keySaved, setKeySaved] = useState<boolean>(() => hasApiKey());
 
@@ -142,11 +142,10 @@ const App: React.FC = () => {
                   onChange={(e) => setSelectedModel(e.target.value)}
                   className="bg-white border border-slate-300 text-slate-900 text-xs sm:text-sm font-medium rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white shadow-sm"
                 >
-                  <option value="gemini-3.6-flash">Gemini 3.6 Flash (Recommended)</option>
-                  <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
-                  <option value="gemini-3-flash-preview">Gemini 3 Flash</option>
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                  <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite</option>
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Recommended)</option>
+                  <option value="gemini-2.5-pro">Gemini 2.5 Pro (Advanced Reasoning)</option>
+                  <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite (Lightweight)</option>
+                  <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
                 </select>
               </div>
             )}

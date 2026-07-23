@@ -83,6 +83,22 @@ const responseSchema = {
     }
 };
 
+export const getValidModelName = (model?: string): string => {
+  if (!model) return 'gemini-2.5-flash';
+  const m = model.toLowerCase().trim();
+  
+  if (m === 'gemini-2.5-flash' || m === 'gemini-2.5-pro' || m === 'gemini-2.0-flash' || m === 'gemini-2.0-flash-lite') {
+    return m;
+  }
+  if (m.includes('lite')) {
+    return 'gemini-2.0-flash-lite';
+  }
+  if (m.includes('pro')) {
+    return 'gemini-2.5-pro';
+  }
+  return 'gemini-2.5-flash';
+};
+
 export const processAudio = async (
   audioBlob: Blob, 
   model: string, 
@@ -141,8 +157,8 @@ export const processAudio = async (
   
   try {
     const response: GenerateContentResponse = await getAiClient().client.models.generateContent({
-      model: model,
-      contents: { parts },
+      model: getValidModelName(model),
+      contents: parts,
       config: {
           responseMimeType: "application/json",
           responseSchema: responseSchema
@@ -208,8 +224,8 @@ Follow these strict instructions to produce a clean and accurate continuation:
 
   try {
     const response: GenerateContentResponse = await getAiClient().client.models.generateContent({
-      model: 'gemini-flash-lite-latest',
-      contents: { parts: [textPart, audioPart] },
+      model: getValidModelName('gemini-2.0-flash-lite'),
+      contents: [textPart, audioPart],
     });
 
     const resultText = response.text?.trim();
@@ -263,8 +279,8 @@ Now, listen to the audio and provide the single, updated finding text.`;
 
   try {
     const response: GenerateContentResponse = await getAiClient().client.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: { parts: [textPart, audioPart] },
+      model: getValidModelName('gemini-2.5-flash'),
+      contents: [textPart, audioPart],
     });
 
     const resultText = response.text?.trim();
@@ -393,8 +409,8 @@ ${JSON.stringify({ findings: currentFindings })}
   
   try {
     const response: GenerateContentResponse = await getAiClient().client.models.generateContent({
-      model: model,
-      contents: { parts },
+      model: getValidModelName(model),
+      contents: parts,
       config: {
           responseMimeType: "application/json",
           responseSchema: responseSchema
@@ -438,8 +454,8 @@ export const transcribeAudioForPrompt = async (audioBlob: Blob): Promise<string>
   
   try {
     const response: GenerateContentResponse = await getAiClient().client.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: { parts: [textPart, audioPart] },
+      model: getValidModelName('gemini-2.5-flash'),
+      contents: [textPart, audioPart],
     });
 
     const resultText = response.text?.trim();
@@ -462,10 +478,10 @@ export const createChat = async (
   initialFindings: string[], 
   customPrompt?: string,
   customImages?: Array<{ data: string; mimeType: string }> | null,
-  model: string = 'gemini-3.6-flash'
+  model: string = 'gemini-2.5-flash'
 ): Promise<Chat> => {
   const base64Audio = await blobToBase64(audioBlob);
-  const targetModel = model || 'gemini-3.6-flash';
+  const targetModel = getValidModelName(model);
   
   const userMessageParts: any[] = [];
 
@@ -514,9 +530,9 @@ export const createChatFromText = async (
   initialFindings: string[], 
   customPrompt?: string,
   customImages?: Array<{ data: string; mimeType: string }> | null,
-  model: string = 'gemini-3.6-flash'
+  model: string = 'gemini-2.5-flash'
 ): Promise<Chat> => {
-  const targetModel = model || 'gemini-3.6-flash';
+  const targetModel = getValidModelName(model);
   const userMessageParts: any[] = [];
   
   if (customImages && customImages.length > 0) {
@@ -561,23 +577,16 @@ const errorSchema = {
             items: {
                 type: Type.OBJECT,
                 properties: {
-                    findingIndex: {
-                        type: Type.INTEGER,
-                        description: "The 0-based index of the finding with a potential error."
-                    },
-                    errorDescription: {
-                        type: Type.STRING,
-                        description: "A concise explanation of the potential error."
-                    },
-                    severity: {
-                        type: Type.STRING,
-                        description: "The severity of the issue: 'WARNING' or 'INFO'."
-                    }
+                    originalText: { type: Type.STRING, description: "The exact phrase or word from the report that contains the error or ambiguity." },
+                    suggestion: { type: Type.STRING, description: "The proposed correction or clarification. For ambiguity, phrase as a question." },
+                    type: { type: Type.STRING, enum: ["potential_error", "clarification"], description: "Use 'potential_error' for clear typos/grammar issues. Use 'clarification' for medical ambiguities." },
+                    reason: { type: Type.STRING, description: "A brief, one-sentence explanation for why this was flagged." }
                 },
-                required: ["findingIndex", "errorDescription", "severity"]
+                required: ["originalText", "suggestion", "type", "reason"]
             }
         }
-    }
+    },
+    required: ["errors"]
 };
 
 export const identifyPotentialErrors = async (findings: string[], model: string): Promise<IdentifiedError[]> => {
@@ -587,8 +596,8 @@ export const identifyPotentialErrors = async (findings: string[], model: string)
 
     try {
         const response: GenerateContentResponse = await getAiClient().client.models.generateContent({
-            model: model, // use the same model as the main transcription for consistency
-            contents: { parts: [textPart] },
+            model: getValidModelName(model),
+            contents: [textPart],
             config: {
                 responseMimeType: "application/json",
                 responseSchema: errorSchema
@@ -616,12 +625,12 @@ export const identifyPotentialErrors = async (findings: string[], model: string)
     }
 };
 
-export async function runAgenticAnalysis(content: string, selectedModel: string = 'gemini-3.6-flash'): Promise<{ finalResult: string; agenticSteps: string; enhancementText: string; }> {
+export async function runAgenticAnalysis(content: string, selectedModel: string = 'gemini-2.5-flash'): Promise<{ finalResult: string; agenticSteps: string; enhancementText: string; }> {
     let agenticSteps = "### Agentic Workflow Log\n\n";
     let initialAnalyses: string[] = [];
     let refinedAnalyses: string[] = [];
     const DELAY_MS = 250;
-    const targetModel = selectedModel || 'gemini-3.6-flash';
+    const targetModel = getValidModelName(selectedModel);
 
     try {
         // --- PRIMARY PATH: PARALLEL EXECUTION ---
@@ -754,9 +763,9 @@ export async function runAgenticAnalysis(content: string, selectedModel: string 
     }
 }
 
-export async function runComplexImpressionGeneration(currentFindings: string[], additionalFindings: string, selectedModel: string = 'gemini-3.6-flash'): Promise<{ findings: string[]; expertNotes: string; }> {
+export async function runComplexImpressionGeneration(currentFindings: string[], additionalFindings: string, selectedModel: string = 'gemini-2.5-flash'): Promise<{ findings: string[]; expertNotes: string; }> {
     const content = currentFindings.join('\n\n') + (additionalFindings ? `\n\n${additionalFindings}` : '');
-    const targetModel = selectedModel || 'gemini-3.6-flash';
+    const targetModel = getValidModelName(selectedModel);
 
     const { finalResult: expertNotesContent } = await runAgenticAnalysis(content, targetModel);
 
