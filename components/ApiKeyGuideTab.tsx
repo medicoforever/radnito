@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { setStoredApiKey, validateApiKey } from '../services/apiKeyStore';
+import { addApiKey, validateApiKey } from '../services/apiKeyStore';
+import { generateRadnitoPDF } from '../services/pdfGenerator';
 
 interface ApiKeyGuideTabProps {
   onKeySaved?: () => void;
@@ -22,7 +23,7 @@ export const ApiKeyGuideTab: React.FC<ApiKeyGuideTabProps> = ({ onKeySaved }) =>
     setVerifying(false);
 
     if (isValid) {
-      setStoredApiKey(keyInput.trim());
+      addApiKey(keyInput.trim());
       setFeedback({ success: true, message: '🎉 Key saved successfully! You are ready to dictate.' });
       if (onKeySaved) onKeySaved();
     } else {
@@ -36,22 +37,40 @@ export const ApiKeyGuideTab: React.FC<ApiKeyGuideTabProps> = ({ onKeySaved }) =>
       <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl p-6 text-white shadow-md flex flex-col md:flex-row items-center justify-between gap-4">
         <div>
           <span className="inline-block bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider mb-2">
-            100% Free & Fast
+            100% Free & Unlimited
           </span>
           <h2 className="text-2xl font-extrabold">How to Get Your Free Gemini API Key</h2>
           <p className="text-blue-100 text-sm mt-1">
-            Follow this 1-minute step-by-step guide to unlock free radiology speech correction!
+            Follow this 1-minute guide for RADNITO speech dictation!
           </p>
         </div>
-        <a
-          href="https://aistudio.google.com/app/apikey"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="bg-white text-blue-700 hover:bg-blue-50 font-bold px-5 py-3 rounded-xl shadow-lg transition-all transform hover:scale-105 whitespace-nowrap text-sm flex items-center space-x-2"
-        >
-          <span>Get Free Key Now</span>
-          <span className="text-lg">↗</span>
-        </a>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <a
+            href="https://aistudio.google.com/app/apikey"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-white text-blue-700 hover:bg-blue-50 font-bold px-4 py-2.5 rounded-xl shadow transition-all whitespace-nowrap text-xs flex items-center justify-center space-x-1"
+          >
+            <span>Get Free Key Now</span>
+            <span>↗</span>
+          </a>
+          <button
+            onClick={generateRadnitoPDF}
+            className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-4 py-2.5 rounded-xl shadow transition-all whitespace-nowrap text-xs flex items-center justify-center space-x-1"
+          >
+            <span>📄 Download PDF Guide</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Why Add Multiple Keys Callout */}
+      <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-300 space-y-1">
+        <h4 className="font-bold flex items-center space-x-1 text-sm text-amber-800 dark:text-amber-200">
+          <span>⚡ Pro Tip: Add 2 or 3 API Keys for Zero Downtime!</span>
+        </h4>
+        <p>
+          You can add multiple API keys from different Google accounts into RADNITO. RADNITO randomly balances requests across all keys to preserve quota, and automatically failovers if one key hits a rate limit!
+        </p>
       </div>
 
       {/* 4 Step Cards */}
@@ -64,7 +83,7 @@ export const ApiKeyGuideTab: React.FC<ApiKeyGuideTabProps> = ({ onKeySaved }) =>
           <div>
             <h4 className="font-bold text-slate-800 dark:text-slate-100 text-sm">Open Google AI Studio</h4>
             <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-              Click the button above or go to{' '}
+              Click the button above or visit{' '}
               <a
                 href="https://aistudio.google.com/app/apikey"
                 target="_blank"
@@ -85,7 +104,7 @@ export const ApiKeyGuideTab: React.FC<ApiKeyGuideTabProps> = ({ onKeySaved }) =>
           <div>
             <h4 className="font-bold text-slate-800 dark:text-slate-100 text-sm">Sign in with Google</h4>
             <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-              Log in using any existing Google account. No credit card or payment info is ever required.
+              Log in using any existing Google account. No credit card or payment info is required.
             </p>
           </div>
         </div>
@@ -98,7 +117,7 @@ export const ApiKeyGuideTab: React.FC<ApiKeyGuideTabProps> = ({ onKeySaved }) =>
           <div>
             <h4 className="font-bold text-slate-800 dark:text-slate-100 text-sm">Click "Create API Key"</h4>
             <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-              Click the blue <strong>Create API Key</strong> button, select a project or create a default one, and copy your key.
+              Click the blue <strong>Create API Key</strong> button, select a project, and copy your key.
             </p>
           </div>
         </div>
@@ -111,7 +130,7 @@ export const ApiKeyGuideTab: React.FC<ApiKeyGuideTabProps> = ({ onKeySaved }) =>
           <div>
             <h4 className="font-bold text-slate-800 dark:text-slate-100 text-sm">Paste Key Below & Save</h4>
             <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-              Paste your key in the box below. It will be saved securely in your own browser storage.
+              Paste your key below. It will be stored securely in your browser's local memory.
             </p>
           </div>
         </div>

@@ -19,6 +19,7 @@ import CustomPromptInput from './components/ui/CustomPromptInput';
 import ApiKeyModal from './components/ApiKeyModal';
 import ApiKeyGuideTab from './components/ApiKeyGuideTab';
 import { hasApiKey } from './services/apiKeyStore';
+import { generateRadnitoPDF } from './services/pdfGenerator';
 
 interface ChatMessage {
   author: 'You' | 'AI';
@@ -65,7 +66,7 @@ const App: React.FC = () => {
   });
   const [isErrorCheckEnabled, setIsErrorCheckEnabled] = useState(() => {
     const saved = localStorage.getItem(ERROR_CHECK_ENABLED_KEY);
-    return saved ? JSON.parse(saved) : false; // Default is OFF
+    return saved ? JSON.parse(saved) : false;
   });
 
   useEffect(() => {
@@ -88,7 +89,6 @@ const App: React.FC = () => {
 
   const [isRestored, setIsRestored] = useState(false);
 
-  // Load state from localStorage & IndexedDB on initial render
   useEffect(() => {
     const loadState = async () => {
       try {
@@ -97,41 +97,34 @@ const App: React.FC = () => {
           const savedState = JSON.parse(savedStateJSON);
           if (savedState.findings && savedState.findings.length > 0) {
             let blob: Blob | null = null;
-
-            // Try loading audio blob from IndexedDB first
             blob = await getAudioBlob('single_mode_audio');
-
-            // Fallback to legacy inline base64 if present
-            if (!blob && savedState.audio?.data) {
-              try {
-                blob = base64ToBlob(savedState.audio.data, savedState.audio.type);
-              } catch (e) {
-                console.warn("Could not decode legacy base64 audio:", e);
-              }
-            }
-
-            setAudioBlob(blob);
-            setFindings(savedState.findings);
-            setChatHistory(savedState.chatHistory || []);
-            setStatus(AppStatus.Success);
             
-            setSelectedModel(savedState.selectedModel || 'gemini-3.1-pro-preview');
+            setFindings(savedState.findings);
+            setAudioBlob(blob);
+            setSelectedModel(savedState.selectedModel || 'gemini-3.6-flash');
             setCustomPrompt(savedState.customPrompt || '');
             setCustomImages(savedState.customImages || []);
-
-            // Recreate chat session asynchronously
-            const chatPromise = blob 
-                ? createChat(blob, savedState.findings, savedState.customPrompt, savedState.customImages)
-                : createChatFromText(savedState.findings, savedState.customPrompt, savedState.customImages);
-
-            chatPromise
-              .then(setChat)
-              .catch(err => console.error("Failed to recreate chat session from saved state:", err));
+            setIdentifiedErrors(savedState.identifiedErrors || []);
+            setErrorCheckStatus(savedState.errorCheckStatus || 'idle');
+            
+            if (savedState.chatHistory && savedState.chatHistory.length > 0) {
+              setChatHistory(savedState.chatHistory);
+              if (blob) {
+                const base64 = await blobToBase64(blob);
+                const cleanMime = getCleanMimeType(blob);
+                const newChat = await createChat(base64, cleanMime, savedState.selectedModel, savedState.customPrompt);
+                setChat(newChat);
+              } else {
+                const fullTextReport = savedState.findings.join('\n');
+                const newChat = await createChatFromText(fullTextReport, savedState.selectedModel, savedState.customPrompt);
+                setChat(newChat);
+              }
+            }
+            setStatus(AppStatus.Success);
           }
         }
-      } catch (err) {
-        console.error("Failed to load state from localStorage:", err);
-        localStorage.removeItem(SINGLE_MODE_STORAGE_KEY);
+      } catch (e) {
+        console.error("Failed to load state from localStorage/IndexedDB", e);
       } finally {
         setIsRestored(true);
       }
@@ -139,222 +132,93 @@ const App: React.FC = () => {
     loadState();
   }, []);
 
-  // Save state to localStorage & IndexedDB whenever it changes
   useEffect(() => {
-    if (!isRestored) return; // Do not save or clear until initial restoration finishes
+    if (!isRestored) return;
 
     const saveState = async () => {
-      // Only save when we have a successful result to resume from
       if (status === AppStatus.Success && findings.length > 0) {
-        try {
-          const stateToSave: any = {
-            findings,
-            chatHistory,
-            selectedModel,
-            customPrompt,
-            customImages,
-            hasAudio: !!audioBlob,
-          };
-          localStorage.setItem(SINGLE_MODE_STORAGE_KEY, JSON.stringify(stateToSave));
-
-          if (audioBlob) {
-            await saveAudioBlob('single_mode_audio', audioBlob);
-          } else {
-            await deleteAudioBlob('single_mode_audio');
-          }
-        } catch (err) {
-          console.error("Failed to save state:", err);
-        }
-      } else if (status === AppStatus.Idle && findings.length === 0) {
-        localStorage.removeItem(SINGLE_MODE_STORAGE_KEY);
-        deleteAudioBlob('single_mode_audio').catch(() => {});
-      }
-    };
-    saveState();
-  }, [status, findings, audioBlob, chatHistory, selectedModel, customPrompt, customImages, isRestored]);
-
-
-  // useEffect to run error check in background
-  useEffect(() => {
-    const checkForErrors = async () => {
-        // Only run when enabled, processing is successful and we have findings
-        if (isErrorCheckEnabled && status === AppStatus.Success && findings.length > 0) {
-            setErrorCheckStatus('checking');
-            setIdentifiedErrors([]); // Clear previous errors
-            try {
-                const errors = await identifyPotentialErrors(findings, selectedModel);
-                setIdentifiedErrors(errors);
-            } catch (err) {
-                console.error("Failed to check for errors:", err);
-                // Don't show this error to the user, it's a background task.
-            } finally {
-                setErrorCheckStatus('complete');
-            }
-        } else {
-            // Clear errors if disabled, status is not 'Success', or there are no findings
-            setIdentifiedErrors([]);
-            setErrorCheckStatus('idle');
-        }
-    };
-
-    checkForErrors();
-  }, [findings, status, selectedModel, isErrorCheckEnabled]);
-
-
-  const handleRecordingComplete = useCallback(async (audioBlob: Blob) => {
-    if (!audioBlob || audioBlob.size === 0) {
-      setError('Recording or upload failed. The audio file is empty.');
-      setStatus(AppStatus.Error);
-      return;
-    }
-    setStatus(AppStatus.Processing);
-    setError(null);
-    setFindings([]);
-    setAudioBlob(audioBlob); // Set audio blob before processing
-
-    try {
-      const processedText = await processAudio(audioBlob, selectedModel, customPrompt, customImages);
-      setFindings(processedText);
-
-      const chatSession = await createChat(audioBlob, processedText, customPrompt, customImages);
-      setChat(chatSession);
-      const aiGreeting = "I have reviewed the audio and the transcript. How can I help you further?";
-      setChatHistory([{ author: 'AI', text: `${processedText.join('\n\n')}\n\n${aiGreeting}` }]);
-      
-      setStatus(AppStatus.Success);
-    } catch (err) {
-      console.error(err);
-      setError(err instanceof Error ? err.message : 'An unknown error occurred during processing.');
-      setStatus(AppStatus.Error);
-    }
-  }, [selectedModel, customPrompt, customImages]);
-  
-  const handleLiveDictationComplete = useCallback(async (transcript: string, audioBlob: Blob | null) => {
-    setStatus(AppStatus.Processing);
-    setError(null);
-    setFindings([]);
-    setAudioBlob(audioBlob); // Set the captured audio blob from the live session
-
-    try {
-        const processedText = transcript.split('\n').filter(line => line.trim() !== '');
-        setFindings(processedText);
-        
-        // Use the custom prompt from single mode for the follow-up chat
-        const chatSession = await createChatFromText(processedText, customPrompt, customImages);
-        setChat(chatSession);
-
-        const aiGreeting = "I have reviewed the live transcript. How can I help you further?";
-        setChatHistory([{ author: 'AI', text: `${processedText.join('\n\n')}\n\n${aiGreeting}` }]);
-
-        setMode('single'); // Switch back to single mode to show ResultsDisplay
-        setStatus(AppStatus.Success);
-
-    } catch (err) {
-        console.error(err);
-        setError(err instanceof Error ? err.message : 'An unknown error occurred during live processing.');
-        setStatus(AppStatus.Error);
-        setMode('single');
-    }
-  }, [customPrompt, customImages]);
-
-  const handleReprocess = useCallback(async () => {
-    if (!audioBlob) {
-      setError('No audio available to reprocess.');
-      setStatus(AppStatus.Error);
-      return;
-    }
-
-    setStatus(AppStatus.Processing);
-    setError(null);
-    
-    try {
-      // Pass the current findings as the base for reprocessing
-      const processedText = await processAudio(audioBlob, selectedModel, customPrompt, customImages, findings);
-      setFindings(processedText);
-
-      // Recreate chat with the new findings
-      const chatSession = await createChat(audioBlob, processedText, customPrompt, customImages);
-      setChat(chatSession);
-      const aiGreeting = "I have re-processed the audio with your new instructions. How can I help you further?";
-      setChatHistory([{ author: 'AI', text: `${processedText.join('\n\n')}\n\n${aiGreeting}` }]);
-      
-      setStatus(AppStatus.Success);
-    } catch (err) {
-      console.error(err);
-      setError(err instanceof Error ? err.message : 'An unknown error occurred during re-processing.');
-      setStatus(AppStatus.Error);
-    }
-  }, [audioBlob, selectedModel, customPrompt, customImages, findings]);
-
-  const handleUpdateFinding = (index: number, newText: string) => {
-    setFindings(prevFindings => {
-      const updatedFindings = [...prevFindings];
-      if (updatedFindings[index] !== undefined) {
-        updatedFindings[index] = newText;
-      }
-      return updatedFindings;
-    });
-  };
-
-  const handleContinueDictation = useCallback(async (newAudioBlob: Blob) => {
-    if (!audioBlob) {
-      throw new Error('Original audio not found. Cannot continue dictation.');
-    }
-
-    try {
-      const newFindings = await processAudio(newAudioBlob, selectedModel, customPrompt, customImages);
-      const updatedFindings = [...findings, ...newFindings];
-      setFindings(updatedFindings);
-
-      const mergedBlob = new Blob([audioBlob, newAudioBlob], { type: getCleanMimeType(audioBlob) });
-      setAudioBlob(mergedBlob);
-      
-      const chatSession = await createChat(mergedBlob, updatedFindings, customPrompt, customImages);
-      setChat(chatSession);
-
-      const aiGreeting = "I have updated the transcript with your new dictation. How can I help you further?";
-      setChatHistory([{ author: 'AI', text: `${updatedFindings.join('\n\n')}\n\n${aiGreeting}` }]);
-
-    } catch (err) {
-      console.error("Error during dictation continuation:", err);
-      throw err; // Propagate error to the UI component
-    }
-  }, [audioBlob, findings, selectedModel, customPrompt, customImages]);
-
-  const handleSendMessage = async (message: string | Blob) => {
-    if (!chat || isChatting) return;
-
-    setIsChatting(true);
-    const userMessageText = typeof message === 'string' ? message : '[Audio Message]';
-    setChatHistory(prev => [...prev, { author: 'You', text: userMessageText }]);
-
-    try {
-      let response;
-      if (typeof message === 'string') {
-        response = await chat.sendMessage({ message });
-      } else { // It's a Blob
-        const base64Audio = await blobToBase64(message);
-        const audioPart = {
-          inlineData: {
-            mimeType: getCleanMimeType(message),
-            data: base64Audio,
-          },
+        const stateToSave = {
+          findings,
+          selectedModel,
+          customPrompt,
+          customImages,
+          identifiedErrors,
+          errorCheckStatus,
+          chatHistory
         };
-        // Adding a text part to guide the model.
-        const textPart = { text: "Please analyze this audio in the context of our conversation." };
-        // The `message` property can be an array of parts for multipart messages.
-        response = await chat.sendMessage({ message: [audioPart, textPart] });
+        localStorage.setItem(SINGLE_MODE_STORAGE_KEY, JSON.stringify(stateToSave));
+        if (audioBlob) {
+          await saveAudioBlob('single_mode_audio', audioBlob);
+        }
+      } else {
+        localStorage.removeItem(SINGLE_MODE_STORAGE_KEY);
+        await deleteAudioBlob('single_mode_audio');
       }
-      const responseText = response.text;
-      setChatHistory(prev => [...prev, { author: 'AI', text: responseText }]);
-    } catch (err) {
-      console.error("Chat error:", err);
-      const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
-      setChatHistory(prev => [...prev, { author: 'AI', text: `Sorry, I encountered an error: ${errorMessage}` }]);
-    } finally {
-      setIsChatting(false);
+    };
+
+    saveState();
+  }, [status, findings, audioBlob, selectedModel, customPrompt, customImages, identifiedErrors, errorCheckStatus, chatHistory, isRestored]);
+
+  const handleRecordingComplete = useCallback(async (blob: Blob) => {
+    setAudioBlob(blob);
+    setStatus(AppStatus.Processing);
+    setError(null);
+    setChat(null);
+    setChatHistory([]);
+    setIdentifiedErrors([]);
+    setErrorCheckStatus('idle');
+
+    try {
+      const resultFindings = await processAudio(blob, selectedModel, customPrompt, customImages);
+      setFindings(resultFindings);
+      setStatus(AppStatus.Success);
+
+      const base64 = await blobToBase64(blob);
+      const cleanMime = getCleanMimeType(blob);
+      const newChat = await createChat(base64, cleanMime, selectedModel, customPrompt);
+      setChat(newChat);
+
+      if (isErrorCheckEnabled && resultFindings.length > 0) {
+        setErrorCheckStatus('checking');
+        identifyPotentialErrors(resultFindings)
+          .then(errors => {
+            setIdentifiedErrors(errors);
+            setErrorCheckStatus('complete');
+          })
+          .catch(err => {
+            console.error("Failed to identify errors:", err);
+            setErrorCheckStatus('idle');
+          });
+      }
+    } catch (err: any) {
+      setError(err.message || 'An unexpected error occurred during transcription.');
+      setStatus(AppStatus.Error);
     }
-  };
+  }, [selectedModel, customPrompt, customImages, isErrorCheckEnabled]);
+
+  const handleLiveDictationComplete = useCallback(async (liveFindings: string[]) => {
+    if (liveFindings.length === 0) {
+      setMode('single');
+      return;
+    }
+    setAudioBlob(null);
+    setFindings(liveFindings);
+    setStatus(AppStatus.Success);
+    setMode('single');
+    setError(null);
+    setChat(null);
+    setChatHistory([]);
+    setIdentifiedErrors([]);
+    setErrorCheckStatus('idle');
+
+    try {
+      const fullTextReport = liveFindings.join('\n');
+      const newChat = await createChatFromText(fullTextReport, selectedModel, customPrompt);
+      setChat(newChat);
+    } catch (err) {
+      console.warn("Failed to initialize chat for live dictation session:", err);
+    }
+  }, [selectedModel, customPrompt]);
 
   const resetSingleMode = () => {
     setStatus(AppStatus.Idle);
@@ -363,38 +227,12 @@ const App: React.FC = () => {
     setAudioBlob(null);
     setChat(null);
     setChatHistory([]);
-    setIsChatting(false);
-    setMode('single');
-    setCustomPrompt(''); // Reset custom prompt as well
+    setCustomPrompt('');
     setCustomImages([]);
     setIdentifiedErrors([]);
     setErrorCheckStatus('idle');
-    // Clear saved state on reset
-    try {
-      localStorage.removeItem(SINGLE_MODE_STORAGE_KEY);
-    } catch (error) {
-      console.error("Failed to remove item from localStorage:", error);
-    }
-  };
-
-  const handleDownload = () => {
-    if (!audioBlob) return;
-    try {
-      const url = URL.createObjectURL(audioBlob);
-      const a = document.createElement('a');
-      document.body.appendChild(a);
-      a.style.display = 'none';
-      a.href = url;
-      
-      const extension = audioBlob.type === 'audio/mpeg' ? 'mp3' : audioBlob.type === 'audio/wav' ? 'wav' : (audioBlob.type.split('/')[1] || 'webm').split(';')[0];
-      a.download = `radiology-dictation.${extension}`;
-      
-      a.click();
-      window.URL.revokeObjectURL(url);
-      a.remove();
-    } catch (err) {
-        console.error('Failed to download audio:', err)
-    }
+    localStorage.removeItem(SINGLE_MODE_STORAGE_KEY);
+    deleteAudioBlob('single_mode_audio');
   };
 
   const renderSingleModeContent = () => {
@@ -402,110 +240,73 @@ const App: React.FC = () => {
       case AppStatus.Idle:
       case AppStatus.Recording:
         return (
-          <>
-            <div className="flex justify-end items-center gap-4 mb-4 -mt-4">
-                 <button 
-                    onClick={() => setMode('live')} 
-                    className="flex items-center gap-1.5 text-sm font-semibold text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300 transition-colors"
-                >
-                    <WaveformIcon className="w-4 h-4" />
-                    Live Dictation
-                </button>
-                 <button 
-                    onClick={() => setMode('batch')} 
-                    className="text-sm font-semibold text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
-                >
-                    Batch Processing &rarr;
-                </button>
-            </div>
-             <CustomPromptInput
-                prompt={customPrompt}
-                onPromptChange={setCustomPrompt}
-                images={customImages}
-                onImagesChange={setCustomImages}
-                className="mb-6"
-            />
-            <AudioRecorder
-              status={status}
-              setStatus={setStatus}
-              onRecordingComplete={handleRecordingComplete}
-            />
-          </>
+          <AudioRecorder
+            status={status}
+            setStatus={setStatus}
+            onRecordingComplete={handleRecordingComplete}
+          />
         );
       case AppStatus.Processing:
         return (
-          <div className="text-center p-8">
+          <div className="flex flex-col items-center justify-center p-8 space-y-4">
             <Spinner />
-            <p className="text-slate-600 dark:text-slate-300 mt-4 text-lg">
-              Analyzing and correcting text...
+            <p className="text-slate-600 dark:text-slate-300 font-medium">Processing dictation with RADNITO AI...</p>
+          </div>
+        );
+      case AppStatus.Error:
+        return (
+          <div className="flex flex-col items-center justify-center p-8 space-y-4 text-center">
+            <div className="text-rose-500 text-4xl">⚠️</div>
+            <p className="text-rose-600 dark:text-rose-400 font-semibold">{error}</p>
+            <p className="text-xs text-slate-500 max-w-md">
+              💡 Tip: If a model hits a quota limit, try switching to a lower model like Gemini 3.5 Flash Lite or adding another API key.
             </p>
-            <p className="text-slate-500 dark:text-slate-400 mt-2 text-sm">
-              This may take a moment.
-            </p>
-            {audioBlob && (
-                <div className="mt-6">
-                    <button
-                        onClick={handleDownload}
-                        className="bg-slate-500 text-white font-bold py-2 px-6 rounded-lg hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-opacity-50 transition-colors"
-                    >
-                        Download Audio
-                    </button>
-                </div>
-            )}
+            <button
+              onClick={resetSingleMode}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg transition-colors text-sm"
+            >
+              Try Again
+            </button>
           </div>
         );
       case AppStatus.Success:
         return (
-          <ResultsDisplay 
-            findings={findings} 
-            onReset={resetSingleMode} 
-            audioBlob={audioBlob}
-            chatHistory={chatHistory}
-            isChatting={isChatting}
-            onSendMessage={handleSendMessage}
-            onSwitchToBatch={() => setMode('batch')}
-            selectedModel={selectedModel}
-            onModelChange={setSelectedModel}
-            onReprocess={handleReprocess}
-            onUpdateFinding={handleUpdateFinding}
-            onAllFindingsUpdate={setFindings}
-            onContinueDictation={handleContinueDictation}
-            customPrompt={customPrompt}
-            onCustomPromptChange={setCustomPrompt}
-            customImages={customImages}
-            onCustomImagesChange={setCustomImages}
-            identifiedErrors={identifiedErrors}
-            errorCheckStatus={errorCheckStatus}
-          />
-        );
-      case AppStatus.Error:
-        return (
-          <div className="text-center p-8 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-500/30 rounded-lg">
-            <h3 className="text-xl font-semibold text-red-700 dark:text-red-300">An Error Occurred</h3>
-            <p className="text-red-600 dark:text-red-400 mt-2">{error}</p>
-            <p className="text-slate-600 dark:text-slate-300 mt-1 text-xs sm:text-sm">
-              {audioBlob ? 'Your recorded audio is safe and preserved below.' : 'Please try recording again.'}
-            </p>
-            <div className="mt-6 flex flex-wrap justify-center items-center gap-3 sm:gap-4">
+          <div className="space-y-6">
+            <ResultsDisplay
+              findings={findings}
+              audioBlob={audioBlob}
+              chat={chat}
+              chatHistory={chatHistory}
+              setChatHistory={setChatHistory}
+              isChatting={isChatting}
+              setIsChatting={setIsChatting}
+              onFindingsChange={setFindings}
+              selectedModel={selectedModel}
+              onModelChange={setSelectedModel}
+              customPrompt={customPrompt}
+              identifiedErrors={identifiedErrors}
+              errorCheckStatus={errorCheckStatus}
+              isErrorCheckEnabled={isErrorCheckEnabled}
+            />
+            <div className="flex justify-center gap-4 flex-wrap">
               {audioBlob && (
                 <button
-                  onClick={() => handleRecordingComplete(audioBlob)}
-                  className="bg-blue-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-colors shadow"
+                  onClick={() => {
+                    const url = URL.createObjectURL(audioBlob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `RADNITO_Dictation_${Date.now()}.webm`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-5 rounded-lg transition-colors text-sm flex items-center space-x-1"
                 >
-                  Retry Processing Audio
-                </button>
-              )}
-              {audioBlob && (
-                <button
-                  onClick={handleDownload}
-                  className="bg-slate-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-opacity-50 transition-colors shadow"
-                >
-                  Download Recorded Audio
+                  <span>⬇️ Download Audio Recording</span>
                 </button>
               )}
               <button
                 onClick={resetSingleMode}
-                className="bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200 font-bold py-2 px-6 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-opacity-50 transition-colors"
+                className="bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200 font-bold py-2 px-6 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors text-sm"
               >
                 Start New Recording
               </button>
@@ -522,16 +323,30 @@ const App: React.FC = () => {
       case 'single':
         return renderSingleModeContent();
       case 'batch':
-        return <BatchProcessor 
-                    selectedModel={selectedModel} 
-                    isErrorCheckEnabled={isErrorCheckEnabled}
-                    onBack={() => {
-                        resetSingleMode();
-                        setMode('single');
-                    }} 
-                />;
+        return (
+          <div className="space-y-4">
+            <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-xl text-xs text-blue-800 dark:text-blue-300 flex items-center justify-between">
+              <span>📂 <strong>Batch Mode:</strong> Upload and transcribe multiple audio files concurrently in bulk to save time.</span>
+            </div>
+            <BatchProcessor 
+              selectedModel={selectedModel} 
+              isErrorCheckEnabled={isErrorCheckEnabled}
+              onBack={() => {
+                resetSingleMode();
+                setMode('single');
+              }} 
+            />
+          </div>
+        );
       case 'live':
-        return <LiveDictation onComplete={handleLiveDictationComplete} onBack={() => setMode('single')} />;
+        return (
+          <div className="space-y-4">
+            <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-800 dark:text-amber-300">
+              ⚡ <strong>Experimental Feature Notice:</strong> Live Dictation is currently experimental. For long or critical radiology reports, Single Mode with recording is recommended.
+            </div>
+            <LiveDictation onComplete={handleLiveDictationComplete} onBack={() => setMode('single')} />
+          </div>
+        );
       case 'guide':
         return <ApiKeyGuideTab onKeySaved={() => { setKeySaved(true); setMode('single'); }} />;
       default:
@@ -540,10 +355,10 @@ const App: React.FC = () => {
   };
 
   const getPageDescription = () => {
-    if (mode === 'batch') return 'Manage and transcribe multiple dictations efficiently.';
-    if (mode === 'live') return 'Dictate in real-time and get an instant, corrected transcript.';
-    if (mode === 'guide') return 'Simple step-by-step tutorial to get your free Gemini API Key.';
-    return 'Record your findings, and let AI provide a clean, corrected transcript.';
+    if (mode === 'batch') return 'Manage and transcribe multiple radiology dictations concurrently in bulk.';
+    if (mode === 'live') return 'Real-time dictation preview (Experimental mode).';
+    if (mode === 'guide') return 'Step-by-step tutorial to get free Gemini API Keys and load-balance quotas.';
+    return 'Record or upload your findings, and let RADNITO AI produce clean, structured report findings.';
   };
 
   return (
@@ -562,19 +377,32 @@ const App: React.FC = () => {
               <span>{keySaved ? '🟢 Gemini API Key Active' : '🔴 Set Gemini API Key'}</span>
             </button>
 
-            <button
-              onClick={toggleTheme}
-              className="p-2 rounded-full text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-              aria-label="Toggle theme"
-            >
-              {theme === 'light' ? <MoonIcon className="w-5 h-5" /> : <SunIcon className="w-5 h-5" />}
-            </button>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={generateRadnitoPDF}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-xl shadow text-xs flex items-center space-x-1 transition-all"
+                title="Download complete RADNITO PDF guide"
+              >
+                <span>📄 PDF Guide</span>
+              </button>
+
+              <button
+                onClick={toggleTheme}
+                className="p-2 rounded-full text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                aria-label="Toggle theme"
+              >
+                {theme === 'light' ? <MoonIcon className="w-5 h-5" /> : <SunIcon className="w-5 h-5" />}
+              </button>
+            </div>
           </div>
 
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-800 dark:text-slate-100">
-            Radiology Dictation Corrector
+          <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-blue-700 dark:text-blue-400 drop-shadow-sm">
+            RADNITO
           </h1>
-          <p className="text-slate-600 dark:text-slate-400 mt-1 text-sm sm:text-base">
+          <p className="text-xs font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400 mt-0.5">
+            AI Radiology Dictation Corrector
+          </p>
+          <p className="text-slate-600 dark:text-slate-400 mt-2 text-sm">
             {getPageDescription()}
           </p>
 
@@ -608,7 +436,7 @@ const App: React.FC = () => {
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
               }`}
             >
-              ⚡ Live Mode
+              ⚡ Live Mode (Experimental)
             </button>
             <button
               onClick={() => setMode('guide')}
@@ -636,22 +464,27 @@ const App: React.FC = () => {
 
           <div className="mt-4 flex flex-wrap justify-center items-center gap-x-6 gap-y-2">
             {status === AppStatus.Idle && (mode === 'single' || mode === 'batch') && (
-              <div className="flex items-center gap-2">
-                <label htmlFor="model-select" className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  AI Model:
-                </label>
-                <select 
-                  id="model-select"
-                  value={selectedModel}
-                  onChange={(e) => setSelectedModel(e.target.value)}
-                  className="bg-white border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white"
-                >
-                  <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
-                  <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
-                  <option value="gemini-3-flash-preview">Gemini 3 Flash</option>
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                  <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite</option>
-                </select>
+              <div className="flex flex-col items-center">
+                <div className="flex items-center gap-2">
+                  <label htmlFor="model-select" className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                    AI Model:
+                  </label>
+                  <select 
+                    id="model-select"
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="bg-white border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white"
+                  >
+                    <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
+                    <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+                    <option value="gemini-3-flash-preview">Gemini 3 Flash</option>
+                    <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                    <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite</option>
+                  </select>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                  💡 Tip: If a model shows error or quota limit, switch to a lower model (e.g. Gemini 3.5 Flash Lite or Gemini 2.5 Flash).
+                </p>
               </div>
             )}
             <div className="flex items-center gap-2">
@@ -681,8 +514,9 @@ const App: React.FC = () => {
           {renderContent()}
         </main>
 
-        <footer className="text-center mt-8 text-sm text-slate-500 dark:text-slate-500">
-          <p>Powered by Gemini AI • 24/7 High Speed Dictation</p>
+        <footer className="text-center mt-8 text-sm text-slate-500 dark:text-slate-500 space-y-1">
+          <p className="font-bold text-slate-700 dark:text-slate-300">RADNITO • High Speed Radiology Dictation</p>
+          <p className="text-xs">Powered by Gemini AI • 24/7 Free Uptime</p>
         </footer>
 
         <ApiKeyModal
