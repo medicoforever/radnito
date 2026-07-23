@@ -618,11 +618,12 @@ export const identifyPotentialErrors = async (findings: string[], model: string)
     }
 };
 
-export async function runAgenticAnalysis(content: string): Promise<{ finalResult: string; agenticSteps: string; enhancementText: string; }> {
+export async function runAgenticAnalysis(content: string, selectedModel: string = 'gemini-3.6-flash'): Promise<{ finalResult: string; agenticSteps: string; enhancementText: string; }> {
     let agenticSteps = "### Agentic Workflow Log\n\n";
     let initialAnalyses: string[] = [];
     let refinedAnalyses: string[] = [];
-    const DELAY_MS = 250; // Delay for sequential fallback
+    const DELAY_MS = 250;
+    const targetModel = selectedModel || 'gemini-3.6-flash';
 
     try {
         // --- PRIMARY PATH: PARALLEL EXECUTION ---
@@ -632,7 +633,7 @@ export async function runAgenticAnalysis(content: string): Promise<{ finalResult
         agenticSteps += "--- STEP 1: Initial Analysis (Fact-Checker Agents) ---\n\n";
         const initialPromises = Array.from({ length: 3 }, () => 
             getAiClient().client.models.generateContent({
-                model: 'gemini-2.5-pro',
+                model: targetModel,
                 contents: `${INITIAL_AGENT_PROMPT}\n\n--- CONTENT TO ANALYZE ---\n\n${content}`,
                 config: { tools: [{ googleSearch: {} }] }
             })
@@ -647,7 +648,7 @@ export async function runAgenticAnalysis(content: string): Promise<{ finalResult
         agenticSteps += "--- STEP 2: Refinement (Peer Reviewer Agents) ---\n\n";
         const refinementPromises = initialAnalyses.map(analysis => 
             getAiClient().client.models.generateContent({
-                model: 'gemini-2.5-pro',
+                model: targetModel,
                 contents: `${REFINEMENT_AGENT_PROMPT}\n\n--- ORIGINAL CONTENT ---\n\n${content}\n\n--- INITIAL ANALYSIS TO REFINE ---\n\n${analysis}`,
                 config: { tools: [{ googleSearch: {} }] }
             })
@@ -666,10 +667,8 @@ export async function runAgenticAnalysis(content: string): Promise<{ finalResult
             agenticSteps += "\n---!! PARALLEL EXECUTION FAILED DUE TO RATE LIMITING !! ---\n";
             agenticSteps += `---!! SWITCHING TO SEQUENTIAL EXECUTION WITH DELAYS !! ---\n\n`;
             
-            // Wait a moment before retrying
             await new Promise(resolve => setTimeout(resolve, 1000));
             
-            // Clear previous results before retry
             initialAnalyses = [];
             refinedAnalyses = [];
 
@@ -677,7 +676,7 @@ export async function runAgenticAnalysis(content: string): Promise<{ finalResult
             agenticSteps += "--- STEP 1: Initial Analysis (Fact-Checker Agents) [SEQUENTIAL] ---\n\n";
             for (let i = 0; i < 3; i++) {
                 const response = await getAiClient().client.models.generateContent({
-                    model: 'gemini-2.5-pro',
+                    model: targetModel,
                     contents: `${INITIAL_AGENT_PROMPT}\n\n--- CONTENT TO ANALYZE ---\n\n${content}`,
                     config: { tools: [{ googleSearch: {} }] }
                 });
@@ -691,7 +690,7 @@ export async function runAgenticAnalysis(content: string): Promise<{ finalResult
             for (let i = 0; i < initialAnalyses.length; i++) {
                 const analysis = initialAnalyses[i];
                 const response = await getAiClient().client.models.generateContent({
-                    model: 'gemini-2.5-pro',
+                    model: targetModel,
                     contents: `${REFINEMENT_AGENT_PROMPT}\n\n--- ORIGINAL CONTENT ---\n\n${content}\n\n--- INITIAL ANALYSIS TO REFINE ---\n\n${analysis}`,
                     config: { tools: [{ googleSearch: {} }] }
                 });
@@ -700,7 +699,6 @@ export async function runAgenticAnalysis(content: string): Promise<{ finalResult
                 await new Promise(resolve => setTimeout(resolve, DELAY_MS));
             }
         } else {
-            // It's not a rate limit error, so fail the workflow
             console.error("Agentic analysis failed:", err);
             const errorMessage = err instanceof Error ? err.message : "An unknown error occurred during agentic analysis.";
             agenticSteps += `\n---!! WORKFLOW FAILED !! ---\n${errorMessage}`;
@@ -712,12 +710,11 @@ export async function runAgenticAnalysis(content: string): Promise<{ finalResult
         }
     }
 
-    // This part runs after either parallel success or sequential fallback success
     try {
         // Step 3: Final Synthesis
         agenticSteps += "--- STEP 3: Final Synthesis (Master Editor Agent) ---\n\n";
         const synthesizerResponse = await getAiClient().client.models.generateContent({
-            model: 'gemini-2.5-pro',
+            model: targetModel,
             contents: `${SYNTHESIZER_AGENT_PROMPT}\n\n--- ORIGINAL CONTENT ---\n\n${content}\n\n--- REFINED ANALYSES ---\n\n${refinedAnalyses.join('\n\n---\n\n')}`,
             config: {
                 tools: [{ googleSearch: {} }]
@@ -726,7 +723,6 @@ export async function runAgenticAnalysis(content: string): Promise<{ finalResult
         const enhancementText = synthesizerResponse.text;
         agenticSteps += `**Agent 3.1 (Synthesizer) Output:**\n\`\`\`\n${enhancementText}\n\`\`\`\n\n`;
 
-        // Output Formatting
         let finalResult = '';
         if (enhancementText.toLowerCase().includes("no significant errors or omissions found")) {
             finalResult = content;
@@ -749,7 +745,6 @@ export async function runAgenticAnalysis(content: string): Promise<{ finalResult
 
         return { finalResult, agenticSteps, enhancementText };
     } catch (err) {
-        // This catch handles errors during the synthesis step or if the sequential fallback also fails
         console.error("Agentic analysis failed (post-parallel/sequential):", err);
         const errorMessage = err instanceof Error ? err.message : "An unknown error occurred during the final synthesis step.";
         agenticSteps += `\n---!! WORKFLOW FAILED !! ---\n${errorMessage}`;
@@ -761,10 +756,11 @@ export async function runAgenticAnalysis(content: string): Promise<{ finalResult
     }
 }
 
-export async function runComplexImpressionGeneration(currentFindings: string[], additionalFindings: string): Promise<{ findings: string[]; expertNotes: string; }> {
+export async function runComplexImpressionGeneration(currentFindings: string[], additionalFindings: string, selectedModel: string = 'gemini-3.6-flash'): Promise<{ findings: string[]; expertNotes: string; }> {
     const content = currentFindings.join('\n\n') + (additionalFindings ? `\n\n${additionalFindings}` : '');
+    const targetModel = selectedModel || 'gemini-3.6-flash';
 
-    const { finalResult: expertNotesContent, enhancementText } = await runAgenticAnalysis(content);
+    const { finalResult: expertNotesContent } = await runAgenticAnalysis(content, targetModel);
 
     const findingsWithoutImpression = currentFindings.filter(f => !f.toUpperCase().startsWith('IMPRESSION:'));
 
@@ -792,7 +788,7 @@ ${expertNotesContent}
 Now, generate the complete report including the new impression in the specified JSON format.`;
 
     const response = await getAiClient().client.models.generateContent({
-        model: 'gemini-2.5-pro',
+        model: targetModel,
         contents: impressionPrompt,
         config: {
             responseMimeType: "application/json",

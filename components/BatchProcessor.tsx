@@ -1523,7 +1523,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
         try {
             setUndoStates(prev => ({ ...prev, [batchId]: batch.findings! }));
             const complexInput = complexInputs[batchId] || '';
-            const result = await runComplexImpressionGeneration(batch.findings, complexInput);
+            const result = await runComplexImpressionGeneration(batch.findings, complexInput, batch.selectedModel);
             
             setBatches(prevBatches => prevBatches.map(b => b.id === batchId ? { ...b, findings: result.findings } : b));
             setExpertNotesForBatches(prev => ({ ...prev, [batchId]: result.expertNotes }));
