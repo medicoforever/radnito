@@ -20,10 +20,9 @@ export const generateRadnitoPDF = () => {
     }
   };
 
-  // Helper to draw a section header badge
   const drawSectionHeader = (title: string, stepNum?: string) => {
     checkPageBreak(12);
-    doc.setFillColor(30, 58, 138); // Deep indigo
+    doc.setFillColor(30, 58, 138);
     doc.roundedRect(margin, y, contentWidth, 8, 1.5, 1.5, 'F');
 
     doc.setTextColor(255, 255, 255);
@@ -35,10 +34,8 @@ export const generateRadnitoPDF = () => {
     y += 12;
   };
 
-  // ==========================================
   // TOP HEADER BANNER
-  // ==========================================
-  doc.setFillColor(30, 64, 175); // Royal Blue
+  doc.setFillColor(30, 64, 175);
   doc.rect(0, 0, pageWidth, 28, 'F');
 
   doc.setTextColor(255, 255, 255);
@@ -48,13 +45,11 @@ export const generateRadnitoPDF = () => {
 
   doc.setFontSize(9.5);
   doc.setFont('helvetica', 'normal');
-  doc.text('AI Radiology Dictation Corrector • Complete User Manual & Guide', margin, 21);
+  doc.text('Batch Radiology Dictation Workspace • Complete User Manual', margin, 21);
 
   y = 34;
 
-  // ==========================================
-  // OFFICIAL WEB APP LINK CARD (START OF PDF)
-  // ==========================================
+  // OFFICIAL WEB APP LINK CARD
   doc.setFillColor(239, 246, 255);
   doc.setDrawColor(191, 219, 254);
   doc.setLineWidth(0.4);
@@ -70,30 +65,24 @@ export const generateRadnitoPDF = () => {
   doc.setFontSize(9.5);
   doc.setFont('helvetica', 'bold');
   doc.text(officialUrl, margin + 4, y + 12.5);
-
-  // Add explicit clickable link annotation box
   doc.link(margin + 4, y + 8, contentWidth - 8, 7, { url: officialUrl });
 
   y += 24;
 
-  // ==========================================
-  // SECTION 1: OVERVIEW
-  // ==========================================
-  drawSectionHeader('Overview & Architecture', '1');
+  // SECTION 1: OVERVIEW & BATCH DICTATION ARCHITECTURE
+  drawSectionHeader('Overview & Batch Architecture', '1');
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(51, 65, 85);
   const overviewText = doc.splitTextToSize(
-    'RADNITO is an advanced AI-powered radiology speech-to-text dictation corrector designed for radiologists and medical professionals. It transforms raw, misheard spoken dictations into clean, structured, line-by-line radiology report findings in real-time. All AI processing runs 100% client-side in your browser using Google Gemini AI, ensuring zero server lag, 24/7 uptime, and absolute privacy.',
+    'RADNITO is an advanced batch radiology dictation and audio processing application built for radiologists. It allows you to upload, record, and process multiple radiology dictations concurrently in bulk. All AI processing runs 100% client-side in your browser using Google Gemini AI, ensuring zero server lag, 24/7 uptime, and absolute privacy.',
     contentWidth
   );
   doc.text(overviewText, margin, y);
   y += overviewText.length * 4.2 + 4;
 
-  // ==========================================
   // SECTION 2: HOW TO GET FREE GEMINI API KEYS
-  // ==========================================
   drawSectionHeader('How to Get a Free Gemini API Key (Step-by-Step)', '2');
 
   doc.setFont('helvetica', 'normal');
@@ -129,16 +118,14 @@ export const generateRadnitoPDF = () => {
 
   y += 2;
 
-  // ==========================================
-  // SECTION 3: MULTI-KEY LOAD BALANCING & FALLBACK
-  // ==========================================
+  // SECTION 3: MULTI-KEY LOAD BALANCING
   drawSectionHeader('Multi-API Key Load Balancing & Automatic Failover', '3');
 
   const multiKeyTextLines = [
-    '• Add Multiple API Keys: You can add 2, 3, or more Gemini API keys from different Google accounts into RADNITO.',
-    '• Randomized Quota Selection: RADNITO randomly selects one of your saved keys for each dictation request to distribute daily quota evenly.',
-    '• Automatic Failover: If any key encounters a rate limit (429) or quota error, RADNITO automatically retries using your next saved key without failing your dictation!',
-    '• Privacy First: All saved keys are stored strictly in your browser local storage and never sent to any third-party server.',
+    '• Save Multiple API Keys: Add 2, 3, or more Gemini API keys from different Google accounts into RADNITO.',
+    '• Randomized Quota Selection: RADNITO randomly selects one of your saved keys for each batch dictation request to balance daily quota.',
+    '• Automatic Failover: If any key hits a rate limit (429) or quota error, RADNITO automatically retries using your next saved key seamlessly.',
+    '• Client-Side Storage: All keys remain strictly in browser local storage and are never sent to external servers.',
   ];
 
   let cardHeight = 8;
@@ -151,7 +138,7 @@ export const generateRadnitoPDF = () => {
   });
 
   checkPageBreak(cardHeight + 4);
-  doc.setFillColor(254, 243, 199); // Warm Amber/Yellow
+  doc.setFillColor(254, 243, 199);
   doc.setDrawColor(251, 191, 36);
   doc.setLineWidth(0.4);
   doc.roundedRect(margin, y, contentWidth, cardHeight, 2, 2, 'FD');
@@ -173,45 +160,18 @@ export const generateRadnitoPDF = () => {
 
   y += cardHeight + 6;
 
-  // ==========================================
-  // SECTION 4: MODEL SELECTION & LOWER MODEL FALLBACK
-  // ==========================================
-  drawSectionHeader('Model Selection & Error Fallback Instructions', '4');
+  // SECTION 4: BATCH FEATURES & AUDIO PRESERVATION
+  drawSectionHeader('Batch Workspace Features & Audio Downloads', '4');
 
-  const modelText = doc.splitTextToSize(
-    'RADNITO includes high-speed Flash models (Gemini 3.6 Flash, Gemini 3.5 Flash, Gemini 3 Flash, Gemini 2.5 Flash, Gemini 3.5 Flash Lite).\n\n' +
-    '💡 Lower Model Fallback Advice: If a selected model shows a quota error or rate limit, switch to a lower model in the AI Model dropdown (e.g. Gemini 3.5 Flash Lite or Gemini 2.5 Flash). Lower models process audio faster and have significantly higher quota limits.',
-    contentWidth - 6
-  );
-
-  const modelCardHeight = modelText.length * 4.2 + 8;
-  checkPageBreak(modelCardHeight + 4);
-
-  doc.setFillColor(240, 253, 244); // Light Emerald
-  doc.setDrawColor(187, 247, 208);
-  doc.setLineWidth(0.4);
-  doc.roundedRect(margin, y, contentWidth, modelCardHeight, 2, 2, 'FD');
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
-  doc.setTextColor(22, 101, 52);
-  doc.text(modelText, margin + 3, y + 6);
-
-  y += modelCardHeight + 6;
-
-  // ==========================================
-  // SECTION 5: DICTATION MODES & AUDIO PRESERVATION
-  // ==========================================
-  drawSectionHeader('Dictation Modes & Audio Preservation', '5');
-
-  const modeDescriptions = [
-    '• Single Mode: Record audio findings line-by-line. Your audio recording is preserved safely. Click "Download Audio Recording" anytime to save recorded audio (.webm/.ogg), or drag-and-drop saved audio files to re-process dictations without loss.',
-    '• Batch Mode: Upload and transcribe multiple dictation audio files concurrently in bulk to save time.',
-    '• Live Mode (Experimental Notice): Dictate in real-time. Note: Live Mode is experimental; Single Mode with audio recording is recommended for critical or lengthy reports.',
+  const batchFeatures = [
+    '• Bulk Multi-File Transcribing: Upload or record multiple audio files and process them concurrently with Gemini AI.',
+    '• Audio Download Buttons: Download original or recorded audio files (.webm/.ogg) anytime directly from each batch item card.',
+    '• Model Fallback Advice: If a model hits a quota limit, switch to Gemini 3.5 Flash Lite or Gemini 2.5 Flash in the model dropdown.',
+    '• Multi-Format Export: Export all completed batch reports as structured HTML, Text, or PDF documents.',
   ];
 
-  modeDescriptions.forEach((modeText) => {
-    const split = doc.splitTextToSize(modeText, contentWidth - 2);
+  batchFeatures.forEach((feat) => {
+    const split = doc.splitTextToSize(feat, contentWidth - 2);
     checkPageBreak(split.length * 4.2 + 4);
 
     doc.setFont('helvetica', 'normal');
@@ -223,11 +183,9 @@ export const generateRadnitoPDF = () => {
 
   y += 4;
 
-  // ==========================================
-  // SECTION 6: SUBSCRIBE TO OUR CHANNELS (END OF PDF)
-  // ==========================================
+  // SECTION 5: SUBSCRIBE TO CHANNELS
   checkPageBreak(44);
-  doc.setFillColor(238, 242, 255); // Indigo Tint
+  doc.setFillColor(238, 242, 255);
   doc.setDrawColor(199, 210, 254);
   doc.setLineWidth(0.5);
   doc.roundedRect(margin, y, contentWidth, 42, 2, 2, 'FD');
@@ -259,19 +217,17 @@ export const generateRadnitoPDF = () => {
     doc.setTextColor(37, 99, 235);
     doc.text(ch.urlText, margin + 36, linkY);
 
-    // Make URL clickable
     doc.link(margin + 36, linkY - 3, 110, 4.5, { url: ch.url });
 
     linkY += 5.5;
   });
 
-  // Footer Page Numbers
   const totalPages = doc.internal.pages.length - 1;
   for (let i = 1; i <= totalPages; i++) {
     doc.setPage(i);
     doc.setFontSize(8);
     doc.setTextColor(148, 163, 184);
-    doc.text(`RADNITO User Manual • Page ${i} of ${totalPages}`, pageWidth / 2, pageHeight - 6, { align: 'center' });
+    doc.text(`RADNITO Batch Dictation Manual • Page ${i} of ${totalPages}`, pageWidth / 2, pageHeight - 6, { align: 'center' });
   }
 
   doc.save('RADNITO_User_Guide.pdf');
