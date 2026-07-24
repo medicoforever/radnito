@@ -10,6 +10,7 @@ export const ApiKeyGuideTab: React.FC<ApiKeyGuideTabProps> = ({ onKeySaved }) =>
   const [keyInput, setKeyInput] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [feedback, setFeedback] = useState<{ success: boolean; message: string } | null>(null);
+  const [showExplainer, setShowExplainer] = useState(true);
 
   const handleQuickSave = async () => {
     if (!keyInput.trim()) {
@@ -33,6 +34,62 @@ export const ApiKeyGuideTab: React.FC<ApiKeyGuideTabProps> = ({ onKeySaved }) =>
 
   return (
     <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-xl border border-slate-200 dark:border-slate-700 max-w-3xl mx-auto my-4 space-y-6">
+      {/* Beginner Explainer - What is an API Key? */}
+      <div className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-slate-900 dark:to-slate-900 rounded-xl border border-blue-200 dark:border-blue-800 overflow-hidden">
+        <button
+          onClick={() => setShowExplainer(!showExplainer)}
+          className="w-full p-4 flex items-center justify-between text-left hover:bg-blue-100/50 dark:hover:bg-slate-800/50 transition-colors"
+        >
+          <div className="flex items-center space-x-3">
+            <span className="text-2xl">🤔</span>
+            <div>
+              <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm">New here? What is an API Key?</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Click to {showExplainer ? 'hide' : 'learn about'} API keys</p>
+            </div>
+          </div>
+          <span className={`text-slate-400 transition-transform duration-200 ${showExplainer ? 'rotate-180' : ''}`}>▼</span>
+        </button>
+        
+        {showExplainer && (
+          <div className="px-4 pb-4 space-y-3 animate-fade-in">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="p-3 rounded-lg bg-white/60 dark:bg-slate-800/60 border border-blue-100 dark:border-slate-700">
+                <h4 className="font-bold text-blue-700 dark:text-blue-300 text-xs flex items-center space-x-1 mb-1.5">
+                  <span>🔑</span><span>What is it?</span>
+                </h4>
+                <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                  An API key is a <strong>free password</strong> from Google that lets RADNITO use Gemini AI to process your audio dictations. Think of it like a <strong>login code</strong> for the AI.
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-white/60 dark:bg-slate-800/60 border border-emerald-100 dark:border-slate-700">
+                <h4 className="font-bold text-emerald-700 dark:text-emerald-300 text-xs flex items-center space-x-1 mb-1.5">
+                  <span>💰</span><span>Is it free?</span>
+                </h4>
+                <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                  <strong>Yes, 100% free!</strong> Google gives free API keys for Gemini AI. No credit card, no payment, no subscription needed. Just a Google account.
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-white/60 dark:bg-slate-800/60 border border-violet-100 dark:border-slate-700">
+                <h4 className="font-bold text-violet-700 dark:text-violet-300 text-xs flex items-center space-x-1 mb-1.5">
+                  <span>🔒</span><span>Is it safe?</span>
+                </h4>
+                <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                  <strong>Completely safe!</strong> Your key is stored <strong>only in your browser</strong>. RADNITO never sends it to any server. Nobody else can see it.
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-white/60 dark:bg-slate-800/60 border border-amber-100 dark:border-slate-700">
+                <h4 className="font-bold text-amber-700 dark:text-amber-300 text-xs flex items-center space-x-1 mb-1.5">
+                  <span>⏱️</span><span>How long does it take?</span>
+                </h4>
+                <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                  Less than <strong>1 minute!</strong> Just open a link, sign in with Google, click one button, copy a code, and paste it below. That's it!
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl p-6 text-white shadow-md flex flex-col md:flex-row items-center justify-between gap-4">
         <div>
