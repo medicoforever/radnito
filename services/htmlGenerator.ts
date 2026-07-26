@@ -5,6 +5,22 @@ interface ReportBatch {
     findings: string[] | null;
 }
 
+// Converts markdown-style bold **text** and (BOLD) markers to HTML <strong> tags
+const convertMarkdownBoldToHTML = (text: string): string => {
+    // Convert **bold text** to <strong>bold text</strong>
+    let result = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // Convert (BOLD) prefix marker — e.g. "(BOLD) Some text" → "<strong>Some text</strong>"
+    result = result.replace(/\(BOLD\)\s*/gi, '');
+    return result;
+};
+
+// Strips markdown bold markers for plain text copy (no HTML)
+const stripMarkdownBold = (text: string): string => {
+    let result = text.replace(/\*\*(.+?)\*\*/g, '$1');
+    result = result.replace(/\(BOLD\)\s*/gi, '');
+    return result;
+};
+
 const getEmbeddedScript = () => `
 // Embedded script for standalone HTML report functionality
 document.addEventListener('DOMContentLoaded', () => {
@@ -24,6 +40,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const multiSelectToggle = document.getElementById('multi-select-toggle');
     
     // --- HELPER FUNCTIONS ---
+    const convertMdBold = (text) => {
+        let r = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        r = r.replace(/\(BOLD\)\s*/gi, '');
+        return r;
+    };
+    const stripMdBold = (text) => {
+        let r = text.replace(/\*\*(.+?)\*\*/g, '$1');
+        r = r.replace(/\(BOLD\)\s*/gi, '');
+        return r;
+    };
     const showNotification = (text) => {
         if (notificationTimeout) clearTimeout(notificationTimeout);
         notificationEl.textContent = text;
@@ -71,25 +97,25 @@ document.addEventListener('DOMContentLoaded', () => {
         let plainText, htmlText;
 
         if (isTitle) {
-            plainText = cleanFinding;
-            htmlText = \`<p style="text-align:center;"><strong><u>\${cleanFinding}</u></strong></p>\`;
+            plainText = stripMdBold(cleanFinding);
+            htmlText = \`<p style="text-align:center;"><strong><u>\${convertMdBold(cleanFinding)}</u></strong></p>\`;
         } else if (isImpression) {
             const title = parts[0];
             const points = parts.slice(1);
-            plainText = \`\${title.toUpperCase()}\\n\${points.map(p => \`• \${p}\`).join('\\n')}\`;
-            htmlText = \`<p><strong style="text-decoration: underline;">\${title.toUpperCase()}</strong></p><ul>\${points.map(p => \`<li><strong>\${p}</strong></li>\`).join('')}</ul>\`;
+            plainText = \`\${stripMdBold(title.toUpperCase())}\\n\${points.map(p => \`• \${stripMdBold(p)}\`).join('\\n')}\`;
+            htmlText = \`<p><strong style="text-decoration: underline;">\${convertMdBold(title.toUpperCase())}</strong></p><ul>\${points.map(p => \`<li><strong>\${convertMdBold(p)}</strong></li>\`).join('')}</ul>\`;
         } else if (isStructured) {
-            plainText = parts.join('\\n');
-            let htmlContent = isBold ? \`<p><strong>\${parts[0]}</strong></p>\` : \`<p>\${parts[0]}</p>\`;
-            htmlContent += parts.slice(1).map(p => isBold ? \`<p><strong>\${p}</strong></p>\` : \`<p>\${p}</p>\`).join('');
+            plainText = parts.map(p => stripMdBold(p)).join('\\n');
+            let htmlContent = isBold ? \`<p><strong>\${convertMdBold(parts[0])}</strong></p>\` : \`<p>\${convertMdBold(parts[0])}</p>\`;
+            htmlContent += parts.slice(1).map(p => isBold ? \`<p><strong>\${convertMdBold(p)}</strong></p>\` : \`<p>\${convertMdBold(p)}</p>\`).join('');
             htmlText = htmlContent;
         } else {
             if (isItalic) {
-                plainText = cleanFinding.slice(1, -1);
-                htmlText = \`<p><em>\${plainText}</em></p>\`;
+                plainText = stripMdBold(cleanFinding.slice(1, -1));
+                htmlText = \`<p><em>\${convertMdBold(plainText)}</em></p>\`;
             } else {
-                plainText = cleanFinding;
-                htmlText = isBold ? \`<p><strong>\${cleanFinding}</strong></p>\` : \`<p>\${cleanFinding}</p>\`;
+                plainText = stripMdBold(cleanFinding);
+                htmlText = isBold ? \`<p><strong>\${convertMdBold(cleanFinding)}</strong></p>\` : \`<p>\${convertMdBold(cleanFinding)}</p>\`;
             }
         }
         return { plainText, htmlText };
@@ -234,16 +260,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (isTitle) {
                 textEl.className = 'finding-text text-slate-700 cursor-pointer text-center font-bold underline';
-                textEl.innerHTML = newClean;
+                textEl.innerHTML = convertMdBold(newClean);
             } else if (isImpression) {
                 textEl.className = 'finding-text text-slate-700 cursor-pointer';
-                textEl.innerHTML = \`<strong class="underline uppercase">\${newParts[0]}</strong><ul class="list-disc list-inside pl-4 mt-1">\${newParts.slice(1).map(p => \`<li class="font-bold">\${p}</li>\`).join('')}</ul>\`;
+                textEl.innerHTML = \`<strong class="underline uppercase">\${convertMdBold(newParts[0])}</strong><ul class="list-disc list-inside pl-4 mt-1">\${newParts.slice(1).map(p => \`<li class="font-bold">\${convertMdBold(p)}</li>\`).join('')}</ul>\`;
             } else if (newParts.length > 1) {
                 textEl.className = 'finding-text text-slate-700 cursor-pointer';
-                textEl.innerHTML = \`<strong class="font-bold">\${newParts[0]}</strong>\${newParts.slice(1).map(p => \`<span class="block font-semibold">\${p}</span>\`).join('')}\`;
+                textEl.innerHTML = \`<strong class="font-bold">\${convertMdBold(newParts[0])}</strong>\${newParts.slice(1).map(p => \`<span class="block font-semibold">\${convertMdBold(p)}</span>\`).join('')}\`;
             } else {
                 textEl.className = \`finding-text text-slate-700 cursor-pointer \${isItalic ? 'italic' : isBold ? 'font-bold' : ''}\`;
-                textEl.innerHTML = isItalic ? newClean.slice(1, -1) : newClean;
+                textEl.innerHTML = isItalic ? convertMdBold(newClean.slice(1, -1)) : convertMdBold(newClean);
             }
             
             addFindingEventListeners(findingEl, batchId, index);
@@ -620,19 +646,19 @@ const renderFindingsList = (findings: string[], batchId: string): string => {
                 let textContainerClasses = '';
 
                 if (isTitle) {
-                    findingContent = cleanFinding;
+                    findingContent = convertMarkdownBoldToHTML(cleanFinding);
                     textContainerClasses = 'text-center font-bold underline';
                 } else if (isImpression) {
                     findingContent = `
-                        <strong class="underline uppercase">${title}</strong>
+                        <strong class="underline uppercase">${convertMarkdownBoldToHTML(title)}</strong>
                         <ul class="list-disc list-inside pl-4 mt-1">
-                            ${points.map(p => `<li class="font-bold">${p}</li>`).join('')}
+                            ${points.map(p => `<li class="font-bold">${convertMarkdownBoldToHTML(p)}</li>`).join('')}
                         </ul>
                     `;
                 } else if (isStructured) {
-                    findingContent = `<strong class="font-bold">${title}</strong>${points.map(p => `<span class="block font-semibold">${p}</span>`).join('')}`;
+                    findingContent = `<strong class="font-bold">${convertMarkdownBoldToHTML(title)}</strong>${points.map(p => `<span class="block font-semibold">${convertMarkdownBoldToHTML(p)}</span>`).join('')}`;
                 } else {
-                    findingContent = textToDisplay;
+                    findingContent = convertMarkdownBoldToHTML(textToDisplay);
                     textContainerClasses = isItalic ? 'italic' : isBold ? 'font-bold' : '';
                 }
 
