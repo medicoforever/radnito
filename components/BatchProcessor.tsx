@@ -818,7 +818,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
             try {
                 const mimeType = batch.audioBlobs[0].type;
                 const mergedBlob = new Blob(batch.audioBlobs, { type: mimeType });
-                const findings = await processAudio(mergedBlob, batch.selectedModel, batch.customPrompt, batch.customImages || []);
+                const findings = await processAudio(mergedBlob, batch.selectedModel, batch.customPrompt, batch.customImages || [], undefined, batch.name);
                 
                 const chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || [], batch.selectedModel);
                 const aiGreeting = "I have reviewed the audio and transcript for this dictation. How can I help you further?";
@@ -845,7 +845,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
         try {
             const mimeType = batch.audioBlobs[0].type;
             const mergedBlob = new Blob(batch.audioBlobs, { type: mimeType });
-            const findings = await processAudio(mergedBlob, batch.selectedModel, batch.customPrompt, batch.customImages || []);
+            const findings = await processAudio(mergedBlob, batch.selectedModel, batch.customPrompt, batch.customImages || [], undefined, batch.name);
             
             const chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || [], batch.selectedModel);
             const aiGreeting = "I have reviewed the audio and transcript for this dictation. How can I help you further?";
@@ -1402,7 +1402,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
             setUndoStates(prev => ({ ...prev, [batchId]: [...batch.findings!] }));
 
             try {
-                const newFindings = await processAudio(newAudioBlob, batch.selectedModel, batch.customPrompt, batch.customImages || []);
+                const newFindings = await processAudio(newAudioBlob, batch.selectedModel, batch.customPrompt, batch.customImages || [], undefined, batch.name);
                 const updatedFindings = [...batch.findings, ...newFindings];
                 
                 const updatedAudioBlobs = [...batch.audioBlobs, newAudioBlob];

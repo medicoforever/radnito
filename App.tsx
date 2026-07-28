@@ -256,9 +256,9 @@ const App: React.FC = () => {
               </button>
             </div>
 
-            <div className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-950/40 px-3 py-1 rounded-xl border border-indigo-200 dark:border-indigo-800">
+            <div className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-950/40 px-3 py-1 rounded-xl border border-indigo-200 dark:border-indigo-800 shadow-sm">
               <span className="text-xs sm:text-sm font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-1">
-                <span>✨ 1,000+ Reports RAG Style Matching</span>
+                <span>✨ 100k+ Reports RAG Matching</span>
               </span>
               <button
                 onClick={() => {
@@ -272,6 +272,7 @@ const App: React.FC = () => {
                 role="switch"
                 aria-checked={isRAGEnabled}
                 id="rag-style-toggle"
+                title="RAG automatically searches 100,000+ real-world radiology reports from NEWWWWW.zip and applies the best matching report layout"
               >
                 <span
                   className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${

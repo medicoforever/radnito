@@ -1,19 +1,21 @@
-import { getValidModelName } from './geminiService';
 import { getStoredApiKey } from './apiKeyStore';
 
 export interface ReportTemplateItem {
   id: string;
+  title: string;
+  category: string;
   modality: string;
   region: string;
-  category: string;
-  title: string;
   content: string;
+  summary_keywords: string[];
 }
 
 export interface KnowledgebaseData {
-  total_reports: number;
+  version: string;
+  source: string;
+  total_templates: number;
   categories: string[];
-  reports_by_category: Record<string, ReportTemplateItem[]>;
+  reports_by_category: { [category: string]: ReportTemplateItem[] };
 }
 
 const RAG_ENABLED_STORAGE_KEY = 'radnito_rag_style_matching_enabled';
@@ -22,12 +24,27 @@ let knowledgebaseCache: KnowledgebaseData | null = null;
 let isFetchingKnowledgebase = false;
 
 /**
- * Loads the 1,000+ report templates knowledgebase from public/report_knowledgebase.json
+ * Check whether RAG Style Matching is enabled by user preference
+ */
+export function isRAGStyleMatchingEnabled(): boolean {
+  const stored = localStorage.getItem(RAG_ENABLED_STORAGE_KEY);
+  if (stored === null) return true; // Default ON
+  return stored === 'true';
+}
+
+/**
+ * Toggle RAG Style Matching preference
+ */
+export function setRAGStyleMatchingEnabled(enabled: boolean): void {
+  localStorage.setItem(RAG_ENABLED_STORAGE_KEY, enabled ? 'true' : 'false');
+}
+
+/**
+ * Asynchronously fetch and cache the report_knowledgebase.json (1,066 distinct templates from NEWWWWW.zip)
  */
 export async function loadReportKnowledgebase(): Promise<KnowledgebaseData | null> {
   if (knowledgebaseCache) return knowledgebaseCache;
   if (isFetchingKnowledgebase) {
-    // Wait a brief moment if already fetching
     await new Promise((resolve) => setTimeout(resolve, 300));
     if (knowledgebaseCache) return knowledgebaseCache;
   }
@@ -52,50 +69,34 @@ export async function loadReportKnowledgebase(): Promise<KnowledgebaseData | nul
 }
 
 /**
- * Check whether RAG Style Matching is enabled by user preference
- */
-export function isRAGStyleMatchingEnabled(): boolean {
-  const stored = localStorage.getItem(RAG_ENABLED_STORAGE_KEY);
-  if (stored === null) return true; // Default ON
-  return stored === 'true';
-}
-
-/**
- * Toggle RAG Style Matching preference
- */
-export function setRAGStyleMatchingEnabled(enabled: boolean): void {
-  localStorage.setItem(RAG_ENABLED_STORAGE_KEY, enabled ? 'true' : 'false');
-}
-
-/**
- * Detects modality and organ region from text to filter relevant templates
+ * Detects modality and organ region from text to filter relevant templates from NEWWWWW.zip
  */
 export function detectModalityAndRegion(text: string): { modality?: string; region?: string } {
   const t = text.toLowerCase();
   
   let modality: string | undefined;
   if (t.includes('mri') || t.includes('magnetic resonance')) modality = 'MRI';
-  else if (t.includes('ct') || t.includes('computed tomography') || t.includes('c.t.')) modality = 'CT';
-  else if (t.includes('usg') || t.includes('ultrasound') || t.includes('sonography') || t.includes('foetal') || t.includes('fetal')) modality = 'USG';
+  else if (t.includes('ct') || t.includes('computed tomography') || t.includes('c.t.') || t.includes('hrct')) modality = 'CT';
+  else if (t.includes('usg') || t.includes('ultrasound') || t.includes('sonography') || t.includes('foetal') || t.includes('fetal') || t.includes('doppler')) modality = 'USG';
   else if (t.includes('x-ray') || t.includes('xray') || t.includes('radiograph') || t.includes('pa view')) modality = 'X-Ray';
-  else if (t.includes('mammogram') || t.includes('mammography') || t.includes('birads')) modality = 'Mammogram';
+  else if (t.includes('mammogram') || t.includes('mammography') || t.includes('birads')) modality = 'Mammography';
   else if (t.includes('nuclear') || t.includes('pet') || t.includes('spect')) modality = 'Nuclear Medicine';
 
   let region: string | undefined;
-  if (t.includes('brain') || t.includes('head') || t.includes('cranial') || t.includes('cerebral') || t.includes('stroke') || t.includes('infarct')) region = 'Brain & Head';
-  else if (t.includes('chest') || t.includes('thorax') || t.includes('lung') || t.includes('pleural') || t.includes('mediastinum')) region = 'Thorax & Chest';
-  else if (t.includes('abdomen') || t.includes('pelvis') || t.includes('liver') || t.includes('kidney') || t.includes('spleen') || t.includes('gallbladder')) region = 'Abdomen & Pelvis';
-  else if (t.includes('spine') || t.includes('lumbar') || t.includes('cervical') || t.includes('dorsal') || t.includes('vertebra')) region = 'Spine';
-  else if (t.includes('knee') || t.includes('shoulder') || t.includes('joint') || t.includes('femur') || t.includes('ankle') || t.includes('extremit')) region = 'Extremities & Joints';
+  if (t.includes('brain') || t.includes('head') || t.includes('cranial') || t.includes('cerebral') || t.includes('stroke') || t.includes('infarct') || t.includes('pns') || t.includes('sinus')) region = 'Brain & Head';
+  else if (t.includes('chest') || t.includes('thorax') || t.includes('lung') || t.includes('pleural') || t.includes('mediastinum') || t.includes('hrct chest')) region = 'Thorax & Chest';
+  else if (t.includes('abdomen') || t.includes('pelvis') || t.includes('liver') || t.includes('kidney') || t.includes('spleen') || t.includes('gallbladder') || t.includes('kub')) region = 'Abdomen & Pelvis';
+  else if (t.includes('spine') || t.includes('lumbar') || t.includes('cervical') || t.includes('dorsal') || t.includes('vertebra') || t.includes('lumbosacral')) region = 'Spine';
+  else if (t.includes('knee') || t.includes('shoulder') || t.includes('joint') || t.includes('femur') || t.includes('ankle') || t.includes('hip') || t.includes('extremit')) region = 'Extremities & Joints';
   else if (t.includes('breast')) region = 'Breast';
-  else if (t.includes('neck') || t.includes('thyroid')) region = 'Neck';
-  else if (t.includes('obstetric') || t.includes('fetal') || t.includes('pregnancy') || t.includes('gestation')) region = 'Obstetrics';
+  else if (t.includes('neck') || t.includes('thyroid') || t.includes('carotid')) region = 'Neck';
+  else if (t.includes('obstetric') || t.includes('fetal') || t.includes('foetal') || t.includes('pregnancy') || t.includes('gestation') || t.includes('anomaly')) region = 'Obstetrics';
 
   return { modality, region };
 }
 
 /**
- * Cosine similarity helper between two vector arrays
+ * Cosine similarity calculation between two float vectors
  */
 function cosineSimilarity(a: number[], b: number[]): number {
   if (!a || !b || a.length !== b.length) return 0;
@@ -112,10 +113,10 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 /**
- * Embeds text using Gemini Embedding 2 model via REST API
+ * Embeds text using Gemini Embedding 2 API endpoint (models/gemini-embedding-2)
  */
 async function embedTextWithGemini2(text: string, apiKey: string): Promise<number[] | null> {
-  if (!apiKey || !text) return null;
+  if (!apiKey || !text || text.trim().length === 0) return null;
   try {
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2:embedContent?key=${apiKey}`,
@@ -133,16 +134,16 @@ async function embedTextWithGemini2(text: string, apiKey: string): Promise<numbe
     const data = await response.json();
     return data.embedding?.values || null;
   } catch (err) {
-    console.warn('Gemini embedding call failed:', err);
+    console.warn('Gemini Embedding 2 call failed:', err);
     return null;
   }
 }
 
 /**
- * Retrieves the top matching style report templates for a given dictation text
+ * Retrieves the top matching style report templates from NEWWWWW.zip dataset for a given dictation/hint
  */
 export async function getRelevantStyleTemplates(
-  dictationHint: string,
+  hintContext: string,
   maxCount: number = 2
 ): Promise<ReportTemplateItem[]> {
   if (!isRAGStyleMatchingEnabled()) return [];
@@ -150,65 +151,84 @@ export async function getRelevantStyleTemplates(
   const kb = await loadReportKnowledgebase();
   if (!kb || !kb.reports_by_category) return [];
 
-  const { modality, region } = detectModalityAndRegion(dictationHint);
+  const textToAnalyze = hintContext || 'Radiology Scan';
+  const { modality, region } = detectModalityAndRegion(textToAnalyze);
   
   let candidates: ReportTemplateItem[] = [];
 
-  // Filter candidates by category match
+  // Filter candidates by matching category
   for (const [catName, list] of Object.entries(kb.reports_by_category)) {
     let matchScore = 0;
-    if (modality && catName.toLowerCase().includes(modality.toLowerCase())) matchScore += 2;
-    if (region && catName.toLowerCase().includes(region.toLowerCase())) matchScore += 2;
+    if (modality && catName.toLowerCase().includes(modality.toLowerCase())) matchScore += 3;
+    if (region && catName.toLowerCase().includes(region.toLowerCase())) matchScore += 3;
 
     if (matchScore > 0) {
       candidates.push(...list);
     }
   }
 
-  // Fallback to all reports if no direct category match
+  // Fallback to all report templates if no direct category match
   if (candidates.length === 0) {
     Object.values(kb.reports_by_category).forEach(list => candidates.push(...list));
   }
 
   if (candidates.length <= maxCount) return candidates;
 
-  // Attempt vector embedding similarity using Gemini Embedding 2
-  const apiKey = getStoredApiKey();
-  if (apiKey) {
-    const queryVector = await embedTextWithGemini2(dictationHint, apiKey);
-    if (queryVector) {
-      // Pick a sample of candidates to rank
-      const sampledCandidates = candidates.slice(0, 30);
-      const scored: Array<{ item: ReportTemplateItem; score: number }> = [];
-
-      for (const item of sampledCandidates) {
-        // Quick keyword similarity fallback or embedding match
-        const titleMatch = item.title.toLowerCase().split(' ').filter(w => dictationHint.toLowerCase().includes(w)).length;
-        scored.push({ item, score: titleMatch });
-      }
-
-      scored.sort((a, b) => b.score - a.score);
-      return scored.slice(0, maxCount).map(s => s.item);
-    }
-  }
-
-  // Fast keyword ranking fallback
+  // Keyword relevance scoring
+  const keywords = textToAnalyze.toLowerCase().split(/\s+/).filter(w => w.length > 2);
   const scored = candidates.map(item => {
-    const words = dictationHint.toLowerCase().split(/\s+/).filter(w => w.length > 3);
     let score = 0;
-    const itemText = (item.title + ' ' + item.content).toLowerCase();
-    for (const w of words) {
-      if (itemText.includes(w)) score++;
+    const itemFullText = (item.title + ' ' + item.category + ' ' + item.content).toLowerCase();
+    
+    // Keyword match boost
+    for (const kw of keywords) {
+      if (itemFullText.includes(kw)) score += 2;
+      if (item.title.toLowerCase().includes(kw)) score += 3;
     }
+    
+    // Modality & region exact match boost
+    if (modality && item.modality.toLowerCase() === modality.toLowerCase()) score += 5;
+    if (region && item.region.toLowerCase() === region.toLowerCase()) score += 5;
+
     return { item, score };
   });
 
   scored.sort((a, b) => b.score - a.score);
+
+  // Optional vector embedding check with Gemini Embedding 2
+  const apiKey = getStoredApiKey();
+  if (apiKey) {
+    try {
+      const topCandidates = scored.slice(0, 15).map(s => s.item);
+      const queryVec = await embedTextWithGemini2(textToAnalyze, apiKey);
+      if (queryVec) {
+        // If vector obtained, rank top candidates by vector similarity
+        const vectorScored: Array<{ item: ReportTemplateItem; score: number }> = [];
+        for (const item of topCandidates) {
+          const itemText = `${item.title} ${item.content.slice(0, 300)}`;
+          const itemVec = await embedTextWithGemini2(itemText, apiKey);
+          if (itemVec) {
+            const sim = cosineSimilarity(queryVec, itemVec);
+            vectorScored.push({ item, score: sim });
+          } else {
+            vectorScored.push({ item, score: 0 });
+          }
+        }
+        vectorScored.sort((a, b) => b.score - a.score);
+        if (vectorScored.length > 0 && vectorScored[0].score > 0) {
+          return vectorScored.slice(0, maxCount).map(s => s.item);
+        }
+      }
+    } catch (e) {
+      // Fallback to keyword scored
+    }
+  }
+
   return scored.slice(0, maxCount).map(s => s.item);
 }
 
 /**
- * Injects reference style templates into system instructions for Gemini
+ * Augment base system prompt with matched report templates from NEWWWWW.zip dataset
  */
 export function augmentPromptWithStyleTemplates(
   basePrompt: string,
@@ -216,16 +236,16 @@ export function augmentPromptWithStyleTemplates(
 ): string {
   if (!templates || templates.length === 0) return basePrompt;
 
-  let styleSnippet = `\n\n=== 🌟 REFERENCE RADIOLOGY REPORT STYLE EXEMPLARS (FROM OUR 1,000+ REAL REPORT KNOWLEDGEBASE) ===\n`;
-  styleSnippet += `Adopt the exact professional structure, terminology, headings, section order, and formatting tone of the following reference templates:\n\n`;
+  let styleSnippet = `\n\n=== 🌟 RAG EXEMPLAR REPORT STYLES (MATCHED FROM YOUR NEWWWWW.zip DATASET) ===\n`;
+  styleSnippet += `Adopt the exact professional structure, terminology, section headings, and layout of the following reference templates:\n\n`;
 
   templates.forEach((t, idx) => {
-    styleSnippet += `--- REFERENCE TEMPLATE #${idx + 1} (${t.category}: ${t.title}) ---\n`;
-    styleSnippet += `${t.content.slice(0, 1500)}\n\n`;
+    styleSnippet += `--- REFERENCE EXEMPLAR #${idx + 1} [Category: ${t.category}] (${t.title}) ---\n`;
+    styleSnippet += `${t.content.slice(0, 2000)}\n\n`;
   });
 
   styleSnippet += `=== MANDATE ===\n`;
-  styleSnippet += `Replicate the structural style, medical terminology, and section layout of the reference templates above while incorporating all dictation details accurately.\n`;
+  styleSnippet += `YOUR TOP PRIORITY MANDATE IS TO REPLICATE THE SECTION LAYOUT, HEADINGS, TERMINOLOGY, AND FORMATTING OF THE EXEMPLARS ABOVE WHILE TRANSCRIPTING AND GENERATING THE REPORT FINDINGS.\n`;
 
   return basePrompt + styleSnippet;
 }

@@ -2,7 +2,8 @@ import { GoogleGenAI, Type, GenerateContentResponse, Chat } from "@google/genai"
 import { DEFAULT_GEMINI_PROMPT, REPROCESS_GEMINI_PROMPT, TEMPLATE_GEMINI_PROMPT, STRICT_CUSTOM_TEMPLATE_GEMINI_PROMPT, REPORT_TEMPLATES, ERROR_IDENTIFIER_PROMPT, INITIAL_AGENT_PROMPT, REFINEMENT_AGENT_PROMPT, SYNTHESIZER_AGENT_PROMPT } from '../constants';
 import { IdentifiedError } from "../types";
 import { getRandomApiKey, getFallbackApiKey, getStoredApiKeys } from './apiKeyStore';
-import { getRelevantStyleTemplates, augmentPromptWithStyleTemplates } from './reportStyleRAG';
+
+import { isRAGStyleMatchingEnabled, getRelevantStyleTemplates, augmentPromptWithStyleTemplates } from './reportStyleRAG';
 
 export const getAiClient = (lastFailedKey?: string) => {
   const keys = getStoredApiKeys();
@@ -105,7 +106,8 @@ export const processAudio = async (
   model: string, 
   customPrompt?: string,
   customImages?: Array<{ data: string; mimeType: string }> | null,
-  existingFindings?: string[]
+  existingFindings?: string[],
+  batchName?: string
 ): Promise<string[]> => {
   const base64Audio = await blobToBase64(audioBlob);
 
@@ -125,18 +127,20 @@ export const processAudio = async (
   } else {
       basePrompt = DEFAULT_GEMINI_PROMPT;
   }
-  
-  // Augment base prompt with matching real-world report style exemplars from 1,000+ report dataset
+
+  // Augment base prompt with matching real-world report exemplars from 100K+ report dataset (NEWWWWW.zip)
   try {
-    const styleHint = customPrompt || (existingFindings ? existingFindings.join(' ') : '');
-    const styleTemplates = await getRelevantStyleTemplates(styleHint);
-    if (styleTemplates.length > 0) {
-      basePrompt = augmentPromptWithStyleTemplates(basePrompt, styleTemplates);
+    if (isRAGStyleMatchingEnabled()) {
+      const hintText = [batchName, customPrompt, existingFindings ? existingFindings.join(' ') : ''].filter(Boolean).join(' ');
+      const styleTemplates = await getRelevantStyleTemplates(hintText || 'Radiology Scan');
+      if (styleTemplates.length > 0) {
+        basePrompt = augmentPromptWithStyleTemplates(basePrompt, styleTemplates);
+      }
     }
   } catch (err) {
     console.warn('RAG style matching lookup failed:', err);
   }
-
+  
   const prompt = basePrompt;
 
   const parts: any[] = [];
