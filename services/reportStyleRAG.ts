@@ -27,9 +27,7 @@ let isFetchingKnowledgebase = false;
  * Check whether RAG Style Matching is enabled by user preference
  */
 export function isRAGStyleMatchingEnabled(): boolean {
-  const stored = localStorage.getItem(RAG_ENABLED_STORAGE_KEY);
-  if (stored === null) return true; // Default ON
-  return stored === 'true';
+  return false; // Stopped for now per user request
 }
 
 /**

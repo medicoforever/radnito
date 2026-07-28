@@ -1989,18 +1989,11 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                                         <span className="text-xs font-bold text-slate-600 dark:text-slate-400">
                                             Template & Custom Instructions for {batch.name}:
                                         </span>
-                                        <div className="flex items-center gap-1.5 flex-wrap">
-                                            {batch.matchedRAGTemplate && (
-                                                <span className="text-[10px] font-bold bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-800" title={`RAG Matched from NEWWWWW.zip: ${batch.matchedRAGTemplate.category}`}>
-                                                    ✨ RAG Matched: {batch.matchedRAGTemplate.title}
-                                                </span>
-                                            )}
-                                            {(batch.customPrompt || (batch.customImages && batch.customImages.length > 0)) && (
-                                                <span className="text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 px-2 py-0.5 rounded-full">
-                                                    Custom Template Attached
-                                                </span>
-                                            )}
-                                        </div>
+                                        {(batch.customPrompt || (batch.customImages && batch.customImages.length > 0)) && (
+                                            <span className="text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 px-2 py-0.5 rounded-full">
+                                                Custom Template Attached
+                                            </span>
+                                        )}
                                     </div>
                                     <CustomPromptInput
                                         prompt={batch.customPrompt}
