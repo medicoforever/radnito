@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { processAudio, createChat, blobToBase64, continueAudioDictation, base64ToBlob, modifyFindingWithAudio, modifyReportWithAudio, identifyPotentialErrors, runComplexImpressionGeneration, transcribeAudioForPrompt } from '../services/geminiService';
+import { isRAGStyleMatchingEnabled, getRelevantStyleTemplates } from '../services/reportStyleRAG';
 import { saveAudioBlob, getAudioBlob, clearUnusedAudioBlobs } from '../services/audioStorage';
 import Spinner from './ui/Spinner';
 import MicIcon from './icons/MicIcon';
@@ -816,6 +817,14 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
         await Promise.all(batchesToProcess.map(async (batch) => {
             if (batch.audioBlobs.length === 0) return;
             try {
+                let matchedRAG: { title: string; category: string } | undefined;
+                if (isRAGStyleMatchingEnabled()) {
+                    try {
+                        const tpls = await getRelevantStyleTemplates(batch.name + ' ' + (batch.customPrompt || ''));
+                        if (tpls.length > 0) matchedRAG = { title: tpls[0].title, category: tpls[0].category };
+                    } catch (e) {}
+                }
+
                 const mimeType = batch.audioBlobs[0].type;
                 const mergedBlob = new Blob(batch.audioBlobs, { type: mimeType });
                 const findings = await processAudio(mergedBlob, batch.selectedModel, batch.customPrompt, batch.customImages || [], undefined, batch.name);
@@ -824,7 +833,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                 const aiGreeting = "I have reviewed the audio and transcript for this dictation. How can I help you further?";
                 const initialChatHistory = [{ author: 'AI' as const, text: `${findings.join('\n\n')}\n\n${aiGreeting}` }];
 
-                setBatches(prev => prev.map(b => b.id === batch.id ? { ...b, status: 'complete', findings, chat: chatSession, chatHistory: initialChatHistory, isChatting: false } : b));
+                setBatches(prev => prev.map(b => b.id === batch.id ? { ...b, status: 'complete', findings, chat: chatSession, chatHistory: initialChatHistory, isChatting: false, matchedRAGTemplate: matchedRAG } : b));
             } catch (err) {
                  const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
                 setBatches(prev => prev.map(b => b.id === batch.id ? { ...b, status: 'error', error: errorMessage } : b));
@@ -843,6 +852,14 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
         setBatches(prev => prev.map(b => b.id === batchId ? {...b, status: 'processing', error: undefined } : b));
 
         try {
+            let matchedRAG: { title: string; category: string } | undefined;
+            if (isRAGStyleMatchingEnabled()) {
+                try {
+                    const tpls = await getRelevantStyleTemplates(batch.name + ' ' + (batch.customPrompt || ''));
+                    if (tpls.length > 0) matchedRAG = { title: tpls[0].title, category: tpls[0].category };
+                } catch (e) {}
+            }
+
             const mimeType = batch.audioBlobs[0].type;
             const mergedBlob = new Blob(batch.audioBlobs, { type: mimeType });
             const findings = await processAudio(mergedBlob, batch.selectedModel, batch.customPrompt, batch.customImages || [], undefined, batch.name);
@@ -851,7 +868,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
             const aiGreeting = "I have reviewed the audio and transcript for this dictation. How can I help you further?";
             const initialChatHistory = [{ author: 'AI' as const, text: `${findings.join('\n\n')}\n\n${aiGreeting}` }];
 
-            setBatches(prev => prev.map(b => b.id === batchId ? { ...b, status: 'complete', findings, chat: chatSession, chatHistory: initialChatHistory, isChatting: false } : b));
+            setBatches(prev => prev.map(b => b.id === batchId ? { ...b, status: 'complete', findings, chat: chatSession, chatHistory: initialChatHistory, isChatting: false, matchedRAGTemplate: matchedRAG } : b));
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
             setBatches(prev => prev.map(b => b.id === batchId ? { ...b, status: 'error', error: errorMessage, findings: null } : b));
@@ -1972,11 +1989,18 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                                         <span className="text-xs font-bold text-slate-600 dark:text-slate-400">
                                             Template & Custom Instructions for {batch.name}:
                                         </span>
-                                        {(batch.customPrompt || (batch.customImages && batch.customImages.length > 0)) && (
-                                            <span className="text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 px-2 py-0.5 rounded-full">
-                                                Custom Template Attached
-                                            </span>
-                                        )}
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                            {batch.matchedRAGTemplate && (
+                                                <span className="text-[10px] font-bold bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-800" title={`RAG Matched from NEWWWWW.zip: ${batch.matchedRAGTemplate.category}`}>
+                                                    ✨ RAG Matched: {batch.matchedRAGTemplate.title}
+                                                </span>
+                                            )}
+                                            {(batch.customPrompt || (batch.customImages && batch.customImages.length > 0)) && (
+                                                <span className="text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 px-2 py-0.5 rounded-full">
+                                                    Custom Template Attached
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
                                     <CustomPromptInput
                                         prompt={batch.customPrompt}

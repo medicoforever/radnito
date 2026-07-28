@@ -83,7 +83,7 @@ export function detectModalityAndRegion(text: string): { modality?: string; regi
   else if (t.includes('nuclear') || t.includes('pet') || t.includes('spect')) modality = 'Nuclear Medicine';
 
   let region: string | undefined;
-  if (t.includes('brain') || t.includes('head') || t.includes('cranial') || t.includes('cerebral') || t.includes('stroke') || t.includes('infarct') || t.includes('pns') || t.includes('sinus')) region = 'Brain & Head';
+  if (t.includes('brain') || t.includes('head') || t.includes('orbit') || t.includes('cranial') || t.includes('cerebral') || t.includes('stroke') || t.includes('infarct') || t.includes('pns') || t.includes('sinus') || t.includes('dacryo')) region = 'Brain & Head';
   else if (t.includes('chest') || t.includes('thorax') || t.includes('lung') || t.includes('pleural') || t.includes('mediastinum') || t.includes('hrct chest')) region = 'Thorax & Chest';
   else if (t.includes('abdomen') || t.includes('pelvis') || t.includes('liver') || t.includes('kidney') || t.includes('spleen') || t.includes('gallbladder') || t.includes('kub')) region = 'Abdomen & Pelvis';
   else if (t.includes('spine') || t.includes('lumbar') || t.includes('cervical') || t.includes('dorsal') || t.includes('vertebra') || t.includes('lumbosacral')) region = 'Spine';
@@ -183,7 +183,7 @@ export async function getRelevantStyleTemplates(
     // Keyword match boost
     for (const kw of keywords) {
       if (itemFullText.includes(kw)) score += 2;
-      if (item.title.toLowerCase().includes(kw)) score += 3;
+      if (item.title.toLowerCase().includes(kw)) score += 4;
     }
     
     // Modality & region exact match boost
@@ -228,7 +228,7 @@ export async function getRelevantStyleTemplates(
 }
 
 /**
- * Augment base system prompt with matched report templates from NEWWWWW.zip dataset
+ * Augment base system prompt into a FULL RAG REPORT GENERATOR MODE system prompt using matched templates from NEWWWWW.zip
  */
 export function augmentPromptWithStyleTemplates(
   basePrompt: string,
@@ -236,16 +236,29 @@ export function augmentPromptWithStyleTemplates(
 ): string {
   if (!templates || templates.length === 0) return basePrompt;
 
-  let styleSnippet = `\n\n=== 🌟 RAG EXEMPLAR REPORT STYLES (MATCHED FROM YOUR NEWWWWW.zip DATASET) ===\n`;
-  styleSnippet += `Adopt the exact professional structure, terminology, section headings, and layout of the following reference templates:\n\n`;
+  const primaryTpl = templates[0];
 
-  templates.forEach((t, idx) => {
-    styleSnippet += `--- REFERENCE EXEMPLAR #${idx + 1} [Category: ${t.category}] (${t.title}) ---\n`;
-    styleSnippet += `${t.content.slice(0, 2000)}\n\n`;
-  });
+  let ragPrompt = `You are an expert Radiologist AI assistant. RAG (Retrieval Augmented Generation) has searched our 100,000+ report dataset (from NEWWWWW.zip) and matched the exact reference radiology report template for this dictation!\n\n`;
 
-  styleSnippet += `=== MANDATE ===\n`;
-  styleSnippet += `YOUR TOP PRIORITY MANDATE IS TO REPLICATE THE SECTION LAYOUT, HEADINGS, TERMINOLOGY, AND FORMATTING OF THE EXEMPLARS ABOVE WHILE TRANSCRIPTING AND GENERATING THE REPORT FINDINGS.\n`;
+  ragPrompt += `=== 🌟 MATCHED RAG RADIOLOGY REPORT EXEMPLAR TEMPLATE [${primaryTpl.category}: ${primaryTpl.title}] ===\n`;
+  ragPrompt += `${primaryTpl.content}\n\n`;
 
-  return basePrompt + styleSnippet;
+  if (templates.length > 1) {
+    ragPrompt += `=== SECONDARY REFERENCE EXEMPLAR [${templates[1].category}: ${templates[1].title}] ===\n`;
+    ragPrompt += `${templates[1].content.slice(0, 1200)}\n\n`;
+  }
+
+  ragPrompt += `=== MANDATORY RAG REPORT GENERATION DIRECTIVES ===
+1. **GENERATE A COMPLETE, FULLY STRUCTURED RADIOLOGY REPORT**: You MUST produce a complete, professional, line-by-line radiology report using the exact layout, section headings (Technique, Brain Parenchyma, Orbits, Spine, Impression, etc.), and clinical tone of the matched RAG exemplar template above.
+2. **REPLICATE TEMPLATE LAYOUT & HEADINGS**: Retain the exact examination title, technique section, and anatomical section headings shown in the matched exemplar template.
+3. **INCORPORATE DICTATED CLINICAL FINDINGS**: Listen carefully to the spoken audio dictation / input text. Populate the report with all dictated observations, measurements, anatomical sides (left/right), and specific diagnoses (e.g. dacryocystitis, lacrimal sac swelling, infarct, fracture, mass) into the appropriate section.
+4. **FILL NORMAL ANATOMICAL SECTIONS**: For any anatomical structures present in the matched exemplar template that were not explicitly dictated as abnormal, keep the standard normal report statements from the template so the output is a complete, ready-to-sign radiology report.
+5. **SYNTHESIZE IMPRESSION**: Include a clear, non-verb IMPRESSION section at the end summarized from the findings, formatted as "IMPRESSION:###Point 1###Point 2".
+6. **FORMATTING RULES**:
+   - Prefix every finding line/technique/header string in the "findings" array with \`BOLD::\`.
+   - Format the impression line starting with \`IMPRESSION:###\`.
+7. **OUTPUT FORMAT**: You MUST respond ONLY with a single JSON object with key "findings", containing an array of strings representing the report lines.
+`;
+
+  return ragPrompt;
 }
