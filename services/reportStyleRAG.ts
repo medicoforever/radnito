@@ -51,7 +51,14 @@ export async function loadReportKnowledgebase(): Promise<KnowledgebaseData | nul
 
   isFetchingKnowledgebase = true;
   try {
-    const res = await fetch('./report_knowledgebase.json');
+    const baseUrl = (import.meta as any).env?.BASE_URL || './';
+    const cleanBase = baseUrl.endsWith('/') ? baseUrl : baseUrl + '/';
+    const targetUrl = `${cleanBase}report_knowledgebase.json`;
+
+    let res = await fetch(targetUrl);
+    if (!res.ok) {
+      res = await fetch('./report_knowledgebase.json');
+    }
     if (!res.ok) {
       console.warn('Failed to load report_knowledgebase.json:', res.statusText);
       isFetchingKnowledgebase = false;
@@ -113,30 +120,40 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 /**
- * Embeds text using Gemini Embedding 2 API endpoint (models/gemini-embedding-2)
+ * Embeds text using Gemini Embedding API (supports gemini-embedding-2 and text-embedding-004 on free Gemini API keys)
  */
 async function embedTextWithGemini2(text: string, apiKey: string): Promise<number[] | null> {
   if (!apiKey || !text || text.trim().length === 0) return null;
-  try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2:embedContent?key=${apiKey}`,
-      {
+  
+  const endpoints = [
+    {
+      url: `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${apiKey}`,
+      body: { model: 'models/text-embedding-004', content: { parts: [{ text: text.slice(0, 500) }] } }
+    },
+    {
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2:embedContent?key=${apiKey}`,
+      body: { model: 'models/gemini-embedding-2', content: { parts: [{ text: `task: search result | query: ${text.slice(0, 500)}` }] }, output_dimensionality: 128 }
+    }
+  ];
+
+  for (const ep of endpoints) {
+    try {
+      const response = await fetch(ep.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'models/gemini-embedding-2',
-          content: { parts: [{ text: `task: search result | query: ${text.slice(0, 500)}` }] },
-          output_dimensionality: 128
-        })
+        body: JSON.stringify(ep.body)
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.embedding?.values) {
+          return data.embedding.values;
+        }
       }
-    );
-    if (!response.ok) return null;
-    const data = await response.json();
-    return data.embedding?.values || null;
-  } catch (err) {
-    console.warn('Gemini Embedding 2 call failed:', err);
-    return null;
+    } catch (err) {
+      // try next fallback endpoint
+    }
   }
+  return null;
 }
 
 /**
@@ -195,7 +212,7 @@ export async function getRelevantStyleTemplates(
 
   scored.sort((a, b) => b.score - a.score);
 
-  // Optional vector embedding check with Gemini Embedding 2
+  // Optional vector embedding check with Gemini Embedding 2 / text-embedding-004
   const apiKey = getStoredApiKey();
   if (apiKey) {
     try {
