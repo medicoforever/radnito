@@ -8,6 +8,7 @@ import ApiKeyGuideTab from './components/ApiKeyGuideTab';
 import OnboardingOverlay, { wasOnboardingDismissed, setOnboardingDismissed } from './components/OnboardingOverlay';
 import { hasApiKey } from './services/apiKeyStore';
 import { generateRadnitoPDF } from './services/pdfGenerator';
+import { isRAGStyleMatchingEnabled, setRAGStyleMatchingEnabled } from './services/reportStyleRAG';
 
 const ERROR_CHECK_ENABLED_KEY = 'radiologyErrorCheckEnabled';
 
@@ -20,6 +21,7 @@ const App: React.FC = () => {
   const [showOnboarding, setShowOnboarding] = useState<boolean>(() => !hasApiKey() && !wasOnboardingDismissed());
   // Show a blocking overlay when user tries to go to batch mode without API key
   const [showKeyRequiredAlert, setShowKeyRequiredAlert] = useState<boolean>(false);
+  const [isRAGEnabled, setIsRAGEnabled] = useState<boolean>(() => isRAGStyleMatchingEnabled());
 
   const [theme, setTheme] = useState(() => {
     const storedTheme = localStorage.getItem('theme');
@@ -249,6 +251,31 @@ const App: React.FC = () => {
                 <span
                   className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
                     isErrorCheckEnabled ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-950/40 px-3 py-1 rounded-xl border border-indigo-200 dark:border-indigo-800">
+              <span className="text-xs sm:text-sm font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-1">
+                <span>✨ 1,000+ Reports RAG Style Matching</span>
+              </span>
+              <button
+                onClick={() => {
+                  const next = !isRAGEnabled;
+                  setIsRAGEnabled(next);
+                  setRAGStyleMatchingEnabled(next);
+                }}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900 ${
+                  isRAGEnabled ? 'bg-indigo-600' : 'bg-gray-200 dark:bg-slate-600'
+                }`}
+                role="switch"
+                aria-checked={isRAGEnabled}
+                id="rag-style-toggle"
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    isRAGEnabled ? 'translate-x-5' : 'translate-x-0'
                   }`}
                 />
               </button>
