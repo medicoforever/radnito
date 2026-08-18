@@ -26,6 +26,9 @@ import CustomPromptInput from './ui/CustomPromptInput';
 import { IdentifiedError } from '../types';
 import WarningIcon from './icons/WarningIcon';
 import BrainIcon from './icons/BrainIcon';
+import { SelectedTemplateData } from './ui/TemplateSelectionModal';
+import { mergeFindingsIntoDocx, downloadDocxBlob } from '../services/docxService';
+import { RADIOLOGY_TEMPLATES_CATALOG } from '../services/templateCatalog';
 
 
 type BatchStatus = 'idle' | 'recording' | 'paused' | 'complete' | 'processing' | 'error';
@@ -56,6 +59,7 @@ interface BatchProcessorProps {
     onBack: () => void;
     selectedModel: string;
     isErrorCheckEnabled: boolean;
+    selectedTemplate?: SelectedTemplateData | null;
 }
 
 const BATCH_MODE_STORAGE_KEY = 'radiologyDictationBatchMode';
@@ -101,7 +105,7 @@ const getCleanMimeType = (blob: Blob): string => {
     return mimeType.split(';')[0];
 };
 
-const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, isErrorCheckEnabled }) => {
+export const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, isErrorCheckEnabled, selectedTemplate = null }) => {
     const [batches, setBatches] = useState<Batch[]>([]);
     const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
     const {
@@ -827,7 +831,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
 
                 const mimeType = batch.audioBlobs[0].type;
                 const mergedBlob = new Blob(batch.audioBlobs, { type: mimeType });
-                const findings = await processAudio(mergedBlob, batch.selectedModel, batch.customPrompt, batch.customImages || [], undefined, batch.name);
+                const findings = await processAudio(mergedBlob, batch.selectedModel, batch.customPrompt, batch.customImages || [], undefined, batch.name, selectedTemplate);
                 
                 const chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || [], batch.selectedModel);
                 const aiGreeting = "I have reviewed the audio and transcript for this dictation. How can I help you further?";
@@ -862,7 +866,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
 
             const mimeType = batch.audioBlobs[0].type;
             const mergedBlob = new Blob(batch.audioBlobs, { type: mimeType });
-            const findings = await processAudio(mergedBlob, batch.selectedModel, batch.customPrompt, batch.customImages || [], undefined, batch.name);
+            const findings = await processAudio(mergedBlob, batch.selectedModel, batch.customPrompt, batch.customImages || [], undefined, batch.name, selectedTemplate);
             
             const chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || [], batch.selectedModel);
             const aiGreeting = "I have reviewed the audio and transcript for this dictation. How can I help you further?";
@@ -1256,6 +1260,32 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
         } catch (err) {
             console.error('Failed to generate or download batch HTML:', err);
             showNotification("Failed to create HTML file.");
+        }
+    };
+
+    const handleDownloadDocx = async (batchId?: string) => {
+        const batchesWithFindings = batchId
+            ? batches.filter(b => b.id === batchId && b.findings && b.findings.length > 0)
+            : batches.filter(b => b.findings && b.findings.length > 0);
+
+        if (batchesWithFindings.length === 0) {
+            showNotification("No processed reports available to download as Word DOCX.");
+            return;
+        }
+
+        try {
+            for (const batch of batchesWithFindings) {
+                let templateBase64 = selectedTemplate?.docxBase64 || RADIOLOGY_TEMPLATES_CATALOG[0]?.docxBase64;
+                if (!templateBase64) continue;
+                const title = selectedTemplate?.name || batch.name || 'Radiology_Report';
+                const cleanName = `${(batch.name || title).replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().slice(0, 10)}.docx`;
+                const blob = await mergeFindingsIntoDocx(templateBase64, batch.findings!, title);
+                downloadDocxBlob(blob, cleanName);
+            }
+            showNotification(`Downloaded ${batchesWithFindings.length} Word DOCX report${batchesWithFindings.length > 1 ? 's' : ''}!`);
+        } catch (err) {
+            console.error('Failed to generate batch DOCX:', err);
+            showNotification("Failed to create Word DOCX file.");
         }
     };
 
@@ -2025,11 +2055,22 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                 >
                     {allProcessed ? 'Create All Transcripts' : <><Spinner className="w-5 h-5 inline mr-2" /> Processing...</>}
                 </button>
+                {selectedTemplate && (
+                    <button
+                        onClick={() => handleDownloadDocx()}
+                        disabled={!hasAnyResults}
+                        className="bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed w-full sm:w-auto flex items-center justify-center gap-1.5 shadow"
+                    >
+                        <DownloadIcon className="w-4 h-4" />
+                        Download Merged (.docx)
+                    </button>
+                )}
                 <button
                     onClick={handleDownloadHTML}
                     disabled={!hasAnyResults}
-                    className="bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed w-full sm:w-auto"
+                    className="bg-emerald-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-emerald-700 disabled:bg-emerald-300 disabled:cursor-not-allowed w-full sm:w-auto flex items-center justify-center gap-1.5"
                 >
+                    <DownloadIcon className="w-4 h-4" />
                     Download Report as HTML
                 </button>
                 <button
@@ -2491,6 +2532,16 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                                                                 >
                                                                     <DownloadIcon className="w-5 h-5" />
                                                                     Download Expert Notes
+                                                                </button>
+                                                            )}
+                                                            {selectedTemplate && (
+                                                                <button
+                                                                    onClick={() => handleDownloadDocx(batch.id)}
+                                                                    disabled={!batch.findings || batch.findings.length === 0}
+                                                                    className="bg-blue-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-colors w-full sm:w-auto flex items-center justify-center gap-2 shadow"
+                                                                >
+                                                                    <DownloadIcon className="w-5 h-5" />
+                                                                    Download Merged (.docx)
                                                                 </button>
                                                             )}
                                                             <button

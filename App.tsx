@@ -9,6 +9,9 @@ import OnboardingOverlay, { wasOnboardingDismissed, setOnboardingDismissed } fro
 import { hasApiKey } from './services/apiKeyStore';
 import { generateRadnitoPDF } from './services/pdfGenerator';
 import { isRAGStyleMatchingEnabled, setRAGStyleMatchingEnabled } from './services/reportStyleRAG';
+import TemplateSelectorBanner from './components/ui/TemplateSelectorBanner';
+import TemplateSelectionModal, { SelectedTemplateData } from './components/ui/TemplateSelectionModal';
+import { getUserTemplates, UserTemplate } from './services/templateStorage';
 
 const ERROR_CHECK_ENABLED_KEY = 'radiologyErrorCheckEnabled';
 
@@ -16,12 +19,31 @@ const App: React.FC = () => {
   const [keySaved, setKeySaved] = useState<boolean>(() => hasApiKey());
   // Auto-redirect to guide tab if no API key is set
   const [mode, setMode] = useState<'batch' | 'guide'>(() => hasApiKey() ? 'batch' : 'guide');
-  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.6-flash');
+  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.7-flash');
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState<boolean>(false);
   const [showOnboarding, setShowOnboarding] = useState<boolean>(() => !hasApiKey() && !wasOnboardingDismissed());
   // Show a blocking overlay when user tries to go to batch mode without API key
   const [showKeyRequiredAlert, setShowKeyRequiredAlert] = useState<boolean>(false);
   const [isRAGEnabled, setIsRAGEnabled] = useState<boolean>(() => isRAGStyleMatchingEnabled());
+
+  // Template State
+  const [selectedTemplate, setSelectedTemplate] = useState<SelectedTemplateData | null>(null);
+  const [autoDownloadDocx, setAutoDownloadDocx] = useState<boolean>(true);
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState<boolean>(false);
+  const [customTemplates, setCustomTemplates] = useState<UserTemplate[]>([]);
+
+  useEffect(() => {
+    getUserTemplates().then(tmpls => setCustomTemplates(tmpls)).catch(() => {});
+  }, []);
+
+  const refreshCustomTemplates = async () => {
+    try {
+      const tmpls = await getUserTemplates();
+      setCustomTemplates(tmpls);
+    } catch (e) {
+      console.warn('Failed to fetch user templates:', e);
+    }
+  };
 
   const [theme, setTheme] = useState(() => {
     const storedTheme = localStorage.getItem('theme');
@@ -75,7 +97,7 @@ const App: React.FC = () => {
 
   const getPageDescription = () => {
     if (mode === 'guide') return 'Step-by-step tutorial to get free Gemini API Keys and load-balance quotas.';
-    return 'Transcribe and process multiple radiology audio dictations concurrently in bulk.';
+    return 'Transcribe and process multiple radiology audio dictations concurrently in bulk with 600+ standard templates and DOCX merge.';
   };
 
   return (
@@ -227,7 +249,8 @@ const App: React.FC = () => {
                   onChange={(e) => setSelectedModel(e.target.value)}
                   className="bg-white border border-slate-300 text-slate-900 text-xs sm:text-sm font-medium rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2 dark:bg-slate-700 dark:border-slate-600 dark:placeholder-slate-400 dark:text-white shadow-sm"
                 >
-                  <option value="gemini-3.6-flash">Gemini 3.6 Flash (Recommended)</option>
+                  <option value="gemini-3.7-flash">Gemini 3.7 Flash (Default)</option>
+                  <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
                   <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
                   <option value="gemini-3-flash-preview">Gemini 3 Flash</option>
                   <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
@@ -258,11 +281,22 @@ const App: React.FC = () => {
           </div>
         </header>
 
+        {mode === 'batch' && (
+          <TemplateSelectorBanner
+            selectedTemplate={selectedTemplate}
+            onOpenModal={() => setIsTemplateModalOpen(true)}
+            onClearTemplate={() => setSelectedTemplate(null)}
+            autoDownloadDocx={autoDownloadDocx}
+            onToggleAutoDownloadDocx={() => setAutoDownloadDocx(prev => !prev)}
+          />
+        )}
+
         <main className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-4 sm:p-8 min-h-[350px]">
           {mode === 'batch' ? (
             <BatchProcessor 
               selectedModel={selectedModel} 
               isErrorCheckEnabled={isErrorCheckEnabled}
+              selectedTemplate={selectedTemplate}
               onBack={() => setMode('guide')} 
             />
           ) : (
@@ -279,6 +313,15 @@ const App: React.FC = () => {
           isOpen={isApiKeyModalOpen}
           onClose={() => setIsApiKeyModalOpen(false)}
           onKeyChange={() => setKeySaved(hasApiKey())}
+        />
+
+        <TemplateSelectionModal
+          isOpen={isTemplateModalOpen}
+          onClose={() => setIsTemplateModalOpen(false)}
+          onSelectTemplate={(tmpl) => setSelectedTemplate(tmpl)}
+          selectedTemplateId={selectedTemplate?.id}
+          customTemplates={customTemplates}
+          onRefreshCustomTemplates={refreshCustomTemplates}
         />
       </div>
     </div>

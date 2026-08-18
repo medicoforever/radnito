@@ -86,19 +86,31 @@ const responseSchema = {
 };
 
 export const getValidModelName = (model?: string): string => {
-  if (!model) return 'gemini-2.5-flash';
+  if (!model) return 'gemini-3.7-flash';
   const m = model.toLowerCase().trim();
   
+  if (m.includes('3.7') || m === 'gemini-3.7-flash') {
+    return 'gemini-3.7-flash';
+  }
+  if (m.includes('3.6') || m === 'gemini-3.6-flash') {
+    return 'gemini-3.6-flash';
+  }
+  if (m.includes('3.5-flash-lite') || m === 'gemini-3.5-flash-lite') {
+    return 'gemini-3.5-flash-lite';
+  }
+  if (m.includes('3.5') || m === 'gemini-3.5-flash') {
+    return 'gemini-3.5-flash';
+  }
+  if (m.includes('3-flash') || m === 'gemini-3-flash-preview') {
+    return 'gemini-3-flash-preview';
+  }
+  if (m.includes('3.1-pro') || m === 'gemini-3.1-pro-preview') {
+    return 'gemini-3.1-pro-preview';
+  }
   if (m === 'gemini-2.5-flash' || m === 'gemini-2.5-pro' || m === 'gemini-2.0-flash' || m === 'gemini-2.0-flash-lite') {
     return m;
   }
-  if (m.includes('lite')) {
-    return 'gemini-2.0-flash-lite';
-  }
-  if (m.includes('pro')) {
-    return 'gemini-2.5-pro';
-  }
-  return 'gemini-2.5-flash';
+  return model;
 };
 
 export const processAudio = async (
@@ -107,7 +119,8 @@ export const processAudio = async (
   customPrompt?: string,
   customImages?: Array<{ data: string; mimeType: string }> | null,
   existingFindings?: string[],
-  batchName?: string
+  batchName?: string,
+  selectedTemplate?: { id: string; name: string; category?: string; modality?: string; lines: string[] } | null
 ): Promise<string[]> => {
   const base64Audio = await blobToBase64(audioBlob);
 
@@ -119,6 +132,13 @@ export const processAudio = async (
 
   if (isReprocessing) {
       basePrompt = REPROCESS_GEMINI_PROMPT;
+  } else if (selectedTemplate && selectedTemplate.lines && selectedTemplate.lines.length > 0) {
+      basePrompt = TEMPLATE_GEMINI_PROMPT + `\n\n--- TARGET REPORT TEMPLATE: "${selectedTemplate.name}" ---\n${JSON.stringify({
+          template_title: selectedTemplate.name,
+          category: selectedTemplate.category,
+          modality: selectedTemplate.modality,
+          normal_findings_checklist: selectedTemplate.lines,
+      }, null, 2)}\n--- END TEMPLATE ---`;
   } else if (hasCustomImages || hasCustomText) {
       basePrompt = STRICT_CUSTOM_TEMPLATE_GEMINI_PROMPT;
       if (hasCustomText) {

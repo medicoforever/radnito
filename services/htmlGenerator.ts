@@ -88,7 +88,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const rawFinding = decodeURIComponent(findingEl.dataset.findingRaw || '');
         const isBold = rawFinding.startsWith('BOLD::');
         const cleanFinding = isBold ? rawFinding.substring(6) : rawFinding;
-        const isTitle = cleanFinding.trim() === 'C.T.SCAN OF BRAIN (PLAIN)';
+        const isTitle = (findingEl.dataset.findingIndex === '0' && cleanFinding.length < 90 && !cleanFinding.includes(':')) || (
+            cleanFinding.length < 90 &&
+            (cleanFinding.toUpperCase().includes('SCAN') || cleanFinding.toUpperCase().includes('MRI') || cleanFinding.toUpperCase().includes('C.T.') || cleanFinding.toUpperCase().includes('ULTRASOUND') || cleanFinding.toUpperCase().includes('X-RAY')) &&
+            !cleanFinding.includes(':')
+        );
         const parts = cleanFinding.split('###');
         const isStructured = parts.length > 1;
         const isImpression = isStructured && parts[0].trim().toUpperCase() === 'IMPRESSION:';
@@ -631,7 +635,11 @@ const renderFindingsList = (findings: string[], batchId: string): string => {
             ${findings.map((finding, index) => {
                 const isBold = finding.startsWith('BOLD::');
                 const cleanFinding = isBold ? finding.substring(6) : finding;
-                const isTitle = cleanFinding.trim() === 'C.T.SCAN OF BRAIN (PLAIN)';
+                const isTitle = (index === 0 && cleanFinding.length < 90 && !cleanFinding.includes(':')) || (
+                    cleanFinding.length < 90 &&
+                    (cleanFinding.toUpperCase().includes('SCAN') || cleanFinding.toUpperCase().includes('MRI') || cleanFinding.toUpperCase().includes('C.T.') || cleanFinding.toUpperCase().includes('ULTRASOUND') || cleanFinding.toUpperCase().includes('X-RAY')) &&
+                    !cleanFinding.includes(':')
+                );
 
                 const parts = cleanFinding.split('###');
                 const isStructured = parts.length > 1;
