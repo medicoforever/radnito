@@ -11,14 +11,14 @@ import { generateRadnitoPDF } from './services/pdfGenerator';
 import { isRAGStyleMatchingEnabled, setRAGStyleMatchingEnabled } from './services/reportStyleRAG';
 import TemplateSelectorBanner from './components/ui/TemplateSelectorBanner';
 import TemplateSelectionModal, { SelectedTemplateData } from './components/ui/TemplateSelectionModal';
-import { getUserTemplates, UserTemplate } from './services/templateStorage';
+import { getAllCustomTemplates, CustomTemplate } from './services/templateStorage';
 
 const ERROR_CHECK_ENABLED_KEY = 'radiologyErrorCheckEnabled';
 
 const App: React.FC = () => {
   const [keySaved, setKeySaved] = useState<boolean>(() => hasApiKey());
   // Auto-redirect to guide tab if no API key is set
-  const [mode, setMode] = useState<'batch' | 'guide'>(() => hasApiKey() ? 'batch' : 'guide');
+  const [mode, setMode] = useState<'batch' | 'guide'>(() => (hasApiKey() ? 'batch' : 'guide'));
   const [selectedModel, setSelectedModel] = useState<string>('gemini-3.7-flash');
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState<boolean>(false);
   const [showOnboarding, setShowOnboarding] = useState<boolean>(() => !hasApiKey() && !wasOnboardingDismissed());
@@ -30,15 +30,15 @@ const App: React.FC = () => {
   const [selectedTemplate, setSelectedTemplate] = useState<SelectedTemplateData | null>(null);
   const [autoDownloadDocx, setAutoDownloadDocx] = useState<boolean>(true);
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState<boolean>(false);
-  const [customTemplates, setCustomTemplates] = useState<UserTemplate[]>([]);
+  const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>([]);
 
   useEffect(() => {
-    getUserTemplates().then(tmpls => setCustomTemplates(tmpls)).catch(() => {});
+    getAllCustomTemplates().then((tmpls) => setCustomTemplates(tmpls)).catch(() => {});
   }, []);
 
   const refreshCustomTemplates = async () => {
     try {
-      const tmpls = await getUserTemplates();
+      const tmpls = await getAllCustomTemplates();
       setCustomTemplates(tmpls);
     } catch (e) {
       console.warn('Failed to fetch user templates:', e);
@@ -73,7 +73,7 @@ const App: React.FC = () => {
   }, [isErrorCheckEnabled]);
 
   const toggleTheme = () => {
-    setTheme(prevTheme => (prevTheme === 'light' ? 'dark' : 'light'));
+    setTheme((prevTheme) => (prevTheme === 'light' ? 'dark' : 'light'));
   };
 
   const handleBatchTabClick = () => {
@@ -287,7 +287,7 @@ const App: React.FC = () => {
             onOpenModal={() => setIsTemplateModalOpen(true)}
             onClearTemplate={() => setSelectedTemplate(null)}
             autoDownloadDocx={autoDownloadDocx}
-            onToggleAutoDownloadDocx={() => setAutoDownloadDocx(prev => !prev)}
+            onToggleAutoDownloadDocx={() => setAutoDownloadDocx((prev) => !prev)}
           />
         )}
 
