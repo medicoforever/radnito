@@ -136,3 +136,24 @@ export async function deleteCustomTemplate(id: string): Promise<boolean> {
     return false;
   }
 }
+
+// Aliases for compatibility
+export type UserTemplate = CustomTemplate & { text?: string; docxBase64?: string; modality?: string };
+
+export async function saveUserTemplate(template: any): Promise<any> {
+  const text = template.textContent || template.text || '';
+  return saveCustomTemplate(template.name || 'Untitled Template', text, template.images || []);
+}
+
+export async function getUserTemplates(): Promise<UserTemplate[]> {
+  const list = await getAllCustomTemplates();
+  return list.map(item => ({
+    ...item,
+    text: item.textContent,
+  }));
+}
+
+export async function deleteUserTemplate(id: string): Promise<boolean> {
+  return deleteCustomTemplate(id);
+}
+
