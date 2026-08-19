@@ -879,6 +879,47 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
         }
     };
 
+    const handleReuploadAudioForBatch = async (batchId: string, event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        
+        try {
+            const batch = batches.find(b => b.id === batchId);
+            if (!batch) return;
+
+            setBatches(prev => prev.map(b => b.id === batchId ? {
+                ...b,
+                audioBlobs: [file],
+                status: 'processing',
+                error: undefined,
+            } : b));
+
+            const findings = await processAudio(file, batch.selectedModel, batch.customPrompt, batch.customImages || [], undefined, batch.name, selectedTemplate);
+            const chatSession = await createChat(file, findings, batch.customPrompt, batch.customImages || [], batch.selectedModel);
+            const aiGreeting = "I have reviewed the audio and transcript for this dictation. How can I help you further?";
+            const initialChatHistory = [{ author: 'AI' as const, text: `${findings.join('\n\n')}\n\n${aiGreeting}` }];
+
+            setBatches(prev => prev.map(b => b.id === batchId ? {
+                ...b,
+                status: 'complete',
+                findings,
+                chat: chatSession,
+                chatHistory: initialChatHistory,
+                isChatting: false,
+            } : b));
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred during re-upload processing.';
+            setBatches(prev => prev.map(b => b.id === batchId ? {
+                ...b,
+                status: 'error',
+                error: errorMessage,
+                findings: null,
+            } : b));
+        } finally {
+            event.target.value = '';
+        }
+    };
+
     const handleSendMessage = async (batchId: string, message: string | Blob) => {
         const batchIndex = batches.findIndex(b => b.id === batchId);
         if (batchIndex === -1) return;
@@ -2581,12 +2622,66 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                                                 )}
                                             </>
                                         ) : (
-                                            <div className="text-center p-4">
-                                                <p className="font-semibold text-red-600 dark:text-red-400">An error occurred during processing:</p>
-                                                <p className="text-sm text-red-500 dark:text-red-400 mt-1">{batch.error}</p>
-                                                <button onClick={() => handleReprocessBatch(batch.id)} className="mt-4 bg-red-100 text-red-800 font-bold py-2 px-4 rounded-lg hover:bg-red-200 dark:bg-red-900/50 dark:text-red-300 dark:hover:bg-red-900/80 transition-colors">
-                                                    Try Reprocessing
-                                                </button>
+                                            <div className="text-center p-6 bg-red-50/70 dark:bg-red-950/30 border border-red-200 dark:border-red-800/60 rounded-xl space-y-4">
+                                                <div className="flex items-center justify-center gap-2 text-red-600 dark:text-red-400 font-bold text-base">
+                                                    <WarningIcon className="w-5 h-5" />
+                                                    <span>An Error Occurred During Processing</span>
+                                                </div>
+                                                <p className="text-sm text-red-600 dark:text-red-300 bg-white/70 dark:bg-slate-900/60 p-3 rounded-lg border border-red-200 dark:border-red-900/60 max-w-xl mx-auto font-mono text-xs text-left">
+                                                    {batch.error || 'Failed to process audio with the selected model.'}
+                                                </p>
+
+                                                <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 max-w-xl mx-auto space-y-3">
+                                                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                                                        <label htmlFor={`error-model-select-${batch.id}`} className="font-bold text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                                                            Retry with Model:
+                                                        </label>
+                                                        <select 
+                                                            id={`error-model-select-${batch.id}`}
+                                                            value={batch.selectedModel}
+                                                            onChange={(e) => updateBatchModel(batch.id, e.target.value)}
+                                                            className="bg-slate-50 border border-slate-300 text-slate-900 text-xs font-semibold rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2 w-full sm:w-auto dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                                                        >
+                                                            <option value="gemini-3.7-flash">Gemini 3.7 Flash</option>
+                                                            <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
+                                                            <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+                                                            <option value="gemini-3-flash-preview">Gemini 3 Flash</option>
+                                                            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                                                            <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite</option>
+                                                        </select>
+                                                    </div>
+
+                                                    <div className="flex flex-wrap items-center justify-center gap-2 pt-2 border-t dark:border-slate-700">
+                                                        {batch.audioBlobs && batch.audioBlobs.length > 0 && (
+                                                            <button
+                                                                onClick={() => handleDownload(batch)}
+                                                                className="bg-slate-600 hover:bg-slate-700 text-white font-bold py-2 px-4 rounded-lg text-xs shadow flex items-center gap-1.5 transition-colors"
+                                                                title="Download recorded audio to your device"
+                                                            >
+                                                                <DownloadIcon className="w-4 h-4" />
+                                                                Download Audio File
+                                                            </button>
+                                                        )}
+
+                                                        <label className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg text-xs shadow flex items-center gap-1.5 cursor-pointer transition-colors">
+                                                            <UploadIcon className="w-4 h-4" />
+                                                            <span>Upload & Process New Audio</span>
+                                                            <input
+                                                                type="file"
+                                                                accept="audio/*,.mp3,.wav,.ogg,.m4a,.webm"
+                                                                onChange={(e) => handleReuploadAudioForBatch(batch.id, e)}
+                                                                className="hidden"
+                                                            />
+                                                        </label>
+
+                                                        <button
+                                                            onClick={() => handleReprocessBatch(batch.id)}
+                                                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg text-xs shadow flex items-center gap-1.5 transition-colors"
+                                                        >
+                                                            Retry Current Audio
+                                                        </button>
+                                                    </div>
+                                                </div>
                                             </div>
                                         )}
                                      </div>
