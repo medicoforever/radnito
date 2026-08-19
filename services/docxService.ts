@@ -217,7 +217,7 @@ function buildMergedDocumentXml(findings: string[], sectionPropertiesXml: string
             <w:jc w:val="center"/>
             <w:spacing w:before="120" w:after="160" w:line="276" w:lineRule="auto"/>
             <w:rPr>
-              <w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>
+              <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>
               <w:b/>
               <w:u w:val="single"/>
               <w:sz w:val="24"/>
@@ -226,7 +226,7 @@ function buildMergedDocumentXml(findings: string[], sectionPropertiesXml: string
           </w:pPr>
           <w:r>
             <w:rPr>
-              <w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>
+              <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>
               <w:b/>
               <w:u w:val="single"/>
               <w:sz w:val="24"/>
@@ -246,20 +246,20 @@ function buildMergedDocumentXml(findings: string[], sectionPropertiesXml: string
           <w:pPr>
             <w:spacing w:before="240" w:after="80" w:line="276" w:lineRule="auto"/>
             <w:rPr>
-              <w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>
+              <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>
               <w:b/>
               <w:u w:val="single"/>
-              <w:sz w:val="22"/>
-              <w:szCs w:val="22"/>
+              <w:sz w:val="24"/>
+              <w:szCs w:val="24"/>
             </w:rPr>
           </w:pPr>
           <w:r>
             <w:rPr>
-              <w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>
+              <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>
               <w:b/>
               <w:u w:val="single"/>
-              <w:sz w:val="22"/>
-              <w:szCs w:val="22"/>
+              <w:sz w:val="24"/>
+              <w:szCs w:val="24"/>
             </w:rPr>
             <w:t xml:space="preserve">${escapeXml(headerTitle)}</w:t>
           </w:r>
@@ -274,25 +274,27 @@ function buildMergedDocumentXml(findings: string[], sectionPropertiesXml: string
                 <w:ind w:left="360" w:hanging="240"/>
                 <w:spacing w:before="40" w:after="60" w:line="260" w:lineRule="auto"/>
                 <w:rPr>
-                  <w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>
+                  <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>
                   <w:b/>
-                  <w:sz w:val="22"/>
-                  <w:szCs w:val="22"/>
+                  <w:sz w:val="24"/>
+                  <w:szCs w:val="24"/>
                 </w:rPr>
               </w:pPr>
               <w:r>
                 <w:rPr>
-                  <w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>
+                  <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>
                   <w:b/>
-                  <w:sz w:val="22"/>
+                  <w:sz w:val="24"/>
+                  <w:szCs w:val="24"/>
                 </w:rPr>
                 <w:t xml:space="preserve">• </w:t>
               </w:r>
               <w:r>
                 <w:rPr>
-                  <w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>
+                  <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>
                   <w:b/>
-                  <w:sz w:val="22"/>
+                  <w:sz w:val="24"/>
+                  <w:szCs w:val="24"/>
                 </w:rPr>
                 <w:t xml:space="preserve">${escapeXml(pt)}</w:t>
               </w:r>
@@ -307,18 +309,18 @@ function buildMergedDocumentXml(findings: string[], sectionPropertiesXml: string
           <w:pPr>
             <w:spacing w:before="80" w:after="120" w:line="276" w:lineRule="auto"/>
             <w:rPr>
-              <w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>
+              <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>
               <w:i/>
-              <w:sz w:val="22"/>
-              <w:szCs w:val="22"/>
+              <w:sz w:val="24"/>
+              <w:szCs w:val="24"/>
             </w:rPr>
           </w:pPr>
           <w:r>
             <w:rPr>
-              <w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>
+              <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>
               <w:i/>
-              <w:sz w:val="22"/>
-              <w:szCs w:val="22"/>
+              <w:sz w:val="24"/>
+              <w:szCs w:val="24"/>
             </w:rPr>
             <w:t xml:space="preserve">${escapeXml(cleanProfile)}</w:t>
           </w:r>
@@ -331,18 +333,18 @@ function buildMergedDocumentXml(findings: string[], sectionPropertiesXml: string
             <w:jc w:val="both"/>
             <w:spacing w:before="40" w:after="80" w:line="276" w:lineRule="auto"/>
             <w:rPr>
-              <w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>
+              <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>
               ${isBold ? '<w:b/>' : ''}
-              <w:sz w:val="22"/>
-              <w:szCs w:val="22"/>
+              <w:sz w:val="24"/>
+              <w:szCs w:val="24"/>
             </w:rPr>
           </w:pPr>
           <w:r>
             <w:rPr>
-              <w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>
+              <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>
               ${isBold ? '<w:b/>' : ''}
-              <w:sz w:val="22"/>
-              <w:szCs w:val="22"/>
+              <w:sz w:val="24"/>
+              <w:szCs w:val="24"/>
             </w:rPr>
             <w:t xml:space="preserve">${escapeXml(cleanLine)}</w:t>
           </w:r>
