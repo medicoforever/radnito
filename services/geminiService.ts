@@ -86,9 +86,15 @@ const responseSchema = {
 };
 
 export const getValidModelName = (model?: string): string => {
-  if (!model) return 'gemini-3.7-flash';
+  if (!model) return 'gemini-3.5-flash';
   const m = model.toLowerCase().trim();
   
+  if (m.includes('3.5-flash-lite') || m === 'gemini-3.5-flash-lite') {
+    return 'gemini-3.5-flash-lite';
+  }
+  if (m.includes('3.5') || m === 'gemini-3.5-flash') {
+    return 'gemini-3.5-flash';
+  }
   if (m.includes('3.7') || m === 'gemini-3.7-flash') {
     return 'gemini-3.7-flash';
   }
