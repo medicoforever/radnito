@@ -8,19 +8,31 @@ interface TemplateSelectorBannerProps {
   selectedTemplate: SelectedTemplateData | null;
   onOpenModal: () => void;
   onClearTemplate: () => void;
-  autoDownloadDocx: boolean;
-  onToggleAutoDownloadDocx: () => void;
+  autoDownloadDocx?: boolean;
+  onToggleAutoDownloadDocx?: () => void;
+  onToggleAutoDownload?: (val: boolean | ((prev: boolean) => boolean)) => void;
+  className?: string;
 }
 
 const TemplateSelectorBanner: React.FC<TemplateSelectorBannerProps> = ({
   selectedTemplate,
   onOpenModal,
   onClearTemplate,
-  autoDownloadDocx,
+  autoDownloadDocx = true,
   onToggleAutoDownloadDocx,
+  onToggleAutoDownload,
+  className = '',
 }) => {
+  const handleToggle = () => {
+    if (onToggleAutoDownloadDocx) {
+      onToggleAutoDownloadDocx();
+    } else if (onToggleAutoDownload) {
+      onToggleAutoDownload(prev => !prev);
+    }
+  };
+
   return (
-    <div className="w-full mb-6 p-4 rounded-2xl bg-gradient-to-r from-blue-50/90 via-indigo-50/60 to-purple-50/90 dark:from-slate-800/90 dark:via-indigo-950/30 dark:to-slate-800/90 border border-blue-200/80 dark:border-slate-700/80 shadow-sm backdrop-blur-sm transition-all">
+    <div className={`w-full mb-6 p-4 rounded-2xl bg-gradient-to-r from-blue-50/90 via-indigo-50/60 to-purple-50/90 dark:from-slate-800/90 dark:via-indigo-950/30 dark:to-slate-800/90 border border-blue-200/80 dark:border-slate-700/80 shadow-sm backdrop-blur-sm transition-all ${className}`}>
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <div className="p-2.5 rounded-xl bg-blue-600 text-white shadow-sm flex-shrink-0">
@@ -33,13 +45,13 @@ const TemplateSelectorBanner: React.FC<TemplateSelectorBannerProps> = ({
               </span>
               {selectedTemplate && (
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-700">
-                  {selectedTemplate.modality}
+                  {selectedTemplate.modality || 'General'}
                 </span>
               )}
             </div>
             {selectedTemplate ? (
               <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white truncate mt-0.5">
-                {selectedTemplate.name}
+                {selectedTemplate.name || 'Untitled Template'}
               </h3>
             ) : (
               <p className="text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-400 mt-0.5">
@@ -55,7 +67,7 @@ const TemplateSelectorBanner: React.FC<TemplateSelectorBannerProps> = ({
               <input
                 type="checkbox"
                 checked={autoDownloadDocx}
-                onChange={onToggleAutoDownloadDocx}
+                onChange={handleToggle}
                 className="w-3.5 h-3.5 text-blue-600 rounded focus:ring-blue-500"
               />
               <span>Auto-Download .docx</span>

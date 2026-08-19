@@ -99,20 +99,20 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
   const filteredTemplates = useMemo(() => {
     let list = allTemplatesList;
 
-    if (activeTab === 'Comprehensive MRI') {
-      list = list.filter(t => t.id && (t.id.startsWith('mri_proto_') || t.id.startsWith('user_')));
+    if (activeTab === 'MRI') {
+      list = list.filter(t => t.modality === 'MRI' || t.category?.includes('MRI'));
+    } else if (activeTab === 'CT') {
+      list = list.filter(t => t.modality === 'CT');
+    } else if (activeTab === 'USG') {
+      list = list.filter(t => t.modality === 'USG' && !t.category?.includes('Doppler'));
     } else if (activeTab === 'Vascular Doppler') {
-      list = list.filter(t => t.id && t.id.startsWith('usg_dop_'));
-    } else if (activeTab === 'Standard CT') {
-      list = list.filter(t => t.id && t.id.startsWith('ris_') && t.modality === 'CT');
-    } else if (activeTab === 'Standard MRI') {
-      list = list.filter(t => t.id && t.id.startsWith('ris_') && t.modality === 'MRI');
-    } else if (activeTab === 'Standard USG') {
-      list = list.filter(t => t.id && t.id.startsWith('ris_') && t.modality === 'USG');
-    } else if (activeTab === 'X-Ray & Fluoroscopy') {
-      list = list.filter(t => t.id && t.id.startsWith('ris_') && (t.modality === 'X-Ray' || t.modality === 'Fluoroscopy'));
-    } else if (activeTab === 'Procedures') {
-      list = list.filter(t => t.id && t.id.startsWith('proc_'));
+      list = list.filter(t => t.category?.includes('Doppler') || t.name?.toUpperCase().includes('DOPPLER'));
+    } else if (activeTab === 'X-Ray') {
+      list = list.filter(t => t.modality === 'X-Ray');
+    } else if (activeTab === 'Fluoroscopy') {
+      list = list.filter(t => t.modality === 'Fluoroscopy');
+    } else if (activeTab === 'Mammography') {
+      list = list.filter(t => t.modality === 'Mammography');
     } else if (activeTab === 'Custom') {
       list = list.filter(t => t.isCustom);
     }
@@ -328,13 +328,13 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
           <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs font-semibold">
             {[
               { id: 'ALL', label: `All (${allTemplatesList.length})` },
-              { id: 'Comprehensive MRI', label: 'MRI Protocols' },
-              { id: 'Vascular Doppler', label: 'Vascular Doppler' },
-              { id: 'Standard CT', label: 'CT Formats' },
-              { id: 'Standard MRI', label: 'Standard MRI' },
-              { id: 'Standard USG', label: 'Ultrasound' },
-              { id: 'X-Ray & Fluoroscopy', label: 'X-Ray' },
-              { id: 'Procedures', label: 'Special Procedures' },
+              { id: 'CT', label: `CT Scan (${allTemplatesList.filter(t => t.modality === 'CT').length})` },
+              { id: 'MRI', label: `MRI (${allTemplatesList.filter(t => t.modality === 'MRI' || t.category?.includes('MRI')).length})` },
+              { id: 'USG', label: `Ultrasound (${allTemplatesList.filter(t => t.modality === 'USG' && !t.category?.includes('Doppler')).length})` },
+              { id: 'Vascular Doppler', label: `Vascular Doppler (${allTemplatesList.filter(t => t.category?.includes('Doppler') || t.name?.toUpperCase().includes('DOPPLER')).length})` },
+              { id: 'X-Ray', label: `X-Ray (${allTemplatesList.filter(t => t.modality === 'X-Ray').length})` },
+              { id: 'Fluoroscopy', label: `Fluoroscopy (${allTemplatesList.filter(t => t.modality === 'Fluoroscopy').length})` },
+              { id: 'Mammography', label: `Mammography (${allTemplatesList.filter(t => t.modality === 'Mammography').length})` },
               ...(allTemplatesList.some(t => t.isCustom)
                 ? [{ id: 'Custom', label: `My Custom (${allTemplatesList.filter(t => t.isCustom).length})` }]
                 : []),
