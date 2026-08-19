@@ -9,7 +9,7 @@ import {
   RadiologyDocxTemplate,
 } from '../../services/templateCatalog';
 import { saveUserTemplate, UserTemplate } from '../../services/templateStorage';
-import { extractLinesFromDocxBlob, mergeFindingsIntoDocx } from '../../services/docxService';
+import { extractLinesFromDocxBlob } from '../../services/docxService';
 
 export interface SelectedTemplateData {
   id: string;
@@ -30,6 +30,16 @@ interface TemplateSelectionModalProps {
   customTemplates?: UserTemplate[];
   onRefreshCustomTemplates?: () => void;
 }
+
+const ORGAN_TAGS = [
+  { label: '🧠 Brain & Head', query: 'brain' },
+  { label: '🦴 Spine', query: 'spine' },
+  { label: '⚡ Stroke', query: 'stroke' },
+  { label: '🩸 Doppler', query: 'doppler' },
+  { label: '🦵 MSK & Joints', query: 'knee|shoulder|foot|wrist|hip|elbow' },
+  { label: '🫁 Chest & Neck', query: 'chest|neck|thorax' },
+  { label: '🩺 Abdomen & Pelvis', query: 'abdomen|pelvis|mrcp|liver|kub' },
+];
 
 const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
   isOpen,
@@ -122,13 +132,18 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
     }
 
     const q = searchQuery.toLowerCase().trim();
+    const queryParts = q.split('|').map(s => s.trim()).filter(Boolean);
+
     return list.filter(t => {
-      const nameMatch = t.name && typeof t.name === 'string' && t.name.toLowerCase().includes(q);
-      const codeMatch = t.code && typeof t.code === 'string' && t.code.toLowerCase().includes(q);
-      const catMatch = t.category && typeof t.category === 'string' && t.category.toLowerCase().includes(q);
-      const modMatch = t.modality && typeof t.modality === 'string' && t.modality.toLowerCase().includes(q);
-      const linesMatch = Array.isArray(t.lines) && t.lines.some(line => line && typeof line === 'string' && line.toLowerCase().includes(q));
-      return Boolean(nameMatch || codeMatch || catMatch || modMatch || linesMatch);
+      const nameStr = (t.name || '').toLowerCase();
+      const codeStr = (t.code || '').toLowerCase();
+      const catStr = (t.category || '').toLowerCase();
+      const modStr = (t.modality || '').toLowerCase();
+      const linesStr = Array.isArray(t.lines) ? t.lines.join(' ').toLowerCase() : '';
+
+      const fullHaystack = `${nameStr} ${codeStr} ${catStr} ${modStr} ${linesStr}`;
+
+      return queryParts.some(part => fullHaystack.includes(part));
     });
   }, [allTemplatesList, activeTab, searchQuery]);
 
@@ -247,7 +262,7 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
                 Select Radiology Report Template
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                600+ Standard Formats (MRI Protocols, Vascular Doppler, CT & RIS Normal Formats)
+                {allTemplatesList.length} Verified Clean Report Formats (MRI, CT, Doppler, Ultrasound, X-Ray)
               </p>
             </div>
           </div>
@@ -300,14 +315,14 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
           </div>
         )}
 
-        {/* Search & Tabs */}
+        {/* Search, Modality Tabs & Organ Filters */}
         <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex-shrink-0 space-y-3">
           <div className="relative">
             <input
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Search across all templates (e.g. Brain, CT Brain Plain, Stroke, Spine, Knee, Doppler, Abdomen, Chest)..."
+              placeholder="Search by title, body region, or finding (e.g. Brain, CT Brain Plain, MRCP, Stroke, Spine, Knee, Doppler)..."
               className="w-full p-2.5 pl-10 border border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50 text-slate-900 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none dark:bg-slate-950 dark:text-white text-sm"
               aria-label="Search templates"
               autoFocus
@@ -325,13 +340,33 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
             )}
           </div>
 
+          {/* Quick Body Region / Organ Shortcuts */}
+          <div className="flex gap-1.5 overflow-x-auto pb-0.5 no-scrollbar text-[11px]">
+            <span className="text-slate-400 dark:text-slate-500 font-bold self-center mr-1">Quick:</span>
+            {ORGAN_TAGS.map(tag => (
+              <button
+                key={tag.label}
+                type="button"
+                onClick={() => setSearchQuery(searchQuery === tag.query ? '' : tag.query)}
+                className={`px-2.5 py-1 rounded-lg border transition-all ${
+                  searchQuery === tag.query
+                    ? 'bg-blue-50 dark:bg-blue-950 border-blue-400 text-blue-700 dark:text-blue-300 font-bold'
+                    : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-slate-300'
+                }`}
+              >
+                {tag.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Modality Tabs */}
           <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs font-semibold">
             {[
-              { id: 'ALL', label: `All (${allTemplatesList.length})` },
-              { id: 'CT', label: `CT Scan (${allTemplatesList.filter(t => t.modality === 'CT').length})` },
+              { id: 'ALL', label: `All Modalities (${allTemplatesList.length})` },
               { id: 'MRI', label: `MRI (${allTemplatesList.filter(t => t.modality === 'MRI' || t.category?.includes('MRI')).length})` },
+              { id: 'CT', label: `CT Scan (${allTemplatesList.filter(t => t.modality === 'CT').length})` },
               { id: 'USG', label: `Ultrasound (${allTemplatesList.filter(t => t.modality === 'USG' && !t.category?.includes('Doppler')).length})` },
-              { id: 'Vascular Doppler', label: `Vascular Doppler (${allTemplatesList.filter(t => t.category?.includes('Doppler') || t.name?.toUpperCase().includes('DOPPLER')).length})` },
+              { id: 'Vascular Doppler', label: `Doppler (${allTemplatesList.filter(t => t.category?.includes('Doppler') || t.name?.toUpperCase().includes('DOPPLER')).length})` },
               { id: 'X-Ray', label: `X-Ray (${allTemplatesList.filter(t => t.modality === 'X-Ray').length})` },
               { id: 'Fluoroscopy', label: `Fluoroscopy (${allTemplatesList.filter(t => t.modality === 'Fluoroscopy').length})` },
               { id: 'Mammography', label: `Mammography (${allTemplatesList.filter(t => t.modality === 'Mammography').length})` },
@@ -412,7 +447,7 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
 
                     <div className="flex justify-between items-center mt-2">
                       <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                        {template.lines.length} lines / sections
+                        {template.lines.length} sections / lines
                       </span>
                       <button
                         type="button"
@@ -467,16 +502,15 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
                 </div>
 
                 {/* Preview Body */}
-                <div className="flex-1 overflow-y-auto py-3 space-y-2 pr-1 font-sans text-xs">
+                <div className="flex-1 overflow-y-auto py-3 space-y-1.5 pr-1 font-sans text-xs">
                   {previewTemplate && Array.isArray(previewTemplate.lines) && previewTemplate.lines.length > 0 ? (
                     previewTemplate.lines.map((line, idx) => {
                       if (!line || typeof line !== 'string') return null;
                       const upper = line.toUpperCase();
                       const lower = line.toLowerCase();
                       const isTitle = idx === 0 && (upper.includes('SCAN') || upper.includes('MRI') || upper.includes('C.T.') || upper.includes('ULTRASOUND') || upper.includes('X-RAY') || upper.includes('REPORT'));
-                      const isImpression = upper.startsWith('IMPRESSION:');
-                      const isProfile = lower.startsWith('clinical profile:');
-                      const isTechnique = lower.startsWith('technique:') || lower.startsWith('mri technique:');
+                      const isImpression = upper.startsWith('IMPRESSION');
+                      const isHeading = line.endsWith(':') && line.length <= 40;
 
                       return (
                         <div
@@ -485,11 +519,9 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
                             isTitle
                               ? 'bg-blue-100/60 dark:bg-blue-900/30 font-bold text-center text-blue-950 dark:text-blue-200 border border-blue-200 dark:border-blue-800'
                               : isImpression
-                              ? 'bg-amber-50 dark:bg-amber-950/30 border-l-4 border-amber-500 font-bold text-amber-950 dark:text-amber-200'
-                              : isProfile
-                              ? 'italic text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-900 p-1.5'
-                              : isTechnique
-                              ? 'text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900 p-1.5 font-medium'
+                              ? 'bg-amber-50 dark:bg-amber-950/30 border-l-4 border-amber-500 font-bold text-amber-950 dark:text-amber-200 mt-2'
+                              : isHeading
+                              ? 'font-bold text-slate-900 dark:text-slate-100 bg-slate-100/80 dark:bg-slate-800/60 border-l-2 border-blue-500 px-2.5 py-1'
                               : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border border-slate-100 dark:border-slate-800/80 leading-relaxed'
                           }`}
                         >
@@ -504,7 +536,7 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
 
                 <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-between items-center text-[11px] text-slate-500 flex-shrink-0">
                   <span>📄 Native Word DOCX Format</span>
-                  <span>✨ Automatically merges findings & preserves font styles</span>
+                  <span>✨ Exact Spacing & Typography</span>
                 </div>
               </div>
             ) : (

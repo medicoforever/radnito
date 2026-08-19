@@ -83,7 +83,7 @@ const TemplateSelectorBanner: React.FC<TemplateSelectorBannerProps> = ({
                 : 'bg-white dark:bg-slate-900 hover:bg-blue-50 text-blue-600 dark:text-blue-400 border border-blue-300 dark:border-blue-700'
             }`}
           >
-            <span>{selectedTemplate ? 'Change Template' : '⚡ Choose from 600+ Templates'}</span>
+            <span>{selectedTemplate ? 'Change Template' : '⚡ Choose Report Template'}</span>
             <ChevronDownIcon className="w-3.5 h-3.5" />
           </button>
 
