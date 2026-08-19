@@ -1316,14 +1316,13 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
 
         try {
             for (const batch of batchesWithFindings) {
-                let templateBase64 = selectedTemplate?.docxBase64 || RADIOLOGY_TEMPLATES_CATALOG[0]?.docxBase64;
-                if (!templateBase64) continue;
+                const templateBase64 = selectedTemplate?.docxBase64;
                 const title = selectedTemplate?.name || batch.name || 'Radiology_Report';
                 const cleanName = `${(batch.name || title).replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().slice(0, 10)}.docx`;
                 const blob = await mergeFindingsIntoDocx(templateBase64, batch.findings!, title);
                 downloadDocxBlob(blob, cleanName);
             }
-            showNotification(`Downloaded ${batchesWithFindings.length} Word DOCX report${batchesWithFindings.length > 1 ? 's' : ''}!`);
+            showNotification(`Downloaded ${batchesWithFindings.length} Word DOCX report${batchesWithFindings.length > 1 ? 's' : ''} (Times New Roman 12pt)!`);
         } catch (err) {
             console.error('Failed to generate batch DOCX:', err);
             showNotification("Failed to create Word DOCX file.");
