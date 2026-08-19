@@ -68,7 +68,7 @@ const CustomPromptInput: React.FC<{
     }
   };
 
-  const handleSelectTemplate = (template: ReportTemplate) => {
+  const handleSelectTemplate = (template: { name: string; lines?: string[] }) => {
     onPromptChange(`Use the normal ${template.name} report template. Integrate my dictation and generate a new impression.`);
     setIsModalOpen(false);
   };
@@ -193,7 +193,6 @@ const CustomPromptInput: React.FC<{
       <TemplateSelectionModal 
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        templates={REPORT_TEMPLATES}
         onSelectTemplate={handleSelectTemplate}
       />
       <button

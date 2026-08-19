@@ -100,37 +100,47 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
     let list = allTemplatesList;
 
     if (activeTab === 'Comprehensive MRI') {
-      list = list.filter(t => t.id.startsWith('mri_proto_') || t.id.startsWith('user_'));
+      list = list.filter(t => t.id && (t.id.startsWith('mri_proto_') || t.id.startsWith('user_')));
     } else if (activeTab === 'Vascular Doppler') {
-      list = list.filter(t => t.id.startsWith('usg_dop_'));
+      list = list.filter(t => t.id && t.id.startsWith('usg_dop_'));
     } else if (activeTab === 'Standard CT') {
-      list = list.filter(t => t.id.startsWith('ris_') && t.modality === 'CT');
+      list = list.filter(t => t.id && t.id.startsWith('ris_') && t.modality === 'CT');
     } else if (activeTab === 'Standard MRI') {
-      list = list.filter(t => t.id.startsWith('ris_') && t.modality === 'MRI');
+      list = list.filter(t => t.id && t.id.startsWith('ris_') && t.modality === 'MRI');
     } else if (activeTab === 'Standard USG') {
-      list = list.filter(t => t.id.startsWith('ris_') && t.modality === 'USG');
+      list = list.filter(t => t.id && t.id.startsWith('ris_') && t.modality === 'USG');
     } else if (activeTab === 'X-Ray & Fluoroscopy') {
-      list = list.filter(t => t.id.startsWith('ris_') && (t.modality === 'X-Ray' || t.modality === 'Fluoroscopy'));
+      list = list.filter(t => t.id && t.id.startsWith('ris_') && (t.modality === 'X-Ray' || t.modality === 'Fluoroscopy'));
     } else if (activeTab === 'Procedures') {
-      list = list.filter(t => t.id.startsWith('proc_'));
+      list = list.filter(t => t.id && t.id.startsWith('proc_'));
     } else if (activeTab === 'Custom') {
       list = list.filter(t => t.isCustom);
     }
 
-    if (!searchQuery.trim()) {
+    if (!searchQuery || !searchQuery.trim()) {
       return list;
     }
 
     const q = searchQuery.toLowerCase().trim();
-    return list.filter(
-      t =>
-        t.name.toLowerCase().includes(q) ||
-        (t.code && t.code.toLowerCase().includes(q)) ||
-        t.category.toLowerCase().includes(q) ||
-        t.modality.toLowerCase().includes(q) ||
-        t.lines.some(line => line.toLowerCase().includes(q))
-    );
+    return list.filter(t => {
+      const nameMatch = t.name && typeof t.name === 'string' && t.name.toLowerCase().includes(q);
+      const codeMatch = t.code && typeof t.code === 'string' && t.code.toLowerCase().includes(q);
+      const catMatch = t.category && typeof t.category === 'string' && t.category.toLowerCase().includes(q);
+      const modMatch = t.modality && typeof t.modality === 'string' && t.modality.toLowerCase().includes(q);
+      const linesMatch = Array.isArray(t.lines) && t.lines.some(line => line && typeof line === 'string' && line.toLowerCase().includes(q));
+      return Boolean(nameMatch || codeMatch || catMatch || modMatch || linesMatch);
+    });
   }, [allTemplatesList, activeTab, searchQuery]);
+
+  useEffect(() => {
+    if (filteredTemplates && filteredTemplates.length > 0) {
+      if (!previewTemplate || !filteredTemplates.some(t => t.id === previewTemplate.id)) {
+        setPreviewTemplate(filteredTemplates[0]);
+      }
+    } else {
+      setPreviewTemplate(null);
+    }
+  }, [filteredTemplates]);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -458,12 +468,15 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
 
                 {/* Preview Body */}
                 <div className="flex-1 overflow-y-auto py-3 space-y-2 pr-1 font-sans text-xs">
-                  {previewTemplate.lines && previewTemplate.lines.length > 0 ? (
+                  {previewTemplate && Array.isArray(previewTemplate.lines) && previewTemplate.lines.length > 0 ? (
                     previewTemplate.lines.map((line, idx) => {
-                      const isTitle = idx === 0 && (line.toUpperCase().includes('SCAN') || line.toUpperCase().includes('MRI') || line.toUpperCase().includes('C.T.') || line.toUpperCase().includes('ULTRASOUND'));
-                      const isImpression = line.toUpperCase().startsWith('IMPRESSION:');
-                      const isProfile = line.toLowerCase().startsWith('clinical profile:');
-                      const isTechnique = line.toLowerCase().startsWith('technique:') || line.toLowerCase().startsWith('mri technique:');
+                      if (!line || typeof line !== 'string') return null;
+                      const upper = line.toUpperCase();
+                      const lower = line.toLowerCase();
+                      const isTitle = idx === 0 && (upper.includes('SCAN') || upper.includes('MRI') || upper.includes('C.T.') || upper.includes('ULTRASOUND') || upper.includes('X-RAY') || upper.includes('REPORT'));
+                      const isImpression = upper.startsWith('IMPRESSION:');
+                      const isProfile = lower.startsWith('clinical profile:');
+                      const isTechnique = lower.startsWith('technique:') || lower.startsWith('mri technique:');
 
                       return (
                         <div
