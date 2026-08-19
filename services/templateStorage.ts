@@ -8,9 +8,6 @@ export interface CustomTemplate {
   createdAt: number;
 }
 
-// Type alias for compatibility across all components
-export type UserTemplate = CustomTemplate;
-
 const DB_NAME = 'RadnitoCustomTemplatesDB';
 const STORE_TEMPLATES = 'custom_templates';
 const DB_VERSION = 1;
@@ -122,9 +119,6 @@ export async function getAllCustomTemplates(): Promise<CustomTemplate[]> {
   }
 }
 
-// Function alias for compatibility
-export const getUserTemplates = getAllCustomTemplates;
-
 /**
  * Deletes a saved custom template by ID from browser IndexedDB
  */
@@ -142,10 +136,3 @@ export async function deleteCustomTemplate(id: string): Promise<boolean> {
     return false;
   }
 }
-
-export default {
-  saveCustomTemplate,
-  getAllCustomTemplates,
-  getUserTemplates,
-  deleteCustomTemplate,
-};
