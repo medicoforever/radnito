@@ -1,6 +1,6 @@
 import os
 
-mri_a_dir = r'\\172.16.1.85\Radiology\Dr Prakhyath Gambira\mri formats'
+mri_a_dir = r'[NETWORK_RADIOLOGY_SHARE] Prakhyath Gambira\mri formats'
 
 files = []
 for root, _, filenames in os.walk(mri_a_dir):

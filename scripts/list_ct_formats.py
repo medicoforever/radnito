@@ -1,6 +1,6 @@
 import docx
 
-ct_path = r'\\172.16.1.85\Radiology\Dr Pragadesh\FORMATS\Radiology report formats\CT reporting formats.docx'
+ct_path = r'[NETWORK_RADIOLOGY_SHARE] Pragadesh\FORMATS\Radiology report formats\CT reporting formats.docx'
 doc = docx.Document(ct_path)
 
 reports = []

@@ -1,7 +1,7 @@
 import docx
 import os
 
-ct_prag_path = r'\\172.16.1.85\Radiology\Dr Pragadesh\FORMATS\Radiology report formats\CT reporting formats.docx'
+ct_prag_path = r'[NETWORK_RADIOLOGY_SHARE] Pragadesh\FORMATS\Radiology report formats\CT reporting formats.docx'
 doc = docx.Document(ct_prag_path)
 print(f"Paragraphs in CT reporting formats.docx: {len(doc.paragraphs)}")
 

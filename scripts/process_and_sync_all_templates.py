@@ -109,7 +109,7 @@ def main():
     ct_seen = set()
 
     # 1. Individual CT Formats from IHSR CT (exact original binary copies)
-    ihsr_ct_path = r'\\172.16.1.85\Radiology\IHSR_New imaging Format templates\IHSR Format\CT IHSR'
+    ihsr_ct_path = r'[NETWORK_RADIOLOGY_SHARE] imaging Format templates\IHSR Format\CT IHSR'
     if os.path.exists(ihsr_ct_path):
         for f in sorted(os.listdir(ihsr_ct_path)):
             if f.endswith('.docx') and not f.startswith('~$'):
@@ -134,7 +134,7 @@ def main():
                 print(f"  [CT] {f} -> {title[:60]}")
 
     # 2. Master Centricity RIS-i CT collection from CT reporting formats.docx
-    prag_ct_path = r'\\172.16.1.85\Radiology\Dr Pragadesh\FORMATS\Radiology report formats\CT reporting formats.docx'
+    prag_ct_path = r'[NETWORK_RADIOLOGY_SHARE] Pragadesh\FORMATS\Radiology report formats\CT reporting formats.docx'
     if os.path.exists(prag_ct_path):
         prag_doc = docx.Document(prag_ct_path)
         current_report_lines = []
@@ -204,11 +204,11 @@ def main():
                 print(f"  [CT RIS-i] {current_report_title[:60]}")
 
     # -----------------------------------------------------------------
-    # B. MRI A (\\172.16.1.85\Radiology\Dr Prakhyath Gambira\mri formats)
-    # Exclude: Gopinath formats, *.lnk, *.pptx, fistula.png
+    # B. MRI A ([NETWORK_RADIOLOGY_SHARE] Prakhyath Gambira\mri formats)
+    # Exclude: Archive formats, *.lnk, *.pptx, fistula.png
     # -----------------------------------------------------------------
-    print("\n--- Processing MRI A Formats (\\172.16.1.85\Radiology\Dr Prakhyath Gambira\mri formats) ---")
-    mri_a_root = r'\\172.16.1.85\Radiology\Dr Prakhyath Gambira\mri formats'
+    print("\n--- Processing MRI A Formats ([NETWORK_RADIOLOGY_SHARE] Prakhyath Gambira\mri formats) ---")
+    mri_a_root = r'[NETWORK_RADIOLOGY_SHARE] Prakhyath Gambira\mri formats'
     ignored_items = {'gopinath formats', 'dr prakhyath gambira - shortcut.lnk', 'sathish-march ppt.pptx', 'gopinath formats - shortcut.lnk', 'fistula.png'}
     mri_a_seen = set()
 
@@ -217,7 +217,7 @@ def main():
             continue
         full_path = os.path.join(mri_a_root, item)
         if os.path.isdir(full_path):
-            continue  # Ignore subfolders like Gopinath formats
+            continue  # Ignore subfolders like Archive formats
         
         if item.endswith('.docx'):
             try:
@@ -330,7 +330,7 @@ Workspace Location: C:\\Users\\doctor\\Desktop\\Radiology_Templates_DOCX
 
 Total Active Templates: {len(all_catalog_templates)}
   📁 01_CT     ({ct_count} templates: GE Centricity RIS-i standard CT formats)
-  📁 02_MRI_A  ({mri_a_count} templates: Dr Prakhyath Gambira MRI formats)
+  📁 02_MRI_A  ({mri_a_count} templates: MRI_Source MRI formats)
   📁 03_MRI_B  ({mri_b_count} templates: MRI B master formats)
 
 HOW TO USE:
