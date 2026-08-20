@@ -18,16 +18,9 @@ export const RADIOLOGY_TEMPLATES_CATALOG: RadiologyDocxTemplate[] = rawTemplates
 
 export const TEMPLATE_MODALITIES = [
   'ALL',
-  'MRI',
   'CT',
-  'USG',
-  'X-Ray',
-  'Comprehensive MRI',
-  'Vascular Doppler',
-  'Hospital Standard RIS',
-  'Fluoroscopy',
-  'Mammography',
-  'Procedures',
+  'MRI A',
+  'MRI B',
 ] as const;
 
 export type TemplateModalityFilter = typeof TEMPLATE_MODALITIES[number];
@@ -42,22 +35,14 @@ export function filterTemplates(
   let list = RADIOLOGY_TEMPLATES_CATALOG;
 
   if (modalityFilter && modalityFilter !== 'ALL') {
-    if (modalityFilter === 'Comprehensive MRI') {
-      list = list.filter(t => t.id.startsWith('mri_proto_') || t.id.startsWith('user_'));
-    } else if (modalityFilter === 'Vascular Doppler') {
-      list = list.filter(t => t.id.startsWith('usg_dop_'));
-    } else if (modalityFilter === 'Hospital Standard RIS') {
-      list = list.filter(t => t.id.startsWith('ris_'));
-    } else if (modalityFilter === 'Procedures') {
-      list = list.filter(t => t.id.startsWith('proc_'));
-    } else {
-      list = list.filter(t => t.modality.toLowerCase() === modalityFilter.toLowerCase());
-    }
+    list = list.filter(t => t.category.toLowerCase() === modalityFilter.toLowerCase() || t.modality.toLowerCase() === modalityFilter.toLowerCase());
   }
 
   if (!query || !query.trim()) {
     return list;
   }
+
+
 
   const q = query.toLowerCase().trim();
   return list.filter(t => 
