@@ -831,7 +831,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
     };
 
     const handleProcessAll = async () => {
-        const batchesToProcess = batches.filter(b => (b.status === 'complete' || b.status === 'paused') && b.audioBlobs.length > 0 && !b.findings);
+        const batchesToProcess = batches.filter(b => (b.status === 'complete' || b.status === 'paused' || b.status === 'error' || b.status === 'idle') && b.audioBlobs.length > 0 && !b.findings);
         if (batchesToProcess.length === 0) return;
 
         isBatchCancelledRef.current = false;
@@ -2078,9 +2078,42 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                                             )}
                                         </div>
                                     )}
-                                    {batch.status === 'error' && !batch.findings && <span className="text-red-600 dark:text-red-400 font-semibold text-sm">Error</span>}
+                                    {batch.status === 'error' && !batch.findings && (
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="text-red-600 dark:text-red-400 font-semibold text-xs bg-red-50 dark:bg-red-950/50 px-2.5 py-1 rounded border border-red-200 dark:border-red-800">
+                                                Error
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleReprocessBatch(batch.id)}
+                                                disabled={isBusy}
+                                                className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow transition-all transform hover:scale-105"
+                                                title="Retry processing this batch"
+                                            >
+                                                ↻ Retry
+                                            </button>
+                                            {batch.audioBlobs.length > 0 && (
+                                                <button onClick={() => handleDownload(batch)} className="flex items-center gap-1.5 bg-slate-500 hover:bg-slate-600 text-white text-xs px-2.5 py-1.5 rounded-lg transition-colors" aria-label={`Download audio for ${batch.name}`}>
+                                                    <DownloadIcon className="w-3.5 h-3.5" /> Audio
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
                                     {batch.findings && <span className="text-blue-600 dark:text-blue-400 font-semibold text-sm">Processed</span>}
                                 </div>
+
+                                {batch.error && batch.status === 'error' && (
+                                    <div className="w-full text-xs text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/40 p-2.5 rounded-lg border border-red-200 dark:border-red-800 flex items-center justify-between">
+                                        <span>⚠ {batch.error}</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleReprocessBatch(batch.id)}
+                                            className="ml-2 font-bold underline text-amber-700 dark:text-amber-300 hover:opacity-80 flex items-center gap-1 whitespace-nowrap"
+                                        >
+                                            ↻ Retry Now
+                                        </button>
+                                    </div>
+                                )}
 
                                 <div className="w-full pt-3 border-t border-slate-200 dark:border-slate-700">
                                     <div className="flex items-center justify-between mb-1.5">
@@ -2130,6 +2163,19 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                         aria-label="Cancel batch processing"
                     >
                         Cancel Processing
+                    </button>
+                )}
+
+                {batches.some(b => b.status === 'error' && !b.findings && b.audioBlobs.length > 0) && (
+                    <button
+                        onClick={() => {
+                            const failedBatches = batches.filter(b => b.status === 'error' && !b.findings && b.audioBlobs.length > 0);
+                            failedBatches.forEach(b => handleReprocessBatch(b.id));
+                        }}
+                        disabled={isBusy}
+                        className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-lg transition-all shadow flex items-center justify-center gap-1.5 w-full sm:w-auto"
+                    >
+                        ↻ Retry All Failed ({batches.filter(b => b.status === 'error' && !b.findings && b.audioBlobs.length > 0).length})
                     </button>
                 )}
 

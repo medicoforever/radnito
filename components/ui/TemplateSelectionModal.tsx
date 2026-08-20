@@ -32,13 +32,12 @@ interface TemplateSelectionModalProps {
 }
 
 const ORGAN_TAGS = [
-  { label: '🧠 Brain & Head', query: 'brain' },
-  { label: '🦴 Spine', query: 'spine' },
+  { label: '🧠 Brain & Head', query: 'brain|head|orbit|temporal' },
+  { label: '🦴 Spine', query: 'spine|cervical|dorsal|lumbar' },
   { label: '⚡ Stroke', query: 'stroke' },
-  { label: '🩸 Doppler', query: 'doppler' },
-  { label: '🦵 MSK & Joints', query: 'knee|shoulder|foot|wrist|hip|elbow' },
-  { label: '🫁 Chest & Neck', query: 'chest|neck|thorax' },
-  { label: '🩺 Abdomen & Pelvis', query: 'abdomen|pelvis|mrcp|liver|kub' },
+  { label: '🫁 Chest & Thorax', query: 'thorax|lung|chest|coronary|aorta|cardiac' },
+  { label: '🩺 Abdomen & Pelvis', query: 'abdomen|pelvis|mrcp|kub|liver' },
+  { label: '🦵 MSK & Extremities', query: 'knee|shoulder|foot|wrist|hip|forearm|leg|brachial' },
 ];
 
 const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
@@ -109,20 +108,12 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
   const filteredTemplates = useMemo(() => {
     let list = allTemplatesList;
 
-    if (activeTab === 'MRI') {
-      list = list.filter(t => t.modality === 'MRI' || t.category?.includes('MRI'));
-    } else if (activeTab === 'CT') {
-      list = list.filter(t => t.modality === 'CT');
-    } else if (activeTab === 'USG') {
-      list = list.filter(t => t.modality === 'USG' && !t.category?.includes('Doppler'));
-    } else if (activeTab === 'Vascular Doppler') {
-      list = list.filter(t => t.category?.includes('Doppler') || t.name?.toUpperCase().includes('DOPPLER'));
-    } else if (activeTab === 'X-Ray') {
-      list = list.filter(t => t.modality === 'X-Ray');
-    } else if (activeTab === 'Fluoroscopy') {
-      list = list.filter(t => t.modality === 'Fluoroscopy');
-    } else if (activeTab === 'Mammography') {
-      list = list.filter(t => t.modality === 'Mammography');
+    if (activeTab === 'CT') {
+      list = list.filter(t => t.category === 'CT' || t.modality === 'CT');
+    } else if (activeTab === 'MRI A') {
+      list = list.filter(t => t.category === 'MRI A' || t.modality === 'MRI A');
+    } else if (activeTab === 'MRI B') {
+      list = list.filter(t => t.category === 'MRI B' || t.modality === 'MRI B');
     } else if (activeTab === 'Custom') {
       list = list.filter(t => t.isCustom);
     }
@@ -262,7 +253,7 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
                 Select Radiology Report Template
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {allTemplatesList.length} Verified Clean Report Formats (MRI, CT, Doppler, Ultrasound, X-Ray)
+                {allTemplatesList.length} Verified Standard Report Formats (CT, MRI A, MRI B)
               </p>
             </div>
           </div>
@@ -322,7 +313,7 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Search by title, body region, or finding (e.g. Brain, CT Brain Plain, MRCP, Stroke, Spine, Knee, Doppler)..."
+              placeholder="Search by title or anatomy (e.g. Brain, CT Brain Plain, MRCP, Stroke, Cervical Spine, Knee)..."
               className="w-full p-2.5 pl-10 border border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50 text-slate-900 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none dark:bg-slate-950 dark:text-white text-sm"
               aria-label="Search templates"
               autoFocus
@@ -362,14 +353,10 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
           {/* Modality Tabs */}
           <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs font-semibold">
             {[
-              { id: 'ALL', label: `All Modalities (${allTemplatesList.length})` },
-              { id: 'MRI', label: `MRI (${allTemplatesList.filter(t => t.modality === 'MRI' || t.category?.includes('MRI')).length})` },
-              { id: 'CT', label: `CT Scan (${allTemplatesList.filter(t => t.modality === 'CT').length})` },
-              { id: 'USG', label: `Ultrasound (${allTemplatesList.filter(t => t.modality === 'USG' && !t.category?.includes('Doppler')).length})` },
-              { id: 'Vascular Doppler', label: `Doppler (${allTemplatesList.filter(t => t.category?.includes('Doppler') || t.name?.toUpperCase().includes('DOPPLER')).length})` },
-              { id: 'X-Ray', label: `X-Ray (${allTemplatesList.filter(t => t.modality === 'X-Ray').length})` },
-              { id: 'Fluoroscopy', label: `Fluoroscopy (${allTemplatesList.filter(t => t.modality === 'Fluoroscopy').length})` },
-              { id: 'Mammography', label: `Mammography (${allTemplatesList.filter(t => t.modality === 'Mammography').length})` },
+              { id: 'ALL', label: `All (${allTemplatesList.length})` },
+              { id: 'CT', label: `CT (${allTemplatesList.filter(t => t.category === 'CT' || t.modality === 'CT').length})` },
+              { id: 'MRI A', label: `MRI A (${allTemplatesList.filter(t => t.category === 'MRI A' || t.modality === 'MRI A').length})` },
+              { id: 'MRI B', label: `MRI B (${allTemplatesList.filter(t => t.category === 'MRI B' || t.modality === 'MRI B').length})` },
               ...(allTemplatesList.some(t => t.isCustom)
                 ? [{ id: 'Custom', label: `My Custom (${allTemplatesList.filter(t => t.isCustom).length})` }]
                 : []),

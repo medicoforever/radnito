@@ -34,7 +34,6 @@ async function decompressDeflate(compressedBytes: Uint8Array): Promise<Uint8Arra
     const buffer = await response.arrayBuffer();
     return new Uint8Array(buffer);
   }
-  // Fallback if DecompressionStream is not available
   throw new Error('DecompressionStream is not supported in this environment.');
 }
 
@@ -51,7 +50,7 @@ async function compressDeflate(rawBytes: Uint8Array): Promise<Uint8Array> {
     const buffer = await response.arrayBuffer();
     return new Uint8Array(buffer);
   }
-  return rawBytes; // Fallback to uncompressed if CompressionStream unavailable
+  return rawBytes;
 }
 
 interface ZipEntry {
@@ -75,7 +74,7 @@ async function parseZip(buffer: ArrayBuffer): Promise<Map<string, ZipEntry>> {
   while (offset + 30 <= len) {
     const sig = view.getUint32(offset, true);
     if (sig !== 0x04034b50) {
-      break; // End of local headers or Central Directory start
+      break;
     }
 
     const method = view.getUint16(offset + 8, true);
@@ -139,12 +138,12 @@ async function createZip(entries: Map<string, Uint8Array>): Promise<Blob> {
     const crc32 = calculateCRC32(uncompressedData);
 
     let compressedData = uncompressedData;
-    let method = 0; // STORED default for simplicity & speed, or DEFLATED
+    let method = 0;
 
     try {
       if (uncompressedData.length > 300) {
         compressedData = await compressDeflate(uncompressedData);
-        method = 8; // DEFLATED
+        method = 8;
       }
     } catch {
       compressedData = uncompressedData;
@@ -153,17 +152,17 @@ async function createZip(entries: Map<string, Uint8Array>): Promise<Blob> {
 
     const localHeader = new Uint8Array(30 + nameBytes.length);
     const lv = new DataView(localHeader.buffer);
-    lv.setUint32(0, 0x04034b50, true); // Local Header Signature
-    lv.setUint16(4, 20, true); // Version needed (2.0)
-    lv.setUint16(6, 0, true); // General Purpose Bit Flag
-    lv.setUint16(8, method, true); // Compression Method
-    lv.setUint16(10, 0, true); // Last Mod Time
-    lv.setUint16(12, 0, true); // Last Mod Date
-    lv.setUint32(14, crc32, true); // CRC32
-    lv.setUint32(18, compressedData.length, true); // Compressed Size
-    lv.setUint32(22, uncompressedData.length, true); // Uncompressed Size
-    lv.setUint16(26, nameBytes.length, true); // File Name Length
-    lv.setUint16(28, 0, true); // Extra Field Length
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);
+    lv.setUint16(6, 0, true);
+    lv.setUint16(8, method, true);
+    lv.setUint16(10, 0, true);
+    lv.setUint16(12, 0, true);
+    lv.setUint32(14, crc32, true);
+    lv.setUint32(18, compressedData.length, true);
+    lv.setUint32(22, uncompressedData.length, true);
+    lv.setUint16(26, nameBytes.length, true);
+    lv.setUint16(28, 0, true);
     localHeader.set(nameBytes, 30);
 
     fileRecords.push({
@@ -187,40 +186,39 @@ async function createZip(entries: Map<string, Uint8Array>): Promise<Blob> {
   for (const rec of fileRecords) {
     const cdHeader = new Uint8Array(46 + rec.nameBytes.length);
     const cv = new DataView(cdHeader.buffer);
-    cv.setUint32(0, 0x02014b50, true); // Central Directory Signature
-    cv.setUint16(4, 20, true); // Version Made By
-    cv.setUint16(6, 20, true); // Version Needed
-    cv.setUint16(8, 0, true); // General Purpose Bit Flag
-    cv.setUint16(10, rec.method, true); // Compression Method
-    cv.setUint16(12, 0, true); // Last Mod Time
-    cv.setUint16(14, 0, true); // Last Mod Date
-    cv.setUint32(16, rec.crc32, true); // CRC32
-    cv.setUint32(20, rec.compressedSize, true); // Compressed Size
-    cv.setUint32(24, rec.uncompressedSize, true); // Uncompressed Size
-    cv.setUint16(28, rec.nameBytes.length, true); // File Name Length
-    cv.setUint16(30, 0, true); // Extra Field Length
-    cv.setUint16(32, 0, true); // File Comment Length
-    cv.setUint16(34, 0, true); // Disk Number Start
-    cv.setUint16(36, 0, true); // Internal File Attributes
-    cv.setUint32(38, 0, true); // External File Attributes
-    cv.setUint32(42, rec.offset, true); // Relative Offset of Local Header
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0, true);
+    cv.setUint16(10, rec.method, true);
+    cv.setUint16(12, 0, true);
+    cv.setUint16(14, 0, true);
+    cv.setUint32(16, rec.crc32, true);
+    cv.setUint32(20, rec.compressedSize, true);
+    cv.setUint32(24, rec.uncompressedSize, true);
+    cv.setUint16(28, rec.nameBytes.length, true);
+    cv.setUint16(30, 0, true);
+    cv.setUint16(32, 0, true);
+    cv.setUint32(34, 0, true);
+    cv.setUint16(36, 0, true);
+    cv.setUint32(38, 0, true);
+    cv.setUint32(42, rec.offset, true);
     cdHeader.set(rec.nameBytes, 46);
 
     parts.push(cdHeader);
     centralDirSize += cdHeader.length;
   }
 
-  // End of Central Directory Record
   const eocd = new Uint8Array(22);
   const ev = new DataView(eocd.buffer);
-  ev.setUint32(0, 0x06054b50, true); // EOCD Signature
-  ev.setUint16(4, 0, true); // Number of this disk
-  ev.setUint16(6, 0, true); // Disk where Central Dir starts
-  ev.setUint16(8, fileRecords.length, true); // Number of Central Dir records on this disk
-  ev.setUint16(10, fileRecords.length, true); // Total Number of Central Dir records
-  ev.setUint32(12, centralDirSize, true); // Size of Central Directory
-  ev.setUint32(16, centralDirStart, true); // Offset of Central Directory
-  ev.setUint16(20, 0, true); // Comment length
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(4, 0, true);
+  ev.setUint16(6, 0, true);
+  ev.setUint16(8, fileRecords.length, true);
+  ev.setUint16(10, fileRecords.length, true);
+  ev.setUint32(12, centralDirSize, true);
+  ev.setUint32(16, centralDirStart, true);
+  ev.setUint16(20, 0, true);
   parts.push(eocd);
 
   return new Blob(parts, {
@@ -229,7 +227,7 @@ async function createZip(entries: Map<string, Uint8Array>): Promise<Blob> {
 }
 
 function escapeXml(unsafe: string): string {
-  return unsafe
+  return (unsafe || '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -237,9 +235,6 @@ function escapeXml(unsafe: string): string {
     .replace(/'/g, '&apos;');
 }
 
-/**
- * Clean base64 string to Uint8Array
- */
 function base64ToUint8Array(base64: string): Uint8Array {
   const binaryString = atob(base64.trim());
   const len = binaryString.length;
@@ -251,133 +246,210 @@ function base64ToUint8Array(base64: string): Uint8Array {
 }
 
 /**
- * Intelligent finding parser for Structured & Impression Findings
+ * Parses raw finding text lines into rich Word XML runs, resolving BOLD:: tags, underlines, and italics.
  */
-function parseFindingLines(findings: string[]): Array<{
-  type: 'title' | 'profile' | 'technique' | 'finding_normal' | 'finding_bold' | 'impression_header' | 'impression_point' | 'generic';
+interface RunChunk {
   text: string;
-}> {
-  const items: Array<{
-    type: 'title' | 'profile' | 'technique' | 'finding_normal' | 'finding_bold' | 'impression_header' | 'impression_point' | 'generic';
-    text: string;
-  }> = [];
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+}
 
-  for (let idx = 0; idx < findings.length; idx++) {
-    const raw = findings[idx]?.trim();
-    if (!raw) continue;
+function parseTextToRuns(text: string, baseStyle: { bold?: boolean; italic?: boolean; underline?: boolean } = {}): RunChunk[] {
+  if (!text) return [];
 
-    if (raw.startsWith('IMPRESSION:')) {
-      const parts = raw.split('###').map(p => p.trim()).filter(Boolean);
-      items.push({ type: 'impression_header', text: 'IMPRESSION:' });
-      for (let i = 1; i < parts.length; i++) {
-        items.push({ type: 'impression_point', text: parts[i] });
-      }
-    } else if (raw.startsWith('*Clinical Profile:') || (raw.startsWith('*') && raw.endsWith('*'))) {
-      const text = raw.replace(/^\*+|\*+$/g, '').trim();
-      items.push({ type: 'profile', text });
-    } else if (raw.startsWith('BOLD::')) {
-      const text = raw.replace(/^BOLD::\s*/, '').trim();
-      items.push({ type: 'finding_bold', text });
-    } else if (idx === 0 && (raw.toUpperCase().includes('SCAN') || raw.toUpperCase().includes('MRI') || raw.toUpperCase().includes('C.T.') || raw.toUpperCase().includes('USG') || raw.toUpperCase().includes('VIEW') || raw.toUpperCase().includes('REPORT'))) {
-      items.push({ type: 'title', text: raw });
-    } else if (raw.toLowerCase().startsWith('technique:') || raw.toLowerCase().startsWith('mri technique:')) {
-      items.push({ type: 'technique', text: raw });
-    } else {
-      items.push({ type: 'finding_normal', text: raw });
+  const chunks: RunChunk[] = [];
+  // Tokenize by BOLD:: markers
+  const tokens = text.split(/(BOLD::)/g);
+  let isCurrentlyBold = baseStyle.bold || false;
+
+  for (const token of tokens) {
+    if (token === 'BOLD::') {
+      isCurrentlyBold = true;
+    } else if (token.length > 0) {
+      chunks.push({
+        text: token,
+        bold: isCurrentlyBold,
+        italic: baseStyle.italic || false,
+        underline: baseStyle.underline || false,
+      });
+      isCurrentlyBold = baseStyle.bold || false;
     }
   }
 
-  return items;
+  return chunks;
+}
+
+const UNDERLINE_HEADING_PATTERNS = [
+  /^(C\d\s*-\s*C\d\s*:?)/i,
+  /^(D\d+\s*-\s*D\d+\s*:?)/i,
+  /^(L\d\s*-\s*L\d\s*:?)/i,
+  /^(L5\s*-\s*S1\s*:?)/i,
+  /^(Screening of [^:]+:?)/i,
+  /^(Bones and joints:?)/i,
+  /^(Meniscus:?)/i,
+  /^(Ligaments?:?)/i,
+  /^(Soft tissues?:?)/i,
+  /^(Right hip joint:?)/i,
+  /^(Left hip joint:?)/i,
+  /^(Rest of bony pelvis:?)/i,
+  /^(MRA:?)/i,
+  /^(MRV:?)/i,
+  /^(ASL:?)/i,
+  /^(ORBITS:?)/i,
+  /^(PNS:?)/i,
+  /^(BRAIN:?)/i,
+  /^(TOF MRA:?)/i,
+  /^(Left brachial plexus:?)/i,
+  /^(Right brachial plexus:?)/i,
+];
+
+function isUnderlineHeading(text: string): boolean {
+  const clean = text.trim();
+  return UNDERLINE_HEADING_PATTERNS.some(pat => pat.test(clean));
+}
+
+function renderRunsXml(runs: RunChunk[]): string {
+  return runs.map(r => {
+    let rPr = '<w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="24"/><w:szCs w:val="24"/>';
+    if (r.bold) rPr += '<w:b/><w:bCs/>';
+    if (r.italic) rPr += '<w:i/><w:iCs/>';
+    if (r.underline) rPr += '<w:u w:val="single"/>';
+    rPr += '</w:rPr>';
+    return `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(r.text)}</w:t></w:r>`;
+  }).join('');
+}
+
+function buildParagraphXml(runs: RunChunk[], options: {
+  align?: 'center' | 'left';
+  spacingBefore?: number;
+  spacingAfter?: number;
+  indentLeft?: number;
+  hanging?: number;
+} = {}): string {
+  const alignXml = options.align === 'center' ? '<w:jc w:val="center"/>' : '';
+  const indXml = (options.indentLeft || options.hanging)
+    ? `<w:ind w:left="${options.indentLeft || 0}" w:hanging="${options.hanging || 0}"/>`
+    : '';
+  const spacingXml = `<w:spacing w:before="${options.spacingBefore || 0}" w:after="${options.spacingAfter !== undefined ? options.spacingAfter : 120}" w:line="240" w:lineRule="auto"/>`;
+  const content = renderRunsXml(runs);
+
+  return `<w:p><w:pPr>${alignXml}${indXml}${spacingXml}</w:pPr>${content}</w:p>`;
+}
+
+function buildEmptyParagraphXml(): string {
+  return `<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:p>`;
 }
 
 /**
- * Extract font, size, line spacing, and margin properties from the template document XML
+ * Intelligent finding parser for Structured & Impression Findings
  */
-function extractTemplateStyling(docXml: string): {
-  fontFamily: string;
-  fontSize: string;
-  lineSpacing: string;
-  spaceAfter: string;
-  sectPrXml: string;
-} {
-  let fontFamily = 'Times New Roman';
-  let fontSize = '24'; // 12pt standard (24 half-points)
-  let lineSpacing = '240';
-  let spaceAfter = '120';
-  let sectPrXml = '';
+function parseFindingsToParagraphs(findings: string[]): string[] {
+  const pXmls: string[] = [];
 
-  // 1. Extract Font Family from first w:rFonts in document
-  const fontMatch = docXml.match(/<w:rFonts[^>]*w:ascii="([^"]+)"/i) || docXml.match(/<w:rFonts[^>]*w:hAnsi="([^"]+)"/i);
-  if (fontMatch && fontMatch[1]) {
-    fontFamily = 'Times New Roman';
+  for (let idx = 0; idx < findings.length; idx++) {
+    const raw = findings[idx]?.trim();
+    if (!raw) {
+      pXmls.push(buildEmptyParagraphXml());
+      continue;
+    }
+
+    // 1. IMPRESSION Section
+    if (raw.startsWith('IMPRESSION:')) {
+      const parts = raw.split('###').map(p => p.trim()).filter(Boolean);
+      // IMPRESSION: header (Bold & Underlined)
+      pXmls.push(
+        buildParagraphXml(
+          [{ text: 'IMPRESSION:', bold: true, italic: false, underline: true }],
+          { spacingBefore: 180, spacingAfter: 80 }
+        )
+      );
+      // Impression bullet points (Bold)
+      for (let i = 1; i < parts.length; i++) {
+        const pt = parts[i].replace(/^BOLD::\s*/i, '').trim();
+        pXmls.push(
+          buildParagraphXml(
+            [{ text: `•  ${pt}`, bold: true, italic: false, underline: false }],
+            { spacingBefore: 0, spacingAfter: 80, indentLeft: 360, hanging: 240 }
+          )
+        );
+      }
+      pXmls.push(buildEmptyParagraphXml());
+      continue;
+    }
+
+    // 2. Clinical Profile (Italic)
+    if (raw.startsWith('*Clinical Profile:') || (raw.startsWith('*') && raw.endsWith('*') && raw.toLowerCase().includes('profile'))) {
+      const text = raw.replace(/^\*+|\*+$/g, '').trim();
+      const profileContent = text.replace(/^Clinical Profile:\s*/i, '').trim();
+      pXmls.push(
+        buildParagraphXml(
+          [{ text: `Clinical Profile: ${profileContent}`, bold: false, italic: true, underline: false }],
+          { spacingBefore: 0, spacingAfter: 120 }
+        )
+      );
+      pXmls.push(buildEmptyParagraphXml());
+      continue;
+    }
+
+    // 3. Technique (Italic)
+    if (raw.toLowerCase().startsWith('technique:') || raw.toLowerCase().startsWith('mri technique:')) {
+      pXmls.push(
+        buildParagraphXml(
+          [{ text: raw, bold: false, italic: true, underline: false }],
+          { spacingBefore: 0, spacingAfter: 120 }
+        )
+      );
+      pXmls.push(buildEmptyParagraphXml());
+      continue;
+    }
+
+    // 4. Document Title (Bold, Underlined, Centered)
+    if (idx === 0 && (raw.toUpperCase().includes('SCAN') || raw.toUpperCase().includes('MRI') || raw.toUpperCase().includes('C.T.') || raw.toUpperCase().includes('REPORT'))) {
+      pXmls.push(
+        buildParagraphXml(
+          [{ text: raw, bold: true, italic: false, underline: true }],
+          { align: 'center', spacingBefore: 100, spacingAfter: 200 }
+        )
+      );
+      pXmls.push(buildEmptyParagraphXml());
+      continue;
+    }
+
+    // 5. Underlined Level / Section Headings (e.g. C2-C3:, L1-L2:, Screening of dorsal spine:)
+    if (isUnderlineHeading(raw)) {
+      pXmls.push(
+        buildParagraphXml(
+          parseTextToRuns(raw, { bold: false, italic: false, underline: true }),
+          { spacingBefore: 60, spacingAfter: 80 }
+        )
+      );
+      pXmls.push(buildEmptyParagraphXml());
+      continue;
+    }
+
+    // 6. Regular findings (with full BOLD:: inline run extraction)
+    const runs = parseTextToRuns(raw);
+    pXmls.push(buildParagraphXml(runs, { spacingBefore: 0, spacingAfter: 100 }));
+    pXmls.push(buildEmptyParagraphXml());
   }
 
-  // 2. Extract Font Size
-  const sizeMatch = docXml.match(/<w:sz[^>]*w:val="([^"]+)"/i);
-  if (sizeMatch && sizeMatch[1]) {
-    fontSize = '24';
-  }
-
-  // 3. Extract Section Properties (Page Margins, Header/Footer references)
-  const sectPrMatch = docXml.match(/<w:sectPr[\s\S]*?<\/w:sectPr>/i);
-  if (sectPrMatch) {
-    sectPrXml = sectPrMatch[0];
-  }
-
-  return { fontFamily: 'Times New Roman', fontSize: '24', lineSpacing, spaceAfter, sectPrXml };
+  return pXmls;
 }
 
 /**
- * Generate a clean, 100% valid Word OpenXML (.docx) from structured findings in Times New Roman 12pt
+ * Generate a clean, 100% valid Word OpenXML (.docx) in Times New Roman 12pt
  */
 export async function generateDocxFromFindings(
   findings: string[],
   fallbackTitle?: string
 ): Promise<Blob> {
-  const parsedFindings = parseFindingLines(findings);
-  const bodyXmlParts: string[] = [];
-
-  const rPrDefault = `<w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>`;
-  const rPrBold = `<w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/><w:b/><w:bCs/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>`;
-  const rPrItalic = `<w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/><w:i/><w:iCs/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>`;
-  const rPrTitle = `<w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/><w:b/><w:bCs/><w:u w:val="single"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>`;
-
-  for (const item of parsedFindings) {
-    if (item.type === 'title') {
-      bodyXmlParts.push(
-        `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="120" w:after="200" w:line="240" w:lineRule="auto"/></w:pPr><w:r>${rPrTitle}<w:t xml:space="preserve">${escapeXml(item.text)}</w:t></w:r></w:p>`
-      );
-    } else if (item.type === 'profile') {
-      bodyXmlParts.push(
-        `<w:p><w:pPr><w:spacing w:after="120" w:line="240" w:lineRule="auto"/></w:pPr><w:r>${rPrItalic}<w:t xml:space="preserve">Clinical Profile: ${escapeXml(item.text.replace(/^Clinical Profile:\s*/i, ''))}</w:t></w:r></w:p>`
-      );
-    } else if (item.type === 'technique') {
-      bodyXmlParts.push(
-        `<w:p><w:pPr><w:spacing w:after="120" w:line="240" w:lineRule="auto"/></w:pPr><w:r>${rPrDefault}<w:t xml:space="preserve">${escapeXml(item.text)}</w:t></w:r></w:p>`
-      );
-    } else if (item.type === 'finding_bold') {
-      bodyXmlParts.push(
-        `<w:p><w:pPr><w:spacing w:after="100" w:line="240" w:lineRule="auto"/></w:pPr><w:r>${rPrBold}<w:t xml:space="preserve">${escapeXml(item.text)}</w:t></w:r></w:p>`
-      );
-    } else if (item.type === 'impression_header') {
-      bodyXmlParts.push(
-        `<w:p><w:pPr><w:spacing w:before="160" w:after="80" w:line="240" w:lineRule="auto"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/><w:b/><w:bCs/><w:u w:val="single"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t xml:space="preserve">IMPRESSION:</w:t></w:r></w:p>`
-      );
-    } else if (item.type === 'impression_point') {
-      bodyXmlParts.push(
-        `<w:p><w:pPr><w:ind w:left="360" w:hanging="240"/><w:spacing w:after="80" w:line="240" w:lineRule="auto"/></w:pPr><w:r>${rPrBold}<w:t xml:space="preserve">&#x2022;  ${escapeXml(item.text)}</w:t></w:r></w:p>`
-      );
-    } else {
-      bodyXmlParts.push(
-        `<w:p><w:pPr><w:spacing w:after="100" w:line="240" w:lineRule="auto"/></w:pPr><w:r>${rPrDefault}<w:t xml:space="preserve">${escapeXml(item.text)}</w:t></w:r></w:p>`
-      );
-    }
-  }
+  const bodyXmlParts = parseFindingsToParagraphs(findings);
 
   const defaultSectPr = `
     <w:sectPr>
-      <w:pgSz w:w="12240" w:h="15840"/>
-      <w:pgMar w:top="1080" w:right="1080" w:bottom="1080" w:left="1080" w:header="720" w:footer="720" w:gutter="0"/>
+      <w:pgSz w:w="11906" w:h="16838"/>
+      <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/>
       <w:cols w:space="720"/>
       <w:docGrid w:linePitch="360"/>
     </w:sectPr>
@@ -464,7 +536,7 @@ export async function mergeFindingsIntoDocx(
     const templateBytes = base64ToUint8Array(templateDocxBase64);
     const zipEntries = await parseZip(templateBytes.buffer);
 
-    let docXmlEntry = zipEntries.get('word/document.xml');
+    const docXmlEntry = zipEntries.get('word/document.xml');
     if (!docXmlEntry) {
       return generateDocxFromFindings(findings, fallbackTitle);
     }
@@ -472,65 +544,27 @@ export async function mergeFindingsIntoDocx(
     const decoder = new TextDecoder('utf-8');
     const originalDocXml = decoder.decode(docXmlEntry.data);
 
-    // Extract font family, size, line spacing, margins
-    const style = extractTemplateStyling(originalDocXml);
+    // Extract sectPr (margins & layout) from original document
+    const sectPrMatch = originalDocXml.match(/<w:sectPr[\s\S]*?<\/w:sectPr>/i);
+    const sectPrXml = sectPrMatch ? sectPrMatch[0] : `
+      <w:sectPr>
+        <w:pgSz w:w="11906" w:h="16838"/>
+        <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/>
+        <w:cols w:space="720"/>
+        <w:docGrid w:linePitch="360"/>
+      </w:sectPr>
+    `;
 
-    const parsedFindings = parseFindingLines(findings);
-
-    // Build the new <w:body> XML with exact template fonts, sizes, paragraph styles, and boldings
-    const bodyXmlParts: string[] = [];
-
-    const rPrDefault = `<w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>`;
-    const rPrBold = `<w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/><w:b/><w:bCs/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>`;
-    const rPrItalic = `<w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/><w:i/><w:iCs/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>`;
-    const rPrTitle = `<w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/><w:b/><w:bCs/><w:u w:val="single"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>`;
-
-    for (const item of parsedFindings) {
-      if (item.type === 'title') {
-        bodyXmlParts.push(
-          `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="120" w:after="200" w:line="240" w:lineRule="auto"/></w:pPr><w:r>${rPrTitle}<w:t xml:space="preserve">${escapeXml(item.text)}</w:t></w:r></w:p>`
-        );
-      } else if (item.type === 'profile') {
-        bodyXmlParts.push(
-          `<w:p><w:pPr><w:spacing w:after="120" w:line="240" w:lineRule="auto"/></w:pPr><w:r>${rPrItalic}<w:t xml:space="preserve">Clinical Profile: ${escapeXml(item.text.replace(/^Clinical Profile:\s*/i, ''))}</w:t></w:r></w:p>`
-        );
-      } else if (item.type === 'technique') {
-        bodyXmlParts.push(
-          `<w:p><w:pPr><w:spacing w:after="120" w:line="240" w:lineRule="auto"/></w:pPr><w:r>${rPrDefault}<w:t xml:space="preserve">${escapeXml(item.text)}</w:t></w:r></w:p>`
-        );
-      } else if (item.type === 'finding_bold') {
-        bodyXmlParts.push(
-          `<w:p><w:pPr><w:spacing w:after="100" w:line="240" w:lineRule="auto"/></w:pPr><w:r>${rPrBold}<w:t xml:space="preserve">${escapeXml(item.text)}</w:t></w:r></w:p>`
-        );
-      } else if (item.type === 'impression_header') {
-        bodyXmlParts.push(
-          `<w:p><w:pPr><w:spacing w:before="160" w:after="80" w:line="240" w:lineRule="auto"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/><w:b/><w:bCs/><w:u w:val="single"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t xml:space="preserve">IMPRESSION:</w:t></w:r></w:p>`
-        );
-      } else if (item.type === 'impression_point') {
-        bodyXmlParts.push(
-          `<w:p><w:pPr><w:ind w:left="360" w:hanging="240"/><w:spacing w:after="80" w:line="240" w:lineRule="auto"/></w:pPr><w:r>${rPrBold}<w:t xml:space="preserve">&#x2022;  ${escapeXml(item.text)}</w:t></w:r></w:p>`
-        );
-      } else {
-        bodyXmlParts.push(
-          `<w:p><w:pPr><w:spacing w:after="100" w:line="240" w:lineRule="auto"/></w:pPr><w:r>${rPrDefault}<w:t xml:space="preserve">${escapeXml(item.text)}</w:t></w:r></w:p>`
-        );
-      }
-    }
-
-    // Preserve Section Properties at the bottom of the body
-    if (style.sectPrXml) {
-      bodyXmlParts.push(style.sectPrXml);
-    }
+    const bodyXmlParts = parseFindingsToParagraphs(findings);
+    bodyXmlParts.push(sectPrXml);
 
     const newBodyContent = bodyXmlParts.join('');
 
-    // Replace <w:body>...</w:body> in the original document.xml
     const modifiedDocXml = originalDocXml.replace(
       /<w:body>[\s\S]*?<\/w:body>/i,
       `<w:body>${newBodyContent}</w:body>`
     );
 
-    // Prepare updated zip entries map
     const updatedEntries = new Map<string, Uint8Array>();
     for (const [name, entry] of zipEntries) {
       if (name === 'word/document.xml') {
@@ -541,7 +575,6 @@ export async function mergeFindingsIntoDocx(
       }
     }
 
-    // Re-package into valid Word DOCX file
     return createZip(updatedEntries);
   } catch (e) {
     console.warn('mergeFindingsIntoDocx fallback to generateDocxFromFindings:', e);
@@ -572,7 +605,6 @@ export async function extractLinesFromDocxBlob(file: File | Blob): Promise<{ lin
   const arrayBuffer = await file.arrayBuffer();
   const bytes = new Uint8Array(arrayBuffer);
   
-  // Convert ArrayBuffer to base64
   let binary = '';
   const len = bytes.byteLength;
   for (let i = 0; i < len; i++) {
@@ -635,4 +667,3 @@ export default {
   extractLinesFromDocxBlob,
   extractTextFromDocxBlob,
 };
-
