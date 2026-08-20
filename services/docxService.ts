@@ -259,7 +259,6 @@ function parseTextToRuns(text: string, baseStyle: { bold?: boolean; italic?: boo
   if (!text) return [];
 
   const chunks: RunChunk[] = [];
-  // Tokenize by BOLD:: markers
   const tokens = text.split(/(BOLD::)/g);
   let isCurrentlyBold = baseStyle.bold || false;
 
@@ -280,34 +279,7 @@ function parseTextToRuns(text: string, baseStyle: { bold?: boolean; italic?: boo
   return chunks;
 }
 
-const UNDERLINE_HEADING_PATTERNS = [
-  /^(C\d\s*-\s*C\d\s*:?)/i,
-  /^(D\d+\s*-\s*D\d+\s*:?)/i,
-  /^(L\d\s*-\s*L\d\s*:?)/i,
-  /^(L5\s*-\s*S1\s*:?)/i,
-  /^(Screening of [^:]+:?)/i,
-  /^(Bones and joints:?)/i,
-  /^(Meniscus:?)/i,
-  /^(Ligaments?:?)/i,
-  /^(Soft tissues?:?)/i,
-  /^(Right hip joint:?)/i,
-  /^(Left hip joint:?)/i,
-  /^(Rest of bony pelvis:?)/i,
-  /^(MRA:?)/i,
-  /^(MRV:?)/i,
-  /^(ASL:?)/i,
-  /^(ORBITS:?)/i,
-  /^(PNS:?)/i,
-  /^(BRAIN:?)/i,
-  /^(TOF MRA:?)/i,
-  /^(Left brachial plexus:?)/i,
-  /^(Right brachial plexus:?)/i,
-];
-
-function isUnderlineHeading(text: string): boolean {
-  const clean = text.trim();
-  return UNDERLINE_HEADING_PATTERNS.some(pat => pat.test(clean));
-}
+const LEVEL_OR_SECTION_HEADING_REGEX = /^((?:C\d\s*-\s*C\d|D\d+\s*-\s*D\d+|L\d\s*-\s*L\d|L5\s*-\s*S1|Screening of (?:dorsal|lumbar|cervical|lumbosacral)\s+spine|Bones and joints|Meniscus|Ligaments?|Soft tissues?|Rest of soft tissues?|Rotator cuff|Labroligamentous structures|AC joint|Liver|Gall bladder|Biliary radicals|Right hip joint|Left hip joint|Rest of bony pelvis|MRA|MRV|ASL|ORBITS|PNS|BRAIN|TOF MRA|Left brachial plexus|Right brachial plexus)\s*:?)(.*)$/i;
 
 function renderRunsXml(runs: RunChunk[]): string {
   return runs.map(r => {
@@ -364,7 +336,7 @@ function parseFindingsToParagraphs(findings: string[]): string[] {
           { spacingBefore: 180, spacingAfter: 80 }
         )
       );
-      // Impression bullet points (Bold)
+      // Impression bullet points (Bold, NOT underlined)
       for (let i = 1; i < parts.length; i++) {
         const pt = parts[i].replace(/^BOLD::\s*/i, '').trim();
         pXmls.push(
@@ -378,13 +350,18 @@ function parseFindingsToParagraphs(findings: string[]): string[] {
       continue;
     }
 
-    // 2. Clinical Profile (Italic)
-    if (raw.startsWith('*Clinical Profile:') || (raw.startsWith('*') && raw.endsWith('*') && raw.toLowerCase().includes('profile'))) {
+    // 2. Clinical Profile (Italic, NEVER Underlined)
+    if (
+      raw.startsWith('*Clinical Profile:') ||
+      (raw.startsWith('*') && raw.endsWith('*') && raw.toLowerCase().includes('profile')) ||
+      raw.toLowerCase().startsWith('clinical profile:')
+    ) {
       const text = raw.replace(/^\*+|\*+$/g, '').trim();
       const profileContent = text.replace(/^Clinical Profile:\s*/i, '').trim();
+      const pText = profileContent ? `Clinical Profile: ${profileContent}` : 'Clinical Profile:';
       pXmls.push(
         buildParagraphXml(
-          [{ text: `Clinical Profile: ${profileContent}`, bold: false, italic: true, underline: false }],
+          [{ text: pText, bold: false, italic: true, underline: false }],
           { spacingBefore: 0, spacingAfter: 120 }
         )
       );
@@ -392,8 +369,14 @@ function parseFindingsToParagraphs(findings: string[]): string[] {
       continue;
     }
 
-    // 3. Technique (Italic)
-    if (raw.toLowerCase().startsWith('technique:') || raw.toLowerCase().startsWith('mri technique:')) {
+    // 3. Technique & Technique Screening (Italic, NEVER Underlined)
+    const isTechnique =
+      raw.toLowerCase().startsWith('technique:') ||
+      raw.toLowerCase().startsWith('mri technique:') ||
+      raw.toLowerCase().startsWith('ct technique:') ||
+      /^(screening\s+of\s+(the\s+)?(rest\s+of\s+(the\s+)?spine|whole\s+spine|upper\s+abdomen))/i.test(raw);
+
+    if (isTechnique) {
       pXmls.push(
         buildParagraphXml(
           [{ text: raw, bold: false, italic: true, underline: false }],
@@ -405,7 +388,7 @@ function parseFindingsToParagraphs(findings: string[]): string[] {
     }
 
     // 4. Document Title (Bold, Underlined, Centered)
-    if (idx === 0 && (raw.toUpperCase().includes('SCAN') || raw.toUpperCase().includes('MRI') || raw.toUpperCase().includes('C.T.') || raw.toUpperCase().includes('REPORT'))) {
+    if (idx === 0 && (raw.toUpperCase().includes('SCAN') || raw.toUpperCase().includes('MRI') || raw.toUpperCase().includes('C.T.') || raw.toUpperCase().includes('REPORT') || raw.toUpperCase().includes('STUDY'))) {
       pXmls.push(
         buildParagraphXml(
           [{ text: raw, bold: true, italic: false, underline: true }],
@@ -416,14 +399,28 @@ function parseFindingsToParagraphs(findings: string[]): string[] {
       continue;
     }
 
-    // 5. Underlined Level / Section Headings (e.g. C2-C3:, L1-L2:, Screening of dorsal spine:)
-    if (isUnderlineHeading(raw)) {
-      pXmls.push(
-        buildParagraphXml(
-          parseTextToRuns(raw, { bold: false, italic: false, underline: true }),
-          { spacingBefore: 60, spacingAfter: 80 }
-        )
-      );
+    // 5. Underlined Level / Section Headings (Underline prefix only, finding text is regular/bold)
+    const headingMatch = raw.match(LEVEL_OR_SECTION_HEADING_REGEX);
+    if (headingMatch) {
+      const prefix = headingMatch[1].trim();
+      const rest = headingMatch[2].trim();
+      const isPrefixBold = prefix.toUpperCase() === prefix && prefix.length > 3;
+
+      const runs: RunChunk[] = [
+        {
+          text: prefix + (rest ? ' ' : ''),
+          bold: isPrefixBold,
+          italic: false,
+          underline: true,
+        },
+      ];
+
+      if (rest) {
+        const restRuns = parseTextToRuns(rest, { bold: false, italic: false, underline: false });
+        runs.push(...restRuns);
+      }
+
+      pXmls.push(buildParagraphXml(runs, { spacingBefore: 60, spacingAfter: 80 }));
       pXmls.push(buildEmptyParagraphXml());
       continue;
     }
