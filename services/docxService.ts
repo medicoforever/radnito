@@ -620,8 +620,19 @@ export async function extractLinesFromDocxBlob(file: File | Blob): Promise<{ lin
   }
 }
 
+export async function extractTextFromDocxBlob(blob: Blob): Promise<string> {
+  try {
+    const { lines } = await extractLinesFromDocxBlob(blob);
+    return lines.join('\n');
+  } catch {
+    return '';
+  }
+}
+
 export default {
   mergeFindingsIntoDocx,
   downloadDocxBlob,
   extractLinesFromDocxBlob,
+  extractTextFromDocxBlob,
 };
+

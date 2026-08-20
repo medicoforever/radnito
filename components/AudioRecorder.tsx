@@ -165,10 +165,10 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ status, setStatus, onReco
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-blue-50/95 dark:bg-slate-800/95 rounded-2xl border-2 border-dashed border-blue-500 p-6 pointer-events-none shadow-xl">
           <UploadIcon className="w-16 h-16 text-blue-600 dark:text-blue-400 animate-bounce mb-3" />
           <p className="text-xl font-bold text-blue-700 dark:text-blue-300">
-            Drop Audio File Here
+            Drop Any File Here
           </p>
           <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">
-            Release to upload and begin transcription
+            Release to upload and analyze (Audio, PDF, Image, DOCX, Video, Document)
           </p>
         </div>
       )}
@@ -215,7 +215,7 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ status, setStatus, onReco
         ref={fileInputRef} 
         onChange={handleFileSelect} 
         className="hidden" 
-        accept="audio/*"
+        accept="audio/*,video/*,image/*,application/pdf,.docx,.doc,.txt,.csv,.json,.md,.rtf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,*/*"
         aria-hidden="true"
       />
       <div className="relative mb-6">
@@ -229,10 +229,10 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ status, setStatus, onReco
         </div>
       </div>
       <h2 className="text-2xl font-semibold text-slate-700 dark:text-slate-200 mb-2">
-        {isRecording ? recordingText : 'Ready to Record'}
+        {isRecording ? recordingText : 'Ready to Record or Upload'}
       </h2>
       <p className="text-slate-500 dark:text-slate-400 mb-6 text-center">
-        {isRecording ? recordingSubtext : 'Click below to start recording, or drag & drop / select an audio file to upload.'}
+        {isRecording ? recordingSubtext : 'Click below to record, or upload any file (Audio, PDF, Image, DOCX, Video, Text) as context.'}
       </p>
       
       {error && <p className="text-red-500 mb-4">{error}</p>}
@@ -262,16 +262,17 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ status, setStatus, onReco
               <button
                 onClick={triggerFileSelect}
                 className="flex items-center justify-center gap-2 bg-slate-200 text-slate-700 font-bold py-3 px-8 rounded-full hover:bg-slate-300 focus:outline-none focus:ring-4 focus:ring-slate-300 transition-all duration-300 ease-in-out transform hover:scale-105 shadow-lg dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600 dark:focus:ring-slate-500"
-                aria-label="Upload Audio File"
+                aria-label="Upload File"
               >
                 <UploadIcon className="w-6 h-6"/>
-                Upload Audio
+                Upload File
               </button>
           </div>
-          <p className="text-xs text-slate-400 dark:text-slate-500 flex items-center gap-1 mt-1">
-            <UploadIcon className="w-3.5 h-3.5 inline" /> You can also drag & drop an audio file anywhere in this box
+          <p className="text-xs text-slate-400 dark:text-slate-500 flex items-center gap-1 mt-1 text-center">
+            <UploadIcon className="w-3.5 h-3.5 inline shrink-0" /> Drop any file (Audio, PDF, Image, DOCX, Video, Text) anywhere in this box
           </p>
         </div>
+
       ) : (
         <div className="flex items-center gap-4">
           <button

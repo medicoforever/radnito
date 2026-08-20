@@ -518,11 +518,29 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
         setExpertNotesForBatches(prev => { const next = {...prev}; delete next[id]; return next; });
     };
 
+    const isBatchCancelledRef = useRef<boolean>(false);
+
+    const handleCancelBatchProcessing = () => {
+        isBatchCancelledRef.current = true;
+        setBatches(prev => prev.map(b => b.status === 'processing' ? { ...b, status: b.findings ? 'complete' : 'idle' } : b));
+        setIsBusy(false);
+    };
+
+    const handleDeleteFindingForBatch = (batchId: string, index: number) => {
+        const batch = batches.find(b => b.id === batchId);
+        if (batch && batch.findings) {
+            setUndoStates(prev => ({ ...prev, [batchId]: [...batch.findings!] }));
+            const updated = batch.findings.filter((_, i) => i !== index);
+            setBatches(prev => prev.map(b => b.id === batchId ? { ...b, findings: updated } : b));
+        }
+    };
+
     const clearAllBatches = () => {
         if (isMainRecording) {
             alert("Please stop recording before clearing all batches.");
             return;
         }
+
         if (batches.length > 0) {
             setBatches([]);
             // Clean up all associated state
@@ -816,10 +834,11 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
         const batchesToProcess = batches.filter(b => (b.status === 'complete' || b.status === 'paused') && b.audioBlobs.length > 0 && !b.findings);
         if (batchesToProcess.length === 0) return;
 
+        isBatchCancelledRef.current = false;
         setBatches(prev => prev.map(b => batchesToProcess.find(p => p.id === b.id) ? {...b, status: 'processing'} : b));
 
         await Promise.all(batchesToProcess.map(async (batch) => {
-            if (batch.audioBlobs.length === 0) return;
+            if (batch.audioBlobs.length === 0 || isBatchCancelledRef.current) return;
             try {
                 let matchedRAG: { title: string; category: string } | undefined;
                 if (isRAGStyleMatchingEnabled()) {
@@ -832,13 +851,16 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                 const mimeType = batch.audioBlobs[0].type;
                 const mergedBlob = new Blob(batch.audioBlobs, { type: mimeType });
                 const findings = await processAudio(mergedBlob, batch.selectedModel, batch.customPrompt, batch.customImages || [], undefined, batch.name, selectedTemplate);
+                if (isBatchCancelledRef.current) return;
                 
                 const chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || [], batch.selectedModel);
+                if (isBatchCancelledRef.current) return;
                 const aiGreeting = "I have reviewed the audio and transcript for this dictation. How can I help you further?";
                 const initialChatHistory = [{ author: 'AI' as const, text: `${findings.join('\n\n')}\n\n${aiGreeting}` }];
 
                 setBatches(prev => prev.map(b => b.id === batch.id ? { ...b, status: 'complete', findings, chat: chatSession, chatHistory: initialChatHistory, isChatting: false, matchedRAGTemplate: matchedRAG } : b));
             } catch (err) {
+                if (isBatchCancelledRef.current) return;
                  const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
                 setBatches(prev => prev.map(b => b.id === batch.id ? { ...b, status: 'error', error: errorMessage } : b));
             }
@@ -853,6 +875,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
             setUndoStates(prev => ({ ...prev, [batchId]: [...batch.findings!] }));
         }
 
+        isBatchCancelledRef.current = false;
         setBatches(prev => prev.map(b => b.id === batchId ? {...b, status: 'processing', error: undefined } : b));
 
         try {
@@ -867,17 +890,21 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
             const mimeType = batch.audioBlobs[0].type;
             const mergedBlob = new Blob(batch.audioBlobs, { type: mimeType });
             const findings = await processAudio(mergedBlob, batch.selectedModel, batch.customPrompt, batch.customImages || [], undefined, batch.name, selectedTemplate);
+            if (isBatchCancelledRef.current) return;
             
             const chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || [], batch.selectedModel);
+            if (isBatchCancelledRef.current) return;
             const aiGreeting = "I have reviewed the audio and transcript for this dictation. How can I help you further?";
             const initialChatHistory = [{ author: 'AI' as const, text: `${findings.join('\n\n')}\n\n${aiGreeting}` }];
 
             setBatches(prev => prev.map(b => b.id === batchId ? { ...b, status: 'complete', findings, chat: chatSession, chatHistory: initialChatHistory, isChatting: false, matchedRAGTemplate: matchedRAG } : b));
         } catch (err) {
+            if (isBatchCancelledRef.current) return;
             const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
             setBatches(prev => prev.map(b => b.id === batchId ? { ...b, status: 'error', error: errorMessage, findings: null } : b));
         }
     };
+
 
     const handleReuploadAudioForBatch = async (batchId: string, event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -1836,7 +1863,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                 {copyNotification.text}
                 </div>
             )}
-            <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept="audio/*" multiple aria-hidden="true" />
+            <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept="audio/*,video/*,image/*,application/pdf,.docx,.doc,.txt,.csv,.json,.md,.rtf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,*/*" multiple aria-hidden="true" />
 
             {/* General Drag and Drop Dropzone for New Batches */}
             <div 
@@ -1855,10 +1882,10 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                     <div className="flex flex-col items-center justify-center py-2">
                         <UploadIcon className="w-12 h-12 text-blue-600 dark:text-blue-400 animate-bounce mb-2" />
                         <p className="text-lg font-bold text-blue-700 dark:text-blue-300">
-                            Drop Audio Files Here
+                            Drop Files Here
                         </p>
                         <p className="text-xs text-slate-600 dark:text-slate-300">
-                            Automatically creates a new batch for each audio file
+                            Automatically creates a new batch for each file (Audio, PDF, Image, DOCX, Video, Text)
                         </p>
                     </div>
                 ) : (
@@ -1868,15 +1895,16 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                         </div>
                         <div>
                             <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                                Drag & drop audio file(s) here to add as new batches
+                                Drag & drop any files (Audio, PDF, Images, DOCX, Video, Text) to add as batches
                             </p>
                             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                                Or <span className="text-blue-600 dark:text-blue-400 underline font-medium">browse audio files</span> from your device
+                                Or <span className="text-blue-600 dark:text-blue-400 underline font-medium">browse files</span> from your device
                             </p>
                         </div>
                     </div>
                 )}
             </div>
+
             
             {unsavedSession && (
                 <div className="w-full my-4 p-4 rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-900/30 dark:border-amber-700/60 shadow-sm flex flex-col gap-3">
@@ -2095,6 +2123,16 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                 >
                     {allProcessed ? 'Create All Transcripts' : <><Spinner className="w-5 h-5 inline mr-2" /> Processing...</>}
                 </button>
+                {!allProcessed && (
+                    <button
+                        onClick={handleCancelBatchProcessing}
+                        className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition-colors w-full sm:w-auto"
+                        aria-label="Cancel batch processing"
+                    >
+                        Cancel Processing
+                    </button>
+                )}
+
                 {selectedTemplate && (
                     <button
                         onClick={() => handleDownloadDocx()}
@@ -2431,16 +2469,20 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                                                                                     </div>
                                                                                     </div>
                                                                                 )}
-                                                                                <button onClick={() => handleStartEdit(batch.id, index)} aria-label="Edit text" className="p-1 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
+                                                                                <button onClick={() => handleStartEdit(batch.id, index)} aria-label="Edit text" title="Edit finding" className="p-1 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
                                                                                     <PencilIcon />
                                                                                 </button>
-                                                                                <button onClick={() => handleStartDictation(batch.id, index)} aria-label="Append dictation" className="p-1 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
+                                                                                <button onClick={() => handleStartDictation(batch.id, index)} aria-label="Append dictation" title="Append dictation" className="p-1 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
                                                                                     <MicPlusIcon />
                                                                                 </button>
-                                                                                 <button onClick={() => handleStartDictateEditForBatch(batch.id, index)} aria-label="Dictate changes" className="p-1 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
+                                                                                <button onClick={() => handleStartDictateEditForBatch(batch.id, index)} aria-label="Dictate changes" title="Dictate changes" className="p-1 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
                                                                                     <MicPencilIcon />
                                                                                 </button>
+                                                                                <button onClick={() => handleDeleteFindingForBatch(batch.id, index)} aria-label="Delete finding row" title="Delete this row" className="p-1 text-slate-600 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400 rounded-full hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors">
+                                                                                    <TrashIcon className="w-5 h-5" />
+                                                                                </button>
                                                                             </div>
+
                                                                         )}
                                                                     </>
                                                                 )}
@@ -2656,19 +2698,19 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                                                             <button
                                                                 onClick={() => handleDownload(batch)}
                                                                 className="bg-slate-600 hover:bg-slate-700 text-white font-bold py-2 px-4 rounded-lg text-xs shadow flex items-center gap-1.5 transition-colors"
-                                                                title="Download recorded audio to your device"
+                                                                title="Download file to your device"
                                                             >
                                                                 <DownloadIcon className="w-4 h-4" />
-                                                                Download Audio File
+                                                                Download File
                                                             </button>
                                                         )}
 
                                                         <label className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg text-xs shadow flex items-center gap-1.5 cursor-pointer transition-colors">
                                                             <UploadIcon className="w-4 h-4" />
-                                                            <span>Upload & Process New Audio</span>
+                                                            <span>Upload & Process New File</span>
                                                             <input
                                                                 type="file"
-                                                                accept="audio/*,.mp3,.wav,.ogg,.m4a,.webm"
+                                                                accept="audio/*,video/*,image/*,application/pdf,.docx,.doc,.txt,.csv,.json,.md,.rtf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,*/*"
                                                                 onChange={(e) => handleReuploadAudioForBatch(batch.id, e)}
                                                                 className="hidden"
                                                             />
@@ -2678,8 +2720,9 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                                                             onClick={() => handleReprocessBatch(batch.id)}
                                                             className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg text-xs shadow flex items-center gap-1.5 transition-colors"
                                                         >
-                                                            Retry Current Audio
+                                                            Retry Current File
                                                         </button>
+
                                                     </div>
                                                 </div>
                                             </div>

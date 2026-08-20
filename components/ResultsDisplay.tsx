@@ -18,6 +18,8 @@ import WarningIcon from './icons/WarningIcon';
 import BrainIcon from './icons/BrainIcon';
 import MicIcon from './icons/MicIcon';
 import DownloadIcon from './icons/DownloadIcon';
+import TrashIcon from './icons/TrashIcon';
+
 
 
 interface ChatMessage {
@@ -887,6 +889,16 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({
     }
   };
 
+  const handleDeleteFinding = (indexToDelete: number) => {
+    setUndoState([...findings]);
+    const updated = findings.filter((_, i) => i !== indexToDelete);
+    onAllFindingsUpdate(updated);
+    if (editingState?.index === indexToDelete) {
+      setEditingState(null);
+    }
+  };
+
+
   const ErrorLegend = () => (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600 dark:text-slate-400 mb-4 p-2 rounded-md bg-slate-100 dark:bg-slate-700/50">
       <strong>Error Key:</strong>
@@ -1241,16 +1253,20 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({
                               </div>
                             </div>
                           )}
-                      <button onClick={() => handleStartEdit(index)} aria-label="Edit text" className="p-1 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
+                      <button onClick={() => handleStartEdit(index)} aria-label="Edit text" title="Edit finding" className="p-1 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
                         <PencilIcon />
                       </button>
-                      <button onClick={() => handleStartDictation(index)} aria-label="Append dictation" className="p-1 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
+                      <button onClick={() => handleStartDictation(index)} aria-label="Append dictation" title="Append dictation" className="p-1 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
                         <MicPlusIcon />
                       </button>
-                      <button onClick={() => handleStartDictateEdit(index)} aria-label="Dictate changes" className="p-1 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
+                      <button onClick={() => handleStartDictateEdit(index)} aria-label="Dictate changes" title="Dictate changes" className="p-1 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
                         <MicPencilIcon />
                       </button>
+                      <button onClick={() => handleDeleteFinding(index)} aria-label="Delete finding row" title="Delete this row" className="p-1 text-slate-600 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400 rounded-full hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors">
+                        <TrashIcon className="w-5 h-5" />
+                      </button>
                     </div>
+
                   )}
                 </>
               )}

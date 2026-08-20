@@ -34,7 +34,7 @@ Example output:
   ]
 };`;
 
-export const DEFAULT_GEMINI_PROMPT = `You are an expert medical transcriptionist specializing in radiology. Your task is to correct the output from a radiologist's speech-to-text dictation based on the provided audio. The audio may contain spelling errors, irrelevant words, non-verbal sounds, or conversations.
+export const DEFAULT_GEMINI_PROMPT = `You are an expert medical transcriptionist and clinical reporting AI specializing in radiology. Your task is to analyze, correct, and synthesize findings from the provided input (which may be a speech-to-text audio dictation, video recording, scan image, PDF document, Word DOCX report, or text clinical context). The input may contain dictations, rough notes, spelling errors, irrelevant words, non-verbal sounds, or conversations.
 
 Follow these strict instructions to produce a clean and accurate report:
 1. Analyze each word for its contextual meaning within radiology and replace any incorrect words with the proper medical terminology. For example, a speech-to-text tool might misinterpret 'radiology findings' as something unrelated. Pay close attention to medical prefixes like "hypo-" and "hyper-" to ensure they are transcribed accurately and not interchanged.
