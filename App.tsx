@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AppStatus } from './types';
 import { BatchProcessor } from './components/BatchProcessor';
+import MergeTemplateProcessor from './components/MergeTemplateProcessor';
 import SunIcon from './components/icons/SunIcon';
 import MoonIcon from './components/icons/MoonIcon';
 import ApiKeyModal from './components/ApiKeyModal';
@@ -18,7 +19,7 @@ const ERROR_CHECK_ENABLED_KEY = 'radiologyErrorCheckEnabled';
 const App: React.FC = () => {
   const [keySaved, setKeySaved] = useState<boolean>(() => hasApiKey());
   // Auto-redirect to guide tab if no API key is set
-  const [mode, setMode] = useState<'batch' | 'guide'>(() => hasApiKey() ? 'batch' : 'guide');
+  const [mode, setMode] = useState<'batch' | 'merge_template' | 'guide'>(() => hasApiKey() ? 'batch' : 'guide');
   const [selectedModel, setSelectedModel] = useState<string>('gemini-3.5-flash');
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState<boolean>(false);
   const [showOnboarding, setShowOnboarding] = useState<boolean>(() => !hasApiKey() && !wasOnboardingDismissed());
@@ -202,6 +203,25 @@ const App: React.FC = () => {
               )}
             </button>
             <button
+              onClick={() => {
+                if (!hasApiKey()) {
+                  setShowKeyRequiredAlert(true);
+                  return;
+                }
+                setMode('merge_template');
+              }}
+              className={`px-5 py-2 text-xs sm:text-sm font-bold rounded-lg transition-all relative ${
+                mode === 'merge_template'
+                  ? 'bg-teal-600 text-white shadow-md'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              📑 Merge Findings to Template
+              {!keySaved && mode !== 'merge_template' && (
+                <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-amber-500 rounded-full text-white text-[8px] flex items-center justify-center font-bold" title="API Key required">🔒</span>
+              )}
+            </button>
+            <button
               onClick={() => setMode('guide')}
               className={`px-5 py-2 text-xs sm:text-sm font-bold rounded-lg transition-all ${
                 mode === 'guide'
@@ -298,6 +318,12 @@ const App: React.FC = () => {
               isErrorCheckEnabled={isErrorCheckEnabled}
               selectedTemplate={selectedTemplate}
               onBack={() => setMode('guide')} 
+            />
+          ) : mode === 'merge_template' ? (
+            <MergeTemplateProcessor
+              selectedModel={selectedModel}
+              initialTemplate={selectedTemplate}
+              onBack={() => setMode('batch')}
             />
           ) : (
             <ApiKeyGuideTab onKeySaved={() => { setKeySaved(true); setMode('batch'); }} />

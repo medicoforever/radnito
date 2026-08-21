@@ -35,6 +35,8 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ status, setStatus, onReco
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = React.useState(false);
   const [isStarting, setIsStarting] = React.useState(false);
+  const [inputMode, setInputMode] = React.useState<'voice' | 'text'>('voice');
+  const [pastedText, setPastedText] = React.useState<string>('');
   const dragCounter = useRef(0);
 
   const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
@@ -87,12 +89,9 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ status, setStatus, onReco
   };
   
   const handleStop = async () => {
-    setStatus(AppStatus.Processing);
-    try {
-      const audioBlob = await stopRecording();
+    const audioBlob = await stopRecording();
+    if (audioBlob) {
       onRecordingComplete(audioBlob);
-    } catch (e) {
-      console.error("Stop recording failed:", e);
     }
   };
 
@@ -218,63 +217,136 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ status, setStatus, onReco
         accept="audio/*,video/*,image/*,application/pdf,.docx,.doc,.txt,.csv,.json,.md,.rtf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,*/*"
         aria-hidden="true"
       />
-      <div className="relative mb-6">
-        <div
-          className={`absolute inset-0 rounded-full bg-blue-500 transition-transform duration-1000 ${
-            isRecording && !isPaused ? 'animate-ping' : ''
-          }`}
-        ></div>
-        <div className="relative w-24 h-24 rounded-full bg-white dark:bg-slate-700 shadow-lg flex items-center justify-center">
-            {isRecording ? <div className={`w-10 h-10 ${isPaused ? 'bg-yellow-500' : 'bg-red-500 animate-pulse'} rounded-full`}></div> : <MicIcon />}
+      {/* Mode Switcher Tabs */}
+      {!isRecording && (
+        <div className="flex bg-slate-100 dark:bg-slate-700/60 p-1 rounded-xl mb-5 text-xs font-bold">
+          <button
+            type="button"
+            onClick={() => setInputMode('voice')}
+            className={`px-4 py-1.5 rounded-lg transition-all ${
+              inputMode === 'voice'
+                ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            🎙️ Voice Recording & Upload
+          </button>
+          <button
+            type="button"
+            onClick={() => setInputMode('text')}
+            className={`px-4 py-1.5 rounded-lg transition-all ${
+              inputMode === 'text'
+                ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            📝 Paste / Type Text Findings
+          </button>
         </div>
-      </div>
-      <h2 className="text-2xl font-semibold text-slate-700 dark:text-slate-200 mb-2">
-        {isRecording ? recordingText : 'Ready to Record or Upload'}
-      </h2>
-      <p className="text-slate-500 dark:text-slate-400 mb-6 text-center">
-        {isRecording ? recordingSubtext : 'Click below to record, or upload any file (Audio, PDF, Image, DOCX, Video, Text) as context.'}
-      </p>
-      
-      {error && <p className="text-red-500 mb-4">{error}</p>}
-      
-      {!isRecording ? (
-        <div className="flex flex-col items-center gap-3 w-full max-w-lg">
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full">
-              <button
-                onClick={handleStart}
-                disabled={status === AppStatus.Recording || isStarting || isRequestingMic}
-                className="flex items-center justify-center gap-2 bg-blue-600 text-white font-bold py-3 px-8 rounded-full hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-300 transition-all duration-300 ease-in-out transform hover:scale-105 shadow-lg disabled:opacity-75 disabled:hover:scale-100 disabled:cursor-wait"
-                aria-label="Start Recording"
-              >
-                {(isStarting || isRequestingMic) ? (
-                  <>
-                    <span className="inline-block w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                    Accessing Mic...
-                  </>
-                ) : (
-                  <>
-                    <MicIcon className="w-6 h-6"/>
-                    Start Recording
-                  </>
-                )}
-              </button>
-              <span className="text-slate-500 dark:text-slate-400 my-1 sm:my-0 font-medium">or</span>
-              <button
-                onClick={triggerFileSelect}
-                className="flex items-center justify-center gap-2 bg-slate-200 text-slate-700 font-bold py-3 px-8 rounded-full hover:bg-slate-300 focus:outline-none focus:ring-4 focus:ring-slate-300 transition-all duration-300 ease-in-out transform hover:scale-105 shadow-lg dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600 dark:focus:ring-slate-500"
-                aria-label="Upload File"
-              >
-                <UploadIcon className="w-6 h-6"/>
-                Upload File
-              </button>
-          </div>
-          <p className="text-xs text-slate-400 dark:text-slate-500 flex items-center gap-1 mt-1 text-center">
-            <UploadIcon className="w-3.5 h-3.5 inline shrink-0" /> Drop any file (Audio, PDF, Image, DOCX, Video, Text) anywhere in this box
-          </p>
-        </div>
+      )}
 
+      {inputMode === 'text' && !isRecording ? (
+        <div className="w-full max-w-xl space-y-3">
+          <textarea
+            rows={6}
+            value={pastedText}
+            onChange={(e) => setPastedText(e.target.value)}
+            placeholder="Type or paste your radiology dictation text, findings, or patient clinical notes here..."
+            className="w-full p-3.5 text-xs sm:text-sm border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none leading-relaxed"
+          />
+
+          <div className="flex flex-wrap gap-1.5 text-xs">
+            <span className="text-slate-400 font-semibold self-center mr-1">Quick:</span>
+            {[
+              { label: 'Normal Brain CT', text: 'CT Brain: Normal brain parenchyma. No hemorrhage, mass effect, or midline shift. Ventricles and cisterns are normal. Calvarium intact.' },
+              { label: 'Normal Spine', text: 'MRI LS Spine: Normal vertebral heights and alignment. No significant disc herniation or spinal canal stenosis. Visualized cord and conus normal.' },
+              { label: 'Normal Chest', text: 'Chest: Lung fields clear. Cardiac silhouette normal in size and configuration. Bilateral costophrenic angles sharp. Bony cage normal.' },
+            ].map(snippet => (
+              <button
+                key={snippet.label}
+                type="button"
+                onClick={() => setPastedText(prev => prev ? `${prev}\n${snippet.text}` : snippet.text)}
+                className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 text-[11px] font-medium"
+              >
+                + {snippet.label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={() => {
+              if (!pastedText.trim()) return;
+              const textBlob = new Blob([pastedText.trim()], { type: 'text/plain' });
+              (textBlob as any).name = 'pasted_dictation.txt';
+              onRecordingComplete(textBlob);
+            }}
+            disabled={!pastedText.trim()}
+            className="w-full py-3 px-6 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2"
+          >
+            <span>🚀 Process & Format Findings</span>
+          </button>
+        </div>
       ) : (
-        <div className="flex items-center gap-4">
+        <>
+          <div className="relative mb-6">
+            <div
+              className={`absolute inset-0 rounded-full bg-blue-500 transition-transform duration-1000 ${
+                isRecording && !isPaused ? 'animate-ping' : ''
+              }`}
+            ></div>
+            <div className="relative w-24 h-24 rounded-full bg-white dark:bg-slate-700 shadow-lg flex items-center justify-center">
+                {isRecording ? <div className={`w-10 h-10 ${isPaused ? 'bg-yellow-500' : 'bg-red-500 animate-pulse'} rounded-full`}></div> : <MicIcon />}
+            </div>
+          </div>
+          <h2 className="text-2xl font-semibold text-slate-700 dark:text-slate-200 mb-2">
+            {isRecording ? recordingText : 'Ready to Record or Upload'}
+          </h2>
+          <p className="text-slate-500 dark:text-slate-400 mb-6 text-center">
+            {isRecording ? recordingSubtext : 'Click below to record, or upload any file (Audio, PDF, Image, DOCX, Video, Text) as context.'}
+          </p>
+          
+          {error && <p className="text-red-500 mb-4">{error}</p>}
+          
+          {!isRecording ? (
+            <div className="flex flex-col items-center gap-3 w-full max-w-lg">
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full">
+                  <button
+                    onClick={handleStart}
+                    disabled={status === AppStatus.Recording || isStarting || isRequestingMic}
+                    className="flex items-center justify-center gap-2 bg-blue-600 text-white font-bold py-3 px-8 rounded-full hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-300 transition-all duration-300 ease-in-out transform hover:scale-105 shadow-lg disabled:opacity-75 disabled:hover:scale-100 disabled:cursor-wait"
+                    aria-label="Start Recording"
+                  >
+                    {(isStarting || isRequestingMic) ? (
+                      <>
+                        <span className="inline-block w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                        Accessing Mic...
+                      </>
+                    ) : (
+                      <>
+                        <MicIcon className="w-6 h-6"/>
+                        Start Recording
+                      </>
+                    )}
+                  </button>
+                  <span className="text-slate-500 dark:text-slate-400 my-1 sm:my-0 font-medium">or</span>
+                  <button
+                    onClick={triggerFileSelect}
+                    className="flex items-center justify-center gap-2 bg-slate-200 text-slate-700 font-bold py-3 px-8 rounded-full hover:bg-slate-300 focus:outline-none focus:ring-4 focus:ring-slate-300 transition-all duration-300 ease-in-out transform hover:scale-105 shadow-lg dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600 dark:focus:ring-slate-500"
+                    aria-label="Upload File"
+                  >
+                    <UploadIcon className="w-6 h-6"/>
+                    Upload File
+                  </button>
+              </div>
+              <p className="text-xs text-slate-400 dark:text-slate-500 flex items-center gap-1 mt-1 text-center">
+                <UploadIcon className="w-3.5 h-3.5 inline shrink-0" /> Drop any file (Audio, PDF, Image, DOCX, Video, Text) anywhere in this box
+              </p>
+            </div>
+          ) : null}
+        </>
+      )}
+      {isRecording && (
+        <div className="flex items-center gap-4 mt-4">
           <button
             onClick={handlePauseToggle}
             className={`flex items-center justify-center gap-2 font-bold py-3 px-8 rounded-full focus:outline-none focus:ring-4 transition-all duration-300 ease-in-out transform hover:scale-105 shadow-lg ${

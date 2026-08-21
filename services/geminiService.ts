@@ -545,6 +545,193 @@ ${JSON.stringify({ findings: currentFindings })}
   }
 };
 
+export const modifyReportWithText = async (
+  currentFindings: string[], 
+  instructionText: string, 
+  model: string, 
+  customPrompt?: string,
+  customImages?: Array<{ data: string; mimeType: string }> | null
+): Promise<string[]> => {
+  let prompt = `You are an expert medical transcriptionist assistant. You are given an existing medical report in JSON format and written instructions to modify it. Your task is to intelligently interpret the instructions and return a single, updated report in the exact same JSON format.
+
+**Core Instructions:**
+1.  **Preserve by Default:** Your primary goal is to modify the existing report. **You MUST preserve all original findings unless the instruction explicitly tells you to remove, replace, or merge them.** Do not discard existing information.
+2.  **Formatting for Boldness**:
+    *   **Adding New Findings**: When the instruction is to add a new clinical finding, prefix the new finding string with the special marker \`BOLD::\`.
+    *   **Preserving Existing Boldness**: When editing an existing finding, if the original finding in the JSON already starts with \`BOLD::\`, the modified finding MUST also start with \`BOLD::\`.
+    *   **Exceptions**: Do NOT add the \`BOLD::\` prefix to the "Clinical Profile" string or the "IMPRESSION" string.
+3.  **Interpret Instructions Accurately:** (e.g., editing specific phrases, removing findings, adding findings, reordering, synthesizing impression).
+4.  **Impression Generation:** If an instruction involves creating or modifying an IMPRESSION, formulate concise impression points without verbs or numerical values, formatted as a single string starting with "IMPRESSION:###point 1###point 2...".
+5.  **Special Clinical Profile Formatting:** If present or added, format as "*Clinical Profile: ...*".
+6.  **Format Output Correctly:** Return ONLY a JSON object with a key named "findings" whose value is an array of strings.
+
+**Existing Report:**
+${JSON.stringify({ findings: currentFindings })}
+
+**User Instruction:**
+"${instructionText}"
+`;
+
+  if (customPrompt) {
+    prompt += `\n\nAdditionally, follow these custom instructions when processing the request:\n${customPrompt}`;
+  }
+
+  const parts: any[] = [];
+  
+  if (customImages && customImages.length > 0) {
+    for (const customImage of customImages) {
+        parts.push({
+          inlineData: {
+            mimeType: customImage.mimeType,
+            data: customImage.data
+          }
+        });
+    }
+    parts.push({ text: `The user has provided ${customImages.length > 1 ? 'images' : 'an image'} of a report template. If the instruction is to reformat the report, use ${customImages.length > 1 ? 'these images' : 'this image'} as a strict visual guide.` });
+  }
+
+  parts.push({ text: prompt });
+  
+  try {
+    const response: GenerateContentResponse = await getAiClient().client.models.generateContent({
+      model: getValidModelName(model),
+      contents: parts,
+      config: {
+          responseMimeType: "application/json",
+          responseSchema: responseSchema
+      }
+    });
+
+    const jsonString = response.text;
+    if (!jsonString) {
+      throw new Error("API returned an empty response for report modification.");
+    }
+
+    const cleanedJsonString = jsonString.replace(/^```json\s*|```\s*$/g, '').trim();
+    const result = JSON.parse(cleanedJsonString);
+
+    if (result && Array.isArray(result.findings)) {
+      return result.findings;
+    } else {
+      throw new Error("Invalid data structure in API response. Expected a 'findings' array.");
+    }
+  } catch (error) {
+    console.error("Error calling Gemini API for text report modification:", error);
+    if (error instanceof Error) {
+        throw new Error(`Failed to modify report: ${error.message}`);
+    }
+    throw new Error("An unknown error occurred while communicating with the API for text report modification.");
+  }
+};
+
+export const mergeFindingsWithTemplate = async (
+  findingsText: string,
+  selectedTemplate: { id?: string; name: string; category?: string; modality?: string; lines?: string[] },
+  model: string,
+  customPrompt?: string,
+  customImages?: Array<{ data: string; mimeType: string }> | null
+): Promise<string[]> => {
+  const normalFindingsText = selectedTemplate.lines && selectedTemplate.lines.length > 0
+    ? selectedTemplate.lines.map((l, i) => `${i + 1}. ${l}`).join('\n')
+    : selectedTemplate.name;
+
+  const prompt = `You are an expert radiologist and medical transcriptionist.
+Your task is to merge the radiologist's findings directly into the target standard radiology report template.
+
+## TARGET REPORT TEMPLATE:
+Title: ${selectedTemplate.name}
+Modality: ${selectedTemplate.modality || selectedTemplate.category || 'Radiology'}
+Category: ${selectedTemplate.category || 'Standard'}
+
+Normal Template Structure & Sections:
+${normalFindingsText}
+
+---
+
+## RADIOLOGIST'S DICTATED / PROVIDED FINDINGS:
+"""
+${findingsText}
+"""
+
+---
+
+## STRICT MERGING AND INTEGRATION RULES:
+1. Carefully analyze each anatomical organ/structure in the target template.
+2. For any organ/region where the radiologist provided abnormal findings or specific observations, replace or update the normal description with the patient's actual findings, and prefix that abnormal/dictated line with "BOLD::".
+3. For all other organs/regions where no abnormality or mention was made, keep the standard normal line from the template exactly as is, without "BOLD::".
+4. If clinical history or indication is mentioned in the findings, add "*Clinical Profile: [history]*" as an italic line near the top.
+5. If the template has a Technique line (e.g. "*CT Technique: ...*"), keep it intact as an italicized line.
+6. Synthesize a concise, bulleted "IMPRESSION:" section at the end summarizing all abnormal findings. Format as a single string: "IMPRESSION:###point 1###point 2...". If all findings are normal, format as "IMPRESSION:###Normal study.###No significant abnormality detected."
+7. If the radiologist says "normal" or "normal study", populate the full normal template.
+8. Output JSON format: { "findings": string[] }.
+${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
+`;
+
+  const parts: any[] = [];
+  if (customImages && customImages.length > 0) {
+    for (const customImage of customImages) {
+      parts.push({
+        inlineData: {
+          mimeType: customImage.mimeType,
+          data: customImage.data,
+        },
+      });
+    }
+    parts.push({
+      text: `Use the provided image as a strict visual guide for the layout and structure.`
+    });
+  }
+
+  parts.push({ text: prompt });
+
+  try {
+    const response: GenerateContentResponse = await getAiClient().client.models.generateContent({
+      model: getValidModelName(model),
+      contents: parts,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: responseSchema,
+      },
+    });
+
+    const jsonString = response.text;
+    if (!jsonString) {
+      throw new Error("API returned an empty response.");
+    }
+
+    const cleanedJsonString = jsonString.replace(/^```json\s*|```\s*$/g, '').trim();
+    const result = JSON.parse(cleanedJsonString);
+
+    if (result && Array.isArray(result.findings)) {
+      return result.findings;
+    } else {
+      throw new Error("Invalid data structure in API response. Expected a 'findings' array.");
+    }
+  } catch (error) {
+    console.error("Error in mergeFindingsWithTemplate:", error);
+    if (error instanceof Error) {
+      throw new Error(`Failed to merge findings into template: ${error.message}`);
+    }
+    throw new Error("An unknown error occurred while merging findings into template.");
+  }
+};
+
+export const processTextFindings = async (
+  rawText: string,
+  model: string,
+  customPrompt?: string,
+  customImages?: Array<{ data: string; mimeType: string }> | null,
+  selectedTemplate?: { id: string; name: string; category?: string; modality?: string; lines: string[] } | null
+): Promise<string[]> => {
+  if (selectedTemplate) {
+    return mergeFindingsWithTemplate(rawText, selectedTemplate, model, customPrompt, customImages);
+  }
+
+  const baseBlob = new Blob([rawText], { type: 'text/plain' });
+  (baseBlob as any).name = 'pasted_dictation.txt';
+  return processAudio(baseBlob, model, customPrompt, customImages, undefined, undefined, selectedTemplate);
+};
+
 export const transcribeAudioForPrompt = async (audioBlob: Blob): Promise<string> => {
   const base64Audio = await blobToBase64(audioBlob);
 
