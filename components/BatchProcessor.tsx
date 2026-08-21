@@ -2257,6 +2257,8 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                     >
                         ↻ Retry All Failed ({batches.filter(b => b.status === 'error' && !b.findings).length})
                     </button>
+                )}
+
                 <button
                     onClick={() => handleDownloadDocx()}
                     disabled={!hasAnyResults}
