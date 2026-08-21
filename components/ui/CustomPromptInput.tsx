@@ -582,5 +582,3 @@ const CustomPromptInput: React.FC<{
 };
 
 export default CustomPromptInput;
-
-export default CustomPromptInput;
