@@ -323,6 +323,7 @@ const App: React.FC = () => {
             <MergeTemplateProcessor
               selectedModel={selectedModel}
               initialTemplate={selectedTemplate}
+              onSelectTemplate={(tmpl) => setSelectedTemplate(tmpl)}
               onBack={() => setMode('batch')}
             />
           ) : (

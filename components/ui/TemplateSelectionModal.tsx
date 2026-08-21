@@ -20,6 +20,7 @@ export interface SelectedTemplateData {
   lines: string[];
   docxBase64?: string;
   isCustom?: boolean;
+  images?: Array<{ data: string; mimeType: string }>;
 }
 
 interface TemplateSelectionModalProps {
@@ -90,13 +91,16 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
 
     if (customTemplates && customTemplates.length > 0) {
       customTemplates.forEach(ct => {
+        const textLines = ct.text ? ct.text.split('\n').filter(Boolean) : [];
+        const hasImages = Boolean(ct.images && ct.images.length > 0);
         list.unshift({
           id: ct.id,
           name: ct.name,
           category: 'My Uploaded Templates',
           modality: (ct as any).modality || 'Custom',
-          lines: ct.text ? ct.text.split('\n').filter(Boolean) : [],
+          lines: textLines.length > 0 ? textLines : (hasImages ? [`[Attached Screenshots: ${ct.images.length} Image(s)]`] : []),
           docxBase64: (ct as any).docxBase64 || RADIOLOGY_TEMPLATES_CATALOG[0]?.docxBase64,
+          images: ct.images || [],
           isCustom: true,
         });
       });
@@ -212,15 +216,11 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
   const getModalityBadgeColor = (mod: string) => {
     switch (mod.toUpperCase()) {
       case 'MRI':
+      case 'MRI A':
+      case 'MRI B':
         return 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 border-purple-200 dark:border-purple-800';
       case 'CT':
         return 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 border-blue-200 dark:border-blue-800';
-      case 'USG':
-        return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800';
-      case 'X-RAY':
-        return 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border-amber-200 dark:border-amber-800';
-      case 'MAMMOGRAPHY':
-        return 'bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-300 border-pink-200 dark:border-pink-800';
       default:
         return 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700';
     }
@@ -489,13 +489,35 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
                 </div>
 
                 {/* Preview Body */}
-                <div className="flex-1 overflow-y-auto py-3 space-y-1.5 pr-1 font-sans text-xs">
+                <div className="flex-1 overflow-y-auto py-3 space-y-2 pr-1 font-sans text-xs">
+                  {previewTemplate?.images && previewTemplate.images.length > 0 && (
+                    <div className="p-3 bg-slate-100 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
+                      <p className="font-bold text-xs text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                        <span>🖼️ Attached Template Screenshots ({previewTemplate.images.length}):</span>
+                      </p>
+                      <div className="flex gap-2 overflow-x-auto pb-1">
+                        {previewTemplate.images.map((img, idx) => (
+                          <div key={idx} className="relative flex-shrink-0 w-24 h-24 rounded-lg overflow-hidden border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
+                            <img
+                              src={`data:${img.mimeType};base64,${img.data}`}
+                              alt={`Template screenshot ${idx + 1}`}
+                              className="w-full h-full object-contain"
+                            />
+                            <span className="absolute bottom-0.5 left-0.5 bg-black/70 text-white text-[8px] px-1 rounded font-mono">
+                              #{idx + 1}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {previewTemplate && Array.isArray(previewTemplate.lines) && previewTemplate.lines.length > 0 ? (
                     previewTemplate.lines.map((line, idx) => {
                       if (!line || typeof line !== 'string') return null;
                       const upper = line.toUpperCase();
                       const lower = line.toLowerCase();
-                      const isTitle = idx === 0 && (upper.includes('SCAN') || upper.includes('MRI') || upper.includes('C.T.') || upper.includes('ULTRASOUND') || upper.includes('X-RAY') || upper.includes('REPORT'));
+                      const isTitle = idx === 0 && (upper.includes('SCAN') || upper.includes('MRI') || upper.includes('C.T.') || upper.includes('REPORT'));
                       const isImpression = upper.startsWith('IMPRESSION');
                       const isHeading = line.endsWith(':') && line.length <= 40;
 

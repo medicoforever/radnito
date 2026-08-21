@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Spinner from './ui/Spinner';
 import SparklesIcon from './icons/SparklesIcon';
 import CopyIcon from './icons/CopyIcon';
@@ -9,24 +9,35 @@ import MicIcon from './icons/MicIcon';
 import StopIcon from './icons/StopIcon';
 import SendIcon from './icons/SendIcon';
 import MicScribbleIcon from './icons/MicScribbleIcon';
-import { SelectedTemplateData } from './ui/TemplateSelectionModal';
+import TemplateSelectionModal, { SelectedTemplateData } from './ui/TemplateSelectionModal';
 import { mergeFindingsWithTemplate, modifyReportWithText, modifyReportWithAudio } from '../services/geminiService';
 import { mergeFindingsIntoDocx, downloadDocxBlob } from '../services/docxService';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
+import { getUserTemplates, UserTemplate } from '../services/templateStorage';
 
 interface MergeTemplateProcessorProps {
-  selectedTemplate: SelectedTemplateData | null;
-  onOpenTemplateModal: () => void;
   selectedModel: string;
+  initialTemplate?: SelectedTemplateData | null;
+  selectedTemplate?: SelectedTemplateData | null;
+  onOpenTemplateModal?: () => void;
+  onSelectTemplate?: (tmpl: SelectedTemplateData) => void;
   onBack?: () => void;
 }
 
 export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
-  selectedTemplate,
-  onOpenTemplateModal,
   selectedModel,
+  initialTemplate,
+  selectedTemplate: selectedTemplateProp,
+  onOpenTemplateModal,
+  onSelectTemplate,
   onBack,
 }) => {
+  const [activeTemplate, setActiveTemplate] = useState<SelectedTemplateData | null>(
+    selectedTemplateProp || initialTemplate || null
+  );
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState<boolean>(false);
+  const [customTemplates, setCustomTemplates] = useState<UserTemplate[]>([]);
+
   const [findingsInput, setFindingsInput] = useState<string>('');
   const [customNotes, setCustomNotes] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -34,6 +45,44 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
   const [mergedFindings, setMergedFindings] = useState<string[] | null>(null);
   const [autoDownloadDocx, setAutoDownloadDocx] = useState<boolean>(true);
   const [isCopied, setIsCopied] = useState<boolean>(false);
+  const [downloadSuccess, setDownloadSuccess] = useState<string | null>(null);
+
+  // Sync prop changes
+  useEffect(() => {
+    if (selectedTemplateProp) {
+      setActiveTemplate(selectedTemplateProp);
+    } else if (initialTemplate && !activeTemplate) {
+      setActiveTemplate(initialTemplate);
+    }
+  }, [selectedTemplateProp, initialTemplate]);
+
+  // Load custom templates
+  useEffect(() => {
+    getUserTemplates().then(list => setCustomTemplates(list)).catch(() => {});
+  }, []);
+
+  const refreshCustomTemplates = async () => {
+    try {
+      const list = await getUserTemplates();
+      setCustomTemplates(list);
+    } catch {}
+  };
+
+  const handleOpenModal = () => {
+    if (onOpenTemplateModal) {
+      onOpenTemplateModal();
+    }
+    setIsTemplateModalOpen(true);
+  };
+
+  const handleTemplateChosen = (tmpl: SelectedTemplateData) => {
+    setActiveTemplate(tmpl);
+    if (onSelectTemplate) {
+      onSelectTemplate(tmpl);
+    }
+    setIsTemplateModalOpen(false);
+    setError(null);
+  };
 
   // Edit / Refine state
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -44,9 +93,9 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
   const modificationRecorder = useAudioRecorder();
 
   const handleMerge = async () => {
-    if (!selectedTemplate) {
+    if (!activeTemplate) {
       setError('Please select a report template first.');
-      onOpenTemplateModal();
+      setIsTemplateModalOpen(true);
       return;
     }
     if (!findingsInput.trim()) {
@@ -60,7 +109,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
     try {
       const result = await mergeFindingsWithTemplate(
         findingsInput.trim(),
-        selectedTemplate,
+        activeTemplate,
         selectedModel,
         customNotes.trim() || undefined
       );
@@ -69,10 +118,12 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
 
       if (autoDownloadDocx && result.length > 0) {
         try {
-          const title = selectedTemplate.name || result[0] || 'Radiology_Report';
+          const title = activeTemplate.name || result[0] || 'Radiology_Report';
           const cleanFileName = `${title.replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().slice(0, 10)}.docx`;
-          const blob = await mergeFindingsIntoDocx(selectedTemplate.docxBase64, result, title);
+          const blob = await mergeFindingsIntoDocx(activeTemplate.docxBase64, result, title);
           downloadDocxBlob(blob, cleanFileName);
+          setDownloadSuccess(`Auto-downloaded "${cleanFileName}"`);
+          setTimeout(() => setDownloadSuccess(null), 4000);
         } catch (docxErr) {
           console.warn('Auto DOCX download failed:', docxErr);
         }
@@ -88,10 +139,12 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
   const handleDownloadDocx = async () => {
     if (!mergedFindings || mergedFindings.length === 0) return;
     try {
-      const title = selectedTemplate?.name || mergedFindings[0] || 'Radiology_Report';
+      const title = activeTemplate?.name || mergedFindings[0] || 'Radiology_Report';
       const cleanFileName = `${title.replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().slice(0, 10)}.docx`;
-      const blob = await mergeFindingsIntoDocx(selectedTemplate?.docxBase64, mergedFindings, title);
+      const blob = await mergeFindingsIntoDocx(activeTemplate?.docxBase64, mergedFindings, title);
       downloadDocxBlob(blob, cleanFileName);
+      setDownloadSuccess(`Downloaded "${cleanFileName}"`);
+      setTimeout(() => setDownloadSuccess(null), 4000);
     } catch (err: any) {
       setError('Failed to download Word document.');
     }
@@ -186,6 +239,16 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
+      {/* Template Selection Modal */}
+      <TemplateSelectionModal
+        isOpen={isTemplateModalOpen}
+        onClose={() => setIsTemplateModalOpen(false)}
+        onSelectTemplate={handleTemplateChosen}
+        selectedTemplateId={activeTemplate?.id}
+        customTemplates={customTemplates}
+        onRefreshCustomTemplates={refreshCustomTemplates}
+      />
+
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-800 text-white p-6 rounded-2xl shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="space-y-1">
@@ -193,7 +256,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
             <span className="bg-white/20 text-white text-[11px] font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
               Direct Merge Mode
             </span>
-            <span className="text-xs text-blue-200">600+ Standard Formats</span>
+            <span className="text-xs text-blue-200">104 Clean CT & MRI Formats</span>
           </div>
           <h2 className="text-xl sm:text-2xl font-black tracking-tight">
             Merge Findings into Report Template
@@ -214,36 +277,50 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
       </div>
 
       {/* Selected Template Card */}
-      <div className="bg-white dark:bg-slate-800 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div 
+        onClick={handleOpenModal}
+        className="bg-white dark:bg-slate-800 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 cursor-pointer hover:border-blue-400 dark:hover:border-blue-600 transition-all"
+      >
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
               Active Template:
             </span>
-            {selectedTemplate && (
+            {activeTemplate && (
               <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300">
-                {selectedTemplate.category || selectedTemplate.modality}
+                {activeTemplate.category || activeTemplate.modality}
               </span>
             )}
           </div>
           <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
-            {selectedTemplate ? selectedTemplate.name : 'No Template Selected Yet'}
+            {activeTemplate ? activeTemplate.name : 'No Template Selected (Click to Choose)'}
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            {selectedTemplate
-              ? `${selectedTemplate.lines?.length || 0} standard normal sections • Times New Roman 12pt format`
+            {activeTemplate
+              ? `${activeTemplate.lines?.length || 0} standard normal sections • Times New Roman 12pt format`
               : 'Please choose a CT, MRI A, MRI B, or custom template to merge your findings.'}
           </p>
         </div>
 
         <button
-          onClick={onOpenTemplateModal}
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            handleOpenModal();
+          }}
           className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs sm:text-sm shadow-md transition-all flex items-center gap-1.5 flex-shrink-0"
         >
           <SparklesIcon className="w-4 h-4" />
-          <span>{selectedTemplate ? 'Change Template' : 'Select Template'}</span>
+          <span>{activeTemplate ? 'Change Template' : 'Select Template'}</span>
         </button>
       </div>
+
+      {downloadSuccess && (
+        <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 rounded-xl text-xs text-emerald-800 dark:text-emerald-200 font-bold flex items-center gap-2 animate-fade-in">
+          <span>✓</span>
+          <span>{downloadSuccess}</span>
+        </div>
+      )}
 
       {/* Main Input or Results Section */}
       {!mergedFindings ? (
@@ -339,7 +416,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
             {isProcessing ? (
               <>
                 <Spinner className="w-5 h-5 text-white" />
-                <span>Integrating findings into {selectedTemplate?.name || 'template'}...</span>
+                <span>Integrating findings into {activeTemplate?.name || 'template'}...</span>
               </>
             ) : (
               <>
@@ -359,7 +436,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
                 ✓ Report Successfully Merged & Standardized
               </span>
               <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white mt-1">
-                {selectedTemplate?.name || 'Standardized Radiology Report'}
+                {activeTemplate?.name || 'Standardized Radiology Report'}
               </h3>
             </div>
 
