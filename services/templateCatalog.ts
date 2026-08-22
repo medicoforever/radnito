@@ -19,8 +19,7 @@ export const RADIOLOGY_TEMPLATES_CATALOG: RadiologyDocxTemplate[] = rawTemplates
 export const TEMPLATE_MODALITIES = [
   'ALL',
   'CT',
-  'MRI A',
-  'MRI B',
+  'MRI',
 ] as const;
 
 export type TemplateModalityFilter = typeof TEMPLATE_MODALITIES[number];
