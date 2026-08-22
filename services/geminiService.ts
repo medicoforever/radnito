@@ -188,26 +188,31 @@ export const processAudio = async (
   customImages?: Array<{ data: string; mimeType: string }> | null,
   existingFindings?: string[],
   batchName?: string,
-  selectedTemplate?: { id: string; name: string; category?: string; modality?: string; lines: string[] } | null
+  selectedTemplate?: { id?: string; name: string; category?: string; modality?: string; lines?: string[] } | null
 ): Promise<string[]> => {
+  const isReprocessing = existingFindings && existingFindings.length > 0;
+
+  // 2-STEP PIPELINE: When a template is selected for audio dictation
+  if (selectedTemplate && selectedTemplate.lines && selectedTemplate.lines.length > 0 && !isReprocessing) {
+    // Step 1: Transcribe audio to verbatim clinical text
+    const transcribedText = await transcribeAudioForPrompt(audioBlob, model);
+    if (!transcribedText || !transcribedText.trim()) {
+      return selectedTemplate.lines;
+    }
+    // Step 2: Merge transcribed findings into the template
+    return mergeFindingsWithTemplate(transcribedText, selectedTemplate, model, customPrompt, customImages);
+  }
+
   const fileName = (audioBlob as any).name;
   const fileContent = await prepareFileContentPart(audioBlob, fileName);
 
   const hasCustomImages = customImages && customImages.length > 0;
   const hasCustomText = customPrompt && customPrompt.trim().length > 0;
-  const isReprocessing = existingFindings && existingFindings.length > 0;
 
   let basePrompt: string;
 
   if (isReprocessing) {
       basePrompt = REPROCESS_GEMINI_PROMPT;
-  } else if (selectedTemplate && selectedTemplate.lines && selectedTemplate.lines.length > 0) {
-      basePrompt = TEMPLATE_GEMINI_PROMPT + `\n\n--- TARGET REPORT TEMPLATE: "${selectedTemplate.name}" ---\n${JSON.stringify({
-          template_title: selectedTemplate.name,
-          category: selectedTemplate.category,
-          modality: selectedTemplate.modality,
-          normal_findings_checklist: selectedTemplate.lines,
-      }, null, 2)}\n--- END TEMPLATE ---`;
   } else if (hasCustomImages || hasCustomText) {
       basePrompt = STRICT_CUSTOM_TEMPLATE_GEMINI_PROMPT;
       if (hasCustomText) {
@@ -656,13 +661,15 @@ ${findingsText}
 ---
 
 ## STRICT MERGING AND INTEGRATION RULES:
-1. Carefully analyze each anatomical organ/structure in the target template.
-2. For any organ/region where the radiologist provided abnormal findings or specific observations, replace or update the normal description with the patient's actual findings, and prefix that abnormal/dictated line with "BOLD::".
-3. For all other organs/regions where no abnormality or mention was made, keep the standard normal line from the template exactly as is, without "BOLD::".
-4. If clinical history or indication is mentioned in the findings, add "*Clinical Profile: [history]*" as an italic line near the top.
-5. If the template has a Technique line (e.g. "*CT Technique: ...*"), keep it intact as an italicized line.
-6. Synthesize a concise, bulleted "IMPRESSION:" section at the end summarizing all abnormal findings. Format as a single string: "IMPRESSION:###point 1###point 2...". If all findings are normal, format as "IMPRESSION:###Normal study.###No significant abnormality detected."
-7. If the radiologist says "normal" or "normal study", populate the full normal template.
+1. Carefully analyze each anatomical organ/structure and line in the target template.
+2. Structure Matching:
+   - If the template has standalone headings (e.g. "Right brachial plexus:") with description lines beneath them, output the heading followed by the updated finding line.
+   - If the template has inline labeled lines (e.g. "RV diameter: --- cm" or "Liver: Normal..."), output the exact label prefix followed by the updated finding or measurement.
+3. For any organ/region where the radiologist provided abnormal findings or specific observations, replace or update the normal description with the patient's actual findings, and prefix that abnormal/dictated line with "BOLD::".
+4. For all other organs/regions where no abnormality or mention was made, keep the standard normal line from the template exactly as is, without "BOLD::".
+5. If clinical history or indication is mentioned in the findings, format as "Clinical Profile: [history]".
+6. If the template has a Technique line (e.g. "Technique: ..."), keep it intact.
+7. Synthesize a concise, bulleted "IMPRESSION:" section at the end summarizing all abnormal findings. Format as a single string: "IMPRESSION:###point 1###point 2...". If all findings are normal, format as "IMPRESSION:###Normal study.###No significant abnormality detected."
 8. Output JSON format: { "findings": string[] }.
 ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
 `;
@@ -732,10 +739,14 @@ export const processTextFindings = async (
   return processAudio(baseBlob, model, customPrompt, customImages, undefined, undefined, selectedTemplate);
 };
 
-export const transcribeAudioForPrompt = async (audioBlob: Blob): Promise<string> => {
+export const transcribeAudioForPrompt = async (audioBlob: Blob, modelName = 'gemini-2.5-flash'): Promise<string> => {
   const base64Audio = await blobToBase64(audioBlob);
 
-  const prompt = "Transcribe the following audio accurately. Provide only the transcribed text without any additional commentary or introduction.";
+  const prompt = `You are an expert medical transcriptionist specializing in radiology dictation.
+Transcribe the following radiology dictation audio with 100% precision.
+- Capture all anatomical observations, measurements, organ descriptions, clinical history, technique, and impression verbatim.
+- Format numbers, units (cm, mm, HU, %), and medical terms accurately.
+- Provide ONLY the transcribed text without conversational filler or markdown code blocks.`;
 
   const textPart = { text: prompt };
   const audioPart = {
@@ -747,15 +758,12 @@ export const transcribeAudioForPrompt = async (audioBlob: Blob): Promise<string>
   
   try {
     const response: GenerateContentResponse = await getAiClient().client.models.generateContent({
-      model: getValidModelName('gemini-2.5-flash'),
+      model: getValidModelName(modelName),
       contents: [textPart, audioPart],
     });
 
     const resultText = response.text?.trim();
-    if (!resultText) {
-      return ""; // Return empty string if no transcription
-    }
-    return resultText;
+    return resultText || "";
   } catch (error) {
     console.error("Error calling Gemini API for transcription:", error);
     if (error instanceof Error) {
