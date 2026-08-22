@@ -7,10 +7,8 @@ import TrashIcon from './icons/TrashIcon';
 import PencilIcon from './icons/PencilIcon';
 import MicIcon from './icons/MicIcon';
 import StopIcon from './icons/StopIcon';
-import SendIcon from './icons/SendIcon';
-import MicScribbleIcon from './icons/MicScribbleIcon';
 import TemplateSelectionModal, { SelectedTemplateData } from './ui/TemplateSelectionModal';
-import { mergeFindingsWithTemplate, modifyReportWithText, modifyReportWithAudio } from '../services/geminiService';
+import { mergeFindingsWithTemplate, mergeFindingsWithAst, modifyReportWithText, modifyReportWithAudio } from '../services/geminiService';
 import { mergeFindingsIntoDocx, downloadDocxBlob } from '../services/docxService';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { getUserTemplates, UserTemplate } from '../services/templateStorage';
@@ -107,7 +105,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
     setError(null);
 
     try {
-      const result = await mergeFindingsWithTemplate(
+      const { findings: result, docxBlob } = await mergeFindingsWithAst(
         findingsInput.trim(),
         activeTemplate,
         selectedModel,
@@ -120,7 +118,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
         try {
           const title = activeTemplate.name || result[0] || 'Radiology_Report';
           const cleanFileName = `${title.replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().slice(0, 10)}.docx`;
-          const blob = await mergeFindingsIntoDocx(activeTemplate.docxBase64, result, title);
+          const blob = docxBlob || await mergeFindingsIntoDocx(activeTemplate.docxBase64, result, title);
           downloadDocxBlob(blob, cleanFileName);
           setDownloadSuccess(`Auto-downloaded "${cleanFileName}"`);
           setTimeout(() => setDownloadSuccess(null), 4000);

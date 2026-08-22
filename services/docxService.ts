@@ -53,7 +53,7 @@ async function compressDeflate(rawBytes: Uint8Array): Promise<Uint8Array> {
   return rawBytes;
 }
 
-interface ZipEntry {
+export interface ZipEntry {
   name: string;
   data: Uint8Array;
   method: number; // 0 = stored, 8 = deflated
@@ -63,7 +63,7 @@ interface ZipEntry {
 /**
  * Simple, robust ZIP Parser
  */
-async function parseZip(buffer: ArrayBuffer): Promise<Map<string, ZipEntry>> {
+export async function parseZip(buffer: ArrayBuffer): Promise<Map<string, ZipEntry>> {
   const view = new DataView(buffer);
   const bytes = new Uint8Array(buffer);
   const entries = new Map<string, ZipEntry>();
@@ -119,7 +119,7 @@ async function parseZip(buffer: ArrayBuffer): Promise<Map<string, ZipEntry>> {
 /**
  * Re-pack ZIP entries into a valid DOCX binary archive
  */
-async function createZip(entries: Map<string, Uint8Array>): Promise<Blob> {
+export async function createZip(entries: Map<string, Uint8Array>): Promise<Blob> {
   const fileRecords: Array<{
     nameBytes: Uint8Array;
     compressedData: Uint8Array;
@@ -235,7 +235,7 @@ function escapeXml(unsafe: string): string {
     .replace(/'/g, '&apos;');
 }
 
-function base64ToUint8Array(base64: string): Uint8Array {
+export function base64ToUint8Array(base64: string): Uint8Array {
   const binaryString = atob(base64.trim());
   const len = binaryString.length;
   const bytes = new Uint8Array(len);

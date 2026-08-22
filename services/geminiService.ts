@@ -3,6 +3,7 @@ import { DEFAULT_GEMINI_PROMPT, REPROCESS_GEMINI_PROMPT, TEMPLATE_GEMINI_PROMPT,
 import { IdentifiedError } from "../types";
 import { getRandomApiKey, getFallbackApiKey, getStoredApiKeys } from './apiKeyStore';
 import { extractTextFromDocxBlob } from './docxService';
+import { buildDocumentAstFromDocx, applyAstMutationsToDocx, AstMutation } from './docxAstService';
 
 import { isRAGStyleMatchingEnabled, getRelevantStyleTemplates, augmentPromptWithStyleTemplates } from './reportStyleRAG';
 
@@ -650,9 +651,114 @@ ${JSON.stringify({ findings: currentFindings })}
   }
 };
 
+export const mergeFindingsWithAst = async (
+  findingsText: string,
+  selectedTemplate: { id?: string; name: string; category?: string; modality?: string; lines?: string[]; docxBase64?: string },
+  model: string,
+  customPrompt?: string,
+  customImages?: Array<{ data: string; mimeType: string }> | null
+): Promise<{ findings: string[]; docxBlob?: Blob }> => {
+  if (!selectedTemplate.docxBase64) {
+    const findings = await mergeFindingsWithTemplate(findingsText, selectedTemplate, model, customPrompt, customImages);
+    return { findings };
+  }
+
+  try {
+    const { ast, xmlDoc, zipEntries, pMap, cellMap, impressionSlotIds } = await buildDocumentAstFromDocx(selectedTemplate.docxBase64);
+
+    const astPrompt = `You are an expert radiology report integration engine.
+Your task is to merge the radiologist's findings into the target document's exact Abstract Syntax Tree (AST) nodes.
+
+## TARGET DOCUMENT AST NODES:
+${JSON.stringify(ast, null, 2)}
+
+---
+
+## RADIOLOGIST'S DICTATED / PROVIDED FINDINGS:
+"""
+${findingsText}
+"""
+
+---
+
+## STRICT AST MUTATION RULES:
+1. Identify the exact node_id for each finding:
+   - For standalone headings (e.g. "Right brachial plexus:"), update the narrative node directly following it with the finding.
+   - For inline fields (e.g. "RV diameter: --- cm"), update that field's node with the new value.
+   - For narrative organ sentences (e.g. liver, spleen), update that specific organ node.
+   - For table cells (e.g. clot matrices, score boxes), update that table cell node.
+2. Only include nodes in "updates" that NEED modifications. Do NOT return untouched normal nodes.
+3. If clinical history is provided, update the Clinical Profile node.
+4. Synthesize concise bullet points under "impression".
+5. Also produce full final report lines in "display_findings" array (prefixing abnormal lines with "BOLD::" and final impression as "IMPRESSION:###point 1###point 2...").
+6. Return JSON with structure:
+{
+  "updates": [
+    { "node_id": "p_...", "new_text": "...", "bold": true }
+  ],
+  "impression": ["..."],
+  "display_findings": ["..."]
+}
+${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
+`;
+
+    const parts: any[] = [];
+    if (customImages && customImages.length > 0) {
+      for (const customImage of customImages) {
+        parts.push({
+          inlineData: {
+            mimeType: customImage.mimeType,
+            data: customImage.data,
+          },
+        });
+      }
+    }
+    parts.push({ text: astPrompt });
+
+    const response: GenerateContentResponse = await getAiClient().client.models.generateContent({
+      model: getValidModelName(model),
+      contents: parts,
+      config: {
+        responseMimeType: "application/json",
+      },
+    });
+
+    const jsonString = response.text;
+    if (jsonString) {
+      const cleaned = jsonString.replace(/^```json\s*|```\s*$/g, '').trim();
+      const result = JSON.parse(cleaned);
+
+      const updates: AstMutation[] = Array.isArray(result.updates) ? result.updates : [];
+      const impression: string[] = Array.isArray(result.impression) ? result.impression : [];
+      const displayFindings: string[] = Array.isArray(result.display_findings) && result.display_findings.length > 0
+        ? result.display_findings
+        : [];
+
+      // Apply exact AST mutations to the DOCX DOM
+      const docxBlob = await applyAstMutationsToDocx(
+        xmlDoc,
+        zipEntries,
+        pMap,
+        cellMap,
+        updates,
+        impression,
+        impressionSlotIds
+      );
+
+      const finalFindings = displayFindings.length > 0 ? displayFindings : (selectedTemplate.lines || [selectedTemplate.name]);
+      return { findings: finalFindings, docxBlob };
+    }
+  } catch (astErr) {
+    console.warn('AST merge failed, falling back to standard merger:', astErr);
+  }
+
+  const findings = await mergeFindingsWithTemplate(findingsText, selectedTemplate, model, customPrompt, customImages);
+  return { findings };
+};
+
 export const mergeFindingsWithTemplate = async (
   findingsText: string,
-  selectedTemplate: { id?: string; name: string; category?: string; modality?: string; lines?: string[] },
+  selectedTemplate: { id?: string; name: string; category?: string; modality?: string; lines?: string[]; docxBase64?: string },
   model: string,
   customPrompt?: string,
   customImages?: Array<{ data: string; mimeType: string }> | null
