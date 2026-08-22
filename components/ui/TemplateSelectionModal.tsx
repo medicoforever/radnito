@@ -114,10 +114,8 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
 
     if (activeTab === 'CT') {
       list = list.filter(t => t.category === 'CT' || t.modality === 'CT');
-    } else if (activeTab === 'MRI A') {
-      list = list.filter(t => t.category === 'MRI A' || t.modality === 'MRI A');
-    } else if (activeTab === 'MRI B') {
-      list = list.filter(t => t.category === 'MRI B' || t.modality === 'MRI B');
+    } else if (activeTab === 'MRI') {
+      list = list.filter(t => t.category === 'MRI' || t.modality === 'MRI');
     } else if (activeTab === 'Custom') {
       list = list.filter(t => t.isCustom);
     }
@@ -216,8 +214,6 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
   const getModalityBadgeColor = (mod: string) => {
     switch (mod.toUpperCase()) {
       case 'MRI':
-      case 'MRI A':
-      case 'MRI B':
         return 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 border-purple-200 dark:border-purple-800';
       case 'CT':
         return 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 border-blue-200 dark:border-blue-800';
@@ -242,7 +238,6 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
         className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col max-h-[92vh] border border-slate-200 dark:border-slate-800 overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
-        {/* Header */}
         <header className="p-4 px-6 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-950 flex-shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="p-2 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
@@ -253,7 +248,7 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
                 Select Radiology Report Template
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {allTemplatesList.length} Verified Standard Report Formats (CT, MRI A, MRI B)
+                {allTemplatesList.length} Verified Standard Report Formats (CT & MRI)
               </p>
             </div>
           </div>
@@ -269,26 +264,17 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={isUploading}
-              className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow flex items-center gap-1.5 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
             >
-              {isUploading ? (
-                <>
-                  <Spinner className="w-3.5 h-3.5" />
-                  <span>Processing...</span>
-                </>
-              ) : (
-                <>
-                  <UploadIcon className="w-3.5 h-3.5" />
-                  <span>Upload Template (.docx)</span>
-                </>
-              )}
+              <UploadIcon className="w-3.5 h-3.5" />
+              {isUploading ? 'Parsing...' : 'Upload DOCX Template'}
             </button>
             <button
+              type="button"
               onClick={onClose}
-              className="p-1.5 rounded-full hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition-colors"
-              aria-label="Close template selection"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             >
-              <CloseIcon className="w-5 h-5" />
+              <XIcon className="w-5 h-5" />
             </button>
           </div>
         </header>
@@ -306,42 +292,41 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
           </div>
         )}
 
-        {/* Search, Modality Tabs & Organ Filters */}
-        <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex-shrink-0 space-y-3">
+        <div className="p-4 px-6 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col gap-3 flex-shrink-0">
           <div className="relative">
+            <SearchIcon className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Search by title or anatomy (e.g. Brain, CT Brain Plain, MRCP, Stroke, Cervical Spine, Knee)..."
-              className="w-full p-2.5 pl-10 border border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50 text-slate-900 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none dark:bg-slate-950 dark:text-white text-sm"
-              aria-label="Search templates"
+              placeholder="Search by organ, procedure, modality, or keywords (e.g. Brain, Abdomen, PE, Spine)..."
+              className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
               autoFocus
             />
-            <div className="absolute left-3 top-1/2 -translate-y-1/2">
-              <SearchIcon className="w-4 h-4 text-slate-400" />
-            </div>
             {searchQuery && (
               <button
+                type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 hover:text-slate-600"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
               >
-                Clear
+                <XIcon className="w-4 h-4" />
               </button>
             )}
           </div>
 
-          {/* Quick Body Region / Organ Shortcuts */}
-          <div className="flex gap-1.5 overflow-x-auto pb-0.5 no-scrollbar text-[11px]">
-            <span className="text-slate-400 dark:text-slate-500 font-bold self-center mr-1">Quick:</span>
+          <div className="flex flex-wrap gap-1.5 items-center">
+            <span className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 mr-1 flex items-center gap-1">
+              <SparklesIcon className="w-3 h-3 text-amber-500" />
+              Quick:
+            </span>
             {ORGAN_TAGS.map(tag => (
               <button
                 key={tag.label}
                 type="button"
                 onClick={() => setSearchQuery(searchQuery === tag.query ? '' : tag.query)}
-                className={`px-2.5 py-1 rounded-lg border transition-all ${
+                className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
                   searchQuery === tag.query
-                    ? 'bg-blue-50 dark:bg-blue-950 border-blue-400 text-blue-700 dark:text-blue-300 font-bold'
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
                     : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-slate-300'
                 }`}
               >
@@ -350,13 +335,11 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
             ))}
           </div>
 
-          {/* Modality Tabs */}
           <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs font-semibold">
             {[
               { id: 'ALL', label: `All (${allTemplatesList.length})` },
               { id: 'CT', label: `CT (${allTemplatesList.filter(t => t.category === 'CT' || t.modality === 'CT').length})` },
-              { id: 'MRI A', label: `MRI A (${allTemplatesList.filter(t => t.category === 'MRI A' || t.modality === 'MRI A').length})` },
-              { id: 'MRI B', label: `MRI B (${allTemplatesList.filter(t => t.category === 'MRI B' || t.modality === 'MRI B').length})` },
+              { id: 'MRI', label: `MRI (${allTemplatesList.filter(t => t.category === 'MRI' || t.modality === 'MRI').length})` },
               ...(allTemplatesList.some(t => t.isCustom)
                 ? [{ id: 'Custom', label: `My Custom (${allTemplatesList.filter(t => t.isCustom).length})` }]
                 : []),

@@ -256,13 +256,13 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
             <span className="bg-white/20 text-white text-[11px] font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
               Direct Merge Mode
             </span>
-            <span className="text-xs text-blue-200">104 Clean CT & MRI Formats</span>
+            <span className="text-xs text-blue-200">72 Curated CT & MRI Formats</span>
           </div>
           <h2 className="text-xl sm:text-2xl font-black tracking-tight">
             Merge Findings into Report Template
           </h2>
           <p className="text-xs sm:text-sm text-blue-100 max-w-xl">
-            Have your findings as text? Select your preferred CT, MRI A, or MRI B template and let AI seamlessly slot findings into the standard report structure with automatic Word (.docx) export.
+            Have your findings as text? Select your preferred CT or MRI template and let AI seamlessly slot findings into the standard report structure with automatic Word (.docx) export.
           </p>
         </div>
 
@@ -298,7 +298,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
           <p className="text-xs text-slate-500 dark:text-slate-400">
             {activeTemplate
               ? `${activeTemplate.lines?.length || 0} standard normal sections • Times New Roman 12pt format`
-              : 'Please choose a CT, MRI A, MRI B, or custom template to merge your findings.'}
+              : 'Please choose a CT, MRI, or custom template to merge your findings.'}
           </p>
         </div>
 
