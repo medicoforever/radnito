@@ -517,8 +517,144 @@ export async function generateDocxFromFindings(
   return createZip(entries);
 }
 
+const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+
+function getParagraphText(p: Element): string {
+  const tTags = p.getElementsByTagName('w:t');
+  let txt = '';
+  for (let i = 0; i < tTags.length; i++) {
+    txt += tTags[i].textContent || '';
+  }
+  return txt;
+}
+
+function getDirectChildElements(parent: Element, localName: string): Element[] {
+  const result: Element[] = [];
+  for (let i = 0; i < parent.childNodes.length; i++) {
+    const node = parent.childNodes[i];
+    if (node.nodeType === 1) {
+      const el = node as Element;
+      if (el.localName === localName || el.nodeName === `w:${localName}`) {
+        result.push(el);
+      }
+    }
+  }
+  return result;
+}
+
+function collectBodyParagraphs(parent: Element): Element[] {
+  const paragraphs: Element[] = [];
+  for (let i = 0; i < parent.childNodes.length; i++) {
+    const node = parent.childNodes[i];
+    if (node.nodeType === 1) {
+      const el = node as Element;
+      const name = el.localName || el.nodeName.replace(/^w:/, '');
+      if (name === 'p') {
+        paragraphs.push(el);
+      } else if (name === 'sdt') {
+        const sdtContent = getDirectChildElements(el, 'sdtContent')[0] || el.getElementsByTagName('w:sdtContent')[0];
+        if (sdtContent) {
+          paragraphs.push(...collectBodyParagraphs(sdtContent));
+        }
+      }
+    }
+  }
+  return paragraphs;
+}
+
+function updateParagraphSurgical(
+  xmlDoc: Document,
+  p: Element,
+  newText: string,
+  forceBold?: boolean
+): void {
+  const isBold = forceBold || newText.startsWith('BOLD::');
+  const cleanText = newText.replace(/^BOLD::\s*/, '').trim();
+
+  const allRuns: Element[] = [];
+  for (let i = 0; i < p.childNodes.length; i++) {
+    if (p.childNodes[i].nodeName === 'w:r') {
+      allRuns.push(p.childNodes[i] as Element);
+    }
+  }
+  const fullText = getParagraphText(p);
+
+  // 1. If paragraph has a colon (e.g. "Right brachial plexus:" or "RV diameter: --- cm")
+  if (fullText.includes(':')) {
+    const colonPos = fullText.indexOf(':');
+    const newVal = cleanText.includes(':') ? cleanText.slice(cleanText.indexOf(':') + 1).trim() : cleanText.trim();
+
+    let accLen = 0;
+    let colonRunIdx = -1;
+
+    for (let i = 0; i < allRuns.length; i++) {
+      const runTxt = getParagraphText(allRuns[i]);
+      if (accLen + runTxt.length > colonPos) {
+        colonRunIdx = i;
+        break;
+      }
+      accLen += runTxt.length;
+    }
+
+    if (colonRunIdx !== -1) {
+      if (colonRunIdx + 1 < allRuns.length) {
+        // Value is in a subsequent run -> update text node of that run
+        const valRun = allRuns[colonRunIdx + 1];
+        const tTags = valRun.getElementsByTagName('w:t');
+        if (tTags.length > 0) {
+          tTags[0].textContent = ' ' + newVal;
+          tTags[0].setAttribute('xml:space', 'preserve');
+          for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
+        }
+        for (let j = colonRunIdx + 2; j < allRuns.length; j++) {
+          const laterTags = allRuns[j].getElementsByTagName('w:t');
+          for (let k = 0; k < laterTags.length; k++) laterTags[k].textContent = '';
+        }
+      } else {
+        // Colon and value share the same run -> keep text up to colon, append new value
+        const valRun = allRuns[colonRunIdx];
+        const tTags = valRun.getElementsByTagName('w:t');
+        if (tTags.length > 0) {
+          const runTxt = getParagraphText(valRun);
+          const cInRun = runTxt.indexOf(':');
+          tTags[0].textContent = runTxt.slice(0, cInRun + 1) + ' ' + newVal;
+          tTags[0].setAttribute('xml:space', 'preserve');
+          for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
+        }
+      }
+      return;
+    }
+  }
+
+  // 2. Plain narrative paragraph
+  if (allRuns.length > 0) {
+    const firstRun = allRuns[0];
+    const tTags = firstRun.getElementsByTagName('w:t');
+    if (tTags.length > 0) {
+      tTags[0].textContent = cleanText;
+      tTags[0].setAttribute('xml:space', 'preserve');
+      for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
+    }
+    for (let j = 1; j < allRuns.length; j++) {
+      const laterTags = allRuns[j].getElementsByTagName('w:t');
+      for (let k = 0; k < laterTags.length; k++) laterTags[k].textContent = '';
+    }
+  }
+}
+
+function updateCellSurgical(xmlDoc: Document, tc: Element, value: string, bold?: boolean): void {
+  const p = tc.getElementsByTagName('w:p')[0];
+  if (!p) return;
+  const tTags = p.getElementsByTagName('w:t');
+  if (tTags.length > 0) {
+    tTags[0].textContent = value;
+    tTags[0].setAttribute('xml:space', 'preserve');
+    for (let i = 1; i < tTags.length; i++) tTags[i].textContent = '';
+  }
+}
+
 /**
- * Merge an array of findings into a DOCX template while preserving 100% of formatting, styles, and layout!
+ * Merge findings into a DOCX template with 100% formatting, headings, and style preservation!
  */
 export async function mergeFindingsIntoDocx(
   templateDocxBase64?: string,
@@ -529,38 +665,247 @@ export async function mergeFindingsIntoDocx(
     return generateDocxFromFindings(findings, fallbackTitle);
   }
 
-  try {
-    const templateBytes = base64ToUint8Array(templateDocxBase64);
-    const zipEntries = await parseZip(templateBytes.buffer);
+  const templateBytes = base64ToUint8Array(templateDocxBase64);
 
+  // 1. Bit-Exact Preservation: If no abnormalities are dictated, return original file bit-for-bit!
+  const hasAbnormalities = findings.some(f => f.startsWith('BOLD::'));
+  const hasCustomHistory = findings.some(f => {
+    const l = f.toLowerCase().trim();
+    return (l.startsWith('clinical profile:') || l.startsWith('history:') || l.startsWith('clinical history:')) &&
+      l.length > 20 && !l.includes('none') && !l.includes('none specified');
+  });
+
+  if (!hasAbnormalities && !hasCustomHistory) {
+    return new Blob([templateBytes], {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    });
+  }
+
+  try {
+    const zipEntries = await parseZip(templateBytes.buffer);
     const docXmlEntry = zipEntries.get('word/document.xml');
     if (!docXmlEntry) {
-      return generateDocxFromFindings(findings, fallbackTitle);
+      return new Blob([templateBytes], {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
     }
 
     const decoder = new TextDecoder('utf-8');
     const originalDocXml = decoder.decode(docXmlEntry.data);
 
-    // Extract sectPr (margins & layout) from original document
-    const sectPrMatch = originalDocXml.match(/<w:sectPr[\s\S]*?<\/w:sectPr>/i);
-    const sectPrXml = sectPrMatch ? sectPrMatch[0] : `
-      <w:sectPr>
-        <w:pgSz w:w="11906" w:h="16838"/>
-        <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/>
-        <w:cols w:space="720"/>
-        <w:docGrid w:linePitch="360"/>
-      </w:sectPr>
-    `;
+    // Parse template XML into DOM for surgical in-place editing
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(originalDocXml, 'application/xml');
 
-    const bodyXmlParts = parseFindingsToParagraphs(findings);
-    bodyXmlParts.push(sectPrXml);
+    const bodyElem = xmlDoc.getElementsByTagName('w:body')[0];
+    if (!bodyElem) {
+      return new Blob([templateBytes], {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
+    }
 
-    const newBodyContent = bodyXmlParts.join('');
+    // Collect block-level body paragraphs (excluding table cells)
+    const directBodyParagraphs = collectBodyParagraphs(bodyElem);
 
-    const modifiedDocXml = originalDocXml.replace(
-      /<w:body>[\s\S]*?<\/w:body>/i,
-      `<w:body>${newBodyContent}</w:body>`
-    );
+    // Build finding map for labeled lines
+    const findingMap = new Map<string, string>();
+    let clinicalHistoryText: string | null = null;
+    let comparisonText: string | null = null;
+    let techniqueText: string | null = null;
+    const impressionItems: string[] = [];
+    const abnormalNarratives: string[] = [];
+
+    for (const f of findings) {
+      const trimmed = f.trim();
+      if (!trimmed) continue;
+      const lower = trimmed.toLowerCase();
+
+      if (lower.startsWith('history:') || lower.startsWith('clinical history:') || lower.startsWith('clinical profile:')) {
+        const val = trimmed.split(':', 2)[1]?.trim();
+        if (val && !val.toLowerCase().includes('none specified')) {
+          clinicalHistoryText = val;
+        }
+        continue;
+      }
+      if (lower.startsWith('comparison:')) {
+        comparisonText = trimmed;
+        continue;
+      }
+      if (lower.startsWith('technique:') || lower.startsWith('ct technique:') || lower.startsWith('mri technique:')) {
+        techniqueText = trimmed;
+        continue;
+      }
+      if (lower.startsWith('impression:')) {
+        const impContent = trimmed.slice(11).trim();
+        const parts = impContent.split('###').map(p => p.trim()).filter(Boolean);
+        impressionItems.push(...parts);
+        continue;
+      }
+
+      if (trimmed.includes(':') && !trimmed.toUpperCase().startsWith('FINDINGS') && !trimmed.toUpperCase().startsWith('OBSERVATIONS') && !trimmed.toUpperCase().startsWith('MEASUREMENTS') && !trimmed.toUpperCase().startsWith('INDIRECT')) {
+        const colonIdx = trimmed.indexOf(':');
+        const prefix = trimmed.slice(0, colonIdx).replace(/^BOLD::\s*/, '').trim();
+        const key = normalizeKey(prefix);
+        if (key && key.length >= 2) {
+          findingMap.set(key, trimmed);
+        }
+      } else if (trimmed.startsWith('BOLD::')) {
+        abnormalNarratives.push(trimmed.replace(/^BOLD::\s*/, '').trim());
+      }
+    }
+
+    // 2. Update Direct Body Paragraphs Surgically In-Place
+    for (const p of directBodyParagraphs) {
+      const origText = getParagraphText(p).trim();
+      if (!origText) continue;
+      const lower = origText.toLowerCase();
+
+      // Clinical History / Profile
+      if (clinicalHistoryText && (lower.startsWith('clinical profile:') || lower.startsWith('history:') || lower.startsWith('clinical history:') || lower.startsWith('clinical indication:'))) {
+        updateParagraphSurgical(xmlDoc, p, `Clinical Profile: ${clinicalHistoryText.replace(/^clinical\s+profile:\s*/i, '')}`);
+        continue;
+      }
+
+      // Comparison
+      if (comparisonText && lower.startsWith('comparison:')) {
+        updateParagraphSurgical(xmlDoc, p, comparisonText);
+        continue;
+      }
+
+      // Technique
+      if (techniqueText && (lower.startsWith('technique:') || lower.startsWith('ct technique:') || lower.startsWith('mri technique:'))) {
+        updateParagraphSurgical(xmlDoc, p, techniqueText);
+        continue;
+      }
+
+      // Labeled Paragraphs (Organ: Description or Heading: Content)
+      if (origText.includes(':') && !origText.toUpperCase().startsWith('IMPRESSION') && !origText.toUpperCase().startsWith('FINDINGS') && !origText.toUpperCase().startsWith('OBSERVATIONS') && !origText.toUpperCase().startsWith('MEASUREMENTS') && !origText.toUpperCase().startsWith('INDIRECT')) {
+        const colonIdx = origText.indexOf(':');
+        const prefix = origText.slice(0, colonIdx).trim();
+        const key = normalizeKey(prefix);
+
+        if (key && findingMap.has(key)) {
+          const matchedFinding = findingMap.get(key)!;
+          updateParagraphSurgical(xmlDoc, p, matchedFinding);
+          findingMap.delete(key);
+          continue;
+        }
+      }
+
+      // Normal narrative finding replacement (e.g. "No evidence of filling defect...")
+      const isNormalNarrative = /no evidence of filling defect|no evidence of acute|within normal limits|no significant abnormality/i.test(origText);
+      if (isNormalNarrative && abnormalNarratives.length > 0) {
+        const joinedNarrative = abnormalNarratives.join(' ');
+        updateParagraphSurgical(xmlDoc, p, joinedNarrative, true);
+        abnormalNarratives.length = 0;
+      }
+    }
+
+    // 3. Update Tables (e.g. Qanadli single-cell tables, clot matrix tables)
+    const allTables = Array.from(xmlDoc.getElementsByTagName('w:tbl'));
+
+    // Check single-cell score box (e.g. Qanadli 0 %)
+    const scoreUpdate = findings.find(f => f.includes('%') && (f.toLowerCase().includes('qanadli') || f.toLowerCase().includes('score') || f.toLowerCase().includes('clot load')));
+    if (scoreUpdate && allTables.length >= 2) {
+      for (const tbl of allTables) {
+        const rows = getDirectChildElements(tbl, 'tr');
+        if (rows.length === 1) {
+          const cells = getDirectChildElements(rows[0], 'tc');
+          if (cells.length === 1) {
+            const cellText = getParagraphText(cells[0]).trim();
+            if (cellText.includes('%') || cellText === '0') {
+              const val = scoreUpdate.replace(/^BOLD::\s*/, '').trim();
+              updateCellSurgical(xmlDoc, cells[0], val, true);
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // Auto-populate Clot Load Table (Table 3) if CTPA findings contain thrombosis mentions
+    if (allTables.length >= 3) {
+      const matrixTbl = allTables[2];
+      const allFindingsText = findings.join(' ').toLowerCase();
+
+      const peMapping: Record<string, string[]> = {
+        'right upper lobar': ['rul', 'apicalra1', 'anteriorra2', 'posteriorra3'],
+        'apicoposterior': ['apicopostla13'],
+        'superior segment of the left lower lobe': ['superiorla6'],
+        'left upper lobar': ['lul'],
+        'left lower lobar': ['lll'],
+        'right lower lobar': ['rll'],
+        'right middle lobar': ['rml']
+      };
+
+      const rows = getDirectChildElements(matrixTbl, 'tr');
+      for (let ri = 2; ri < rows.length; ri++) {
+        const cells = getDirectChildElements(rows[ri], 'tc');
+        if (cells.length < 2) continue;
+        const rowLabelNorm = normalizeKey(getParagraphText(cells[0]));
+
+        for (const [phrase, targets] of Object.entries(peMapping)) {
+          if (allFindingsText.includes(phrase)) {
+            if (targets.some(t => rowLabelNorm.includes(t) || t.includes(rowLabelNorm))) {
+              updateCellSurgical(xmlDoc, cells[1], '+', true);
+            }
+          }
+        }
+      }
+    }
+
+    // 4. Update Impression Section
+    if (impressionItems.length > 0 && hasAbnormalities) {
+      let impressionHeaderIdx = -1;
+      for (let idx = 0; idx < directBodyParagraphs.length; idx++) {
+        const pText = getParagraphText(directBodyParagraphs[idx]).trim().toUpperCase();
+        if (pText === 'IMPRESSION:' || pText.startsWith('IMPRESSION:') || pText === 'CONCLUSION:') {
+          impressionHeaderIdx = idx;
+          break;
+        }
+      }
+
+      if (impressionHeaderIdx !== -1) {
+        const impressionSlotParagraphs: Element[] = [];
+        for (let idx = impressionHeaderIdx + 1; idx < directBodyParagraphs.length; idx++) {
+          const p = directBodyParagraphs[idx];
+          const pText = getParagraphText(p).trim();
+          if (pText.includes('MD') || pText.includes('RADIOLOGIST') || pText.includes('Page ')) {
+            break;
+          }
+          impressionSlotParagraphs.push(p);
+        }
+
+        if (impressionSlotParagraphs.length > 0) {
+          const lastSlot = impressionSlotParagraphs[impressionSlotParagraphs.length - 1];
+          let lastInserted = lastSlot;
+
+          for (let i = 0; i < impressionItems.length; i++) {
+            const cleanBullet = impressionItems[i].replace(/^•\s*/, '').trim();
+            if (i < impressionSlotParagraphs.length) {
+              updateParagraphSurgical(xmlDoc, impressionSlotParagraphs[i], `• ${cleanBullet}`);
+            } else {
+              const newP = lastSlot.cloneNode(true) as Element;
+              updateParagraphSurgical(xmlDoc, newP, `• ${cleanBullet}`);
+              lastInserted.parentNode?.insertBefore(newP, lastInserted.nextSibling);
+              lastInserted = newP;
+            }
+          }
+
+          for (let i = impressionItems.length; i < impressionSlotParagraphs.length; i++) {
+            const p = impressionSlotParagraphs[i];
+            const tTags = p.getElementsByTagName('w:t');
+            for (let j = 0; j < tTags.length; j++) {
+              tTags[j].textContent = '';
+            }
+          }
+        }
+      }
+    }
+
+    // Serialize modified DOM back to XML
+    const serializer = new XMLSerializer();
+    const modifiedDocXml = serializer.serializeToString(xmlDoc);
 
     const updatedEntries = new Map<string, Uint8Array>();
     for (const [name, entry] of zipEntries) {
@@ -574,8 +919,10 @@ export async function mergeFindingsIntoDocx(
 
     return createZip(updatedEntries);
   } catch (e) {
-    console.warn('mergeFindingsIntoDocx fallback to generateDocxFromFindings:', e);
-    return generateDocxFromFindings(findings, fallbackTitle);
+    console.warn('mergeFindingsIntoDocx in-place error, returning original template:', e);
+    return new Blob([templateBytes], {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    });
   }
 }
 
