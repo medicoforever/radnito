@@ -234,10 +234,19 @@ export async function applyAstMutationsToDocx(
       const lastSlot = slotElements[slotElements.length - 1];
       let lastInserted = lastSlot;
 
+      const hasNativeBullet = (p: Element): boolean => {
+        const pPr = p.getElementsByTagName('w:pPr')[0];
+        if (!pPr) return false;
+        const numPr = pPr.getElementsByTagName('w:numPr')[0];
+        return !!numPr;
+      };
+
       for (let i = 0; i < impressionItems.length; i++) {
-        const bulletText = `• ${impressionItems[i].replace(/^[•\\-\\*\\s]+/, '').trim()}`;
+        const cleanBullet = impressionItems[i].replace(/^[•\-\*\s]+/, '').trim();
         if (i < slotElements.length) {
           const p = slotElements[i];
+          const isNative = hasNativeBullet(p);
+          const bulletText = isNative ? cleanBullet : `• ${cleanBullet}`;
           const tTags = p.getElementsByTagName('w:t');
           if (tTags.length > 0) {
             tTags[0].textContent = bulletText;
@@ -246,6 +255,8 @@ export async function applyAstMutationsToDocx(
           }
         } else {
           const newP = lastSlot.cloneNode(true) as Element;
+          const isNative = hasNativeBullet(newP);
+          const bulletText = isNative ? cleanBullet : `• ${cleanBullet}`;
           const tTags = newP.getElementsByTagName('w:t');
           if (tTags.length > 0) {
             tTags[0].textContent = bulletText;

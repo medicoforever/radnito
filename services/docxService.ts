@@ -941,13 +941,23 @@ export async function mergeFindingsIntoDocx(
           const lastSlot = impressionSlotParagraphs[impressionSlotParagraphs.length - 1];
           let lastInserted = lastSlot;
 
+          const hasNativeBullet = (p: Element): boolean => {
+            const pPr = p.getElementsByTagName('w:pPr')[0];
+            if (!pPr) return false;
+            const numPr = pPr.getElementsByTagName('w:numPr')[0];
+            return !!numPr;
+          };
+
           for (let i = 0; i < impressionItems.length; i++) {
             const cleanBullet = impressionItems[i].replace(/^[•\-\*\s]+/, '').trim();
             if (i < impressionSlotParagraphs.length) {
-              updateParagraphSurgical(xmlDoc, impressionSlotParagraphs[i], `• ${cleanBullet}`);
+              const p = impressionSlotParagraphs[i];
+              const isNative = hasNativeBullet(p);
+              updateParagraphSurgical(xmlDoc, p, isNative ? cleanBullet : `• ${cleanBullet}`);
             } else {
               const newP = lastSlot.cloneNode(true) as Element;
-              updateParagraphSurgical(xmlDoc, newP, `• ${cleanBullet}`);
+              const isNative = hasNativeBullet(newP);
+              updateParagraphSurgical(xmlDoc, newP, isNative ? cleanBullet : `• ${cleanBullet}`);
               lastInserted.parentNode?.insertBefore(newP, lastInserted.nextSibling);
               lastInserted = newP;
             }

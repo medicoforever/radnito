@@ -7,6 +7,8 @@ import TrashIcon from './icons/TrashIcon';
 import PencilIcon from './icons/PencilIcon';
 import MicIcon from './icons/MicIcon';
 import StopIcon from './icons/StopIcon';
+import SendIcon from './icons/SendIcon';
+import MicScribbleIcon from './icons/MicScribbleIcon';
 import TemplateSelectionModal, { SelectedTemplateData } from './ui/TemplateSelectionModal';
 import { mergeFindingsWithTemplate, mergeFindingsWithAst, modifyReportWithText, modifyReportWithAudio } from '../services/geminiService';
 import { mergeFindingsIntoDocx, downloadDocxBlob } from '../services/docxService';
