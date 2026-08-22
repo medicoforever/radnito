@@ -837,6 +837,20 @@ export async function mergeFindingsIntoDocx(
         }
       }
 
+      // Anatomical Keyword Matching for Narrative Sentences (e.g. "The study shows normal anatomical configuration of the liver...")
+      if (!origText.toUpperCase().startsWith('IMPRESSION') && !origText.toUpperCase().startsWith('FINDINGS') && !origText.toUpperCase().startsWith('OBSERVATIONS') && !origText.toUpperCase().startsWith('C.T.') && !origText.toUpperCase().startsWith('MRI')) {
+        for (const [key, lines] of Array.from(sectionMap.entries())) {
+          if (key.length >= 3 && lower.includes(key)) {
+            const joined = lines.map(l => l.replace(/^BOLD::\s*/, '').trim()).filter(Boolean).join(' ');
+            if (joined) {
+              updateParagraphSurgical(xmlDoc, p, joined);
+            }
+            sectionMap.delete(key);
+            break;
+          }
+        }
+      }
+
       // Normal narrative finding replacement (e.g. "No evidence of filling defect...")
       const isNormalNarrative = /no evidence of filling defect|no evidence of acute|within normal limits|no significant abnormality/i.test(origText);
       if (isNormalNarrative && abnormalNarratives.length > 0) {
