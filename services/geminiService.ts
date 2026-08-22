@@ -181,6 +181,12 @@ export const getValidModelName = (model?: string): string => {
   return model;
 };
 
+const audioTranscriptCache = new WeakMap<Blob, string>();
+
+export const getCachedAudioTranscript = (audioBlob: Blob): string | undefined => {
+  return audioTranscriptCache.get(audioBlob);
+};
+
 export const processAudio = async (
   audioBlob: Blob, 
   model: string, 
@@ -194,13 +200,28 @@ export const processAudio = async (
 
   // 2-STEP PIPELINE: When a template is selected for audio dictation
   if (selectedTemplate && selectedTemplate.lines && selectedTemplate.lines.length > 0 && !isReprocessing) {
-    // Step 1: Transcribe audio to verbatim clinical text
-    const transcribedText = await transcribeAudioForPrompt(audioBlob, model);
+    let transcribedText = audioTranscriptCache.get(audioBlob);
+    if (!transcribedText || !transcribedText.trim()) {
+      // Step 1: Transcribe audio to verbatim clinical text
+      transcribedText = await transcribeAudioForPrompt(audioBlob, model);
+      if (transcribedText) {
+        audioTranscriptCache.set(audioBlob, transcribedText);
+      }
+    }
+
     if (!transcribedText || !transcribedText.trim()) {
       return selectedTemplate.lines;
     }
+
     // Step 2: Merge transcribed findings into the template
-    return mergeFindingsWithTemplate(transcribedText, selectedTemplate, model, customPrompt, customImages);
+    try {
+      return await mergeFindingsWithTemplate(transcribedText, selectedTemplate, model, customPrompt, customImages);
+    } catch (step2Error: any) {
+      const err = new Error(`Audio transcribed successfully ("${transcribedText.slice(0, 60)}..."), but template merge failed: ${step2Error.message || step2Error}`);
+      (err as any).transcribedText = transcribedText;
+      (err as any).isStep2Failure = true;
+      throw err;
+    }
   }
 
   const fileName = (audioBlob as any).name;

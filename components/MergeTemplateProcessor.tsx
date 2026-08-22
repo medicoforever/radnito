@@ -403,8 +403,33 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
           </div>
 
           {error && (
-            <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-xs font-semibold rounded-xl">
-              ⚠️ {error}
+            <div className="p-3.5 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-xs font-semibold rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="space-y-1">
+                <span>⚠️ {error}</span>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 font-normal">
+                  Your findings are preserved. You can click Try Again or pick a different model to retry.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <select
+                  value={selectedModel}
+                  onChange={e => setSelectedModel(e.target.value)}
+                  className="text-xs py-1 px-2 rounded-lg border border-red-300 dark:border-red-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-white focus:outline-none"
+                >
+                  <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                  <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                  <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={handleMerge}
+                  disabled={isProcessing}
+                  className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-xs shadow transition-all whitespace-nowrap"
+                >
+                  ↻ Try Again
+                </button>
+              </div>
             </div>
           )}
 
