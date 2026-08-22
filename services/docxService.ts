@@ -707,8 +707,9 @@ export async function mergeFindingsIntoDocx(
     // Collect block-level body paragraphs (excluding table cells)
     const directBodyParagraphs = collectBodyParagraphs(bodyElem);
 
-    // Build finding map for labeled lines
-    const findingMap = new Map<string, string>();
+    // Build section map and clean impression items
+    const sectionMap = new Map<string, string[]>();
+    let currentSectionKey: string | null = null;
     let clinicalHistoryText: string | null = null;
     let comparisonText: string | null = null;
     let techniqueText: string | null = null;
@@ -718,44 +719,61 @@ export async function mergeFindingsIntoDocx(
     for (const f of findings) {
       const trimmed = f.trim();
       if (!trimmed) continue;
-      const lower = trimmed.toLowerCase();
+      const clean = trimmed.replace(/^BOLD::\s*/, '').trim();
+      const lower = clean.toLowerCase();
 
       if (lower.startsWith('history:') || lower.startsWith('clinical history:') || lower.startsWith('clinical profile:')) {
-        const val = trimmed.split(':', 2)[1]?.trim();
+        const val = clean.split(':', 2)[1]?.trim();
         if (val && !val.toLowerCase().includes('none specified')) {
           clinicalHistoryText = val;
         }
+        currentSectionKey = null;
         continue;
       }
       if (lower.startsWith('comparison:')) {
-        comparisonText = trimmed;
+        comparisonText = clean;
+        currentSectionKey = null;
         continue;
       }
       if (lower.startsWith('technique:') || lower.startsWith('ct technique:') || lower.startsWith('mri technique:')) {
-        techniqueText = trimmed;
+        techniqueText = clean;
+        currentSectionKey = null;
         continue;
       }
       if (lower.startsWith('impression:')) {
-        const impContent = trimmed.slice(11).trim();
+        const impContent = clean.slice(11).trim();
         const parts = impContent.split('###').map(p => p.trim()).filter(Boolean);
-        impressionItems.push(...parts);
+        for (const p of parts) {
+          const b = p.replace(/^[•\-\*\s]+/, '').trim();
+          if (b) impressionItems.push(b);
+        }
+        currentSectionKey = null;
         continue;
       }
 
-      if (trimmed.includes(':') && !trimmed.toUpperCase().startsWith('FINDINGS') && !trimmed.toUpperCase().startsWith('OBSERVATIONS') && !trimmed.toUpperCase().startsWith('MEASUREMENTS') && !trimmed.toUpperCase().startsWith('INDIRECT')) {
-        const colonIdx = trimmed.indexOf(':');
-        const prefix = trimmed.slice(0, colonIdx).replace(/^BOLD::\s*/, '').trim();
+      // Detect section heading line (e.g. "Right brachial plexus:" or "Liver:")
+      if (clean.endsWith(':') || (clean.includes(':') && clean.split(':')[0].split(/\s+/).length <= 4 && !clean.split(':')[1].trim())) {
+        currentSectionKey = normalizeKey(clean.split(':')[0]);
+        if (currentSectionKey) {
+          sectionMap.set(currentSectionKey, []);
+        }
+      } else if (currentSectionKey) {
+        sectionMap.get(currentSectionKey)?.push(trimmed);
+      } else if (clean.includes(':') && !clean.toUpperCase().startsWith('FINDINGS') && !clean.toUpperCase().startsWith('OBSERVATIONS') && !clean.toUpperCase().startsWith('MEASUREMENTS') && !clean.toUpperCase().startsWith('INDIRECT')) {
+        const colonIdx = clean.indexOf(':');
+        const prefix = clean.slice(0, colonIdx).trim();
         const key = normalizeKey(prefix);
         if (key && key.length >= 2) {
-          findingMap.set(key, trimmed);
+          sectionMap.set(key, [trimmed]);
         }
       } else if (trimmed.startsWith('BOLD::')) {
-        abnormalNarratives.push(trimmed.replace(/^BOLD::\s*/, '').trim());
+        abnormalNarratives.push(clean);
       }
     }
 
     // 2. Update Direct Body Paragraphs Surgically In-Place
-    for (const p of directBodyParagraphs) {
+    for (let idx = 0; idx < directBodyParagraphs.length; idx++) {
+      const p = directBodyParagraphs[idx];
       const origText = getParagraphText(p).trim();
       if (!origText) continue;
       const lower = origText.toLowerCase();
@@ -778,16 +796,43 @@ export async function mergeFindingsIntoDocx(
         continue;
       }
 
-      // Labeled Paragraphs (Organ: Description or Heading: Content)
-      if (origText.includes(':') && !origText.toUpperCase().startsWith('IMPRESSION') && !origText.toUpperCase().startsWith('FINDINGS') && !origText.toUpperCase().startsWith('OBSERVATIONS') && !origText.toUpperCase().startsWith('MEASUREMENTS') && !origText.toUpperCase().startsWith('INDIRECT')) {
+      // Check if this paragraph is a Section Heading (e.g. "Right brachial plexus:")
+      if (origText.endsWith(':') || (origText.includes(':') && origText.split(':')[0].split(/\s+/).length <= 4 && !origText.split(':')[1].trim())) {
+        const secKey = normalizeKey(origText.split(':')[0]);
+        if (secKey && sectionMap.has(secKey)) {
+          const contentLines = sectionMap.get(secKey)!;
+          // Find following narrative paragraph(s) before next heading
+          for (let nextIdx = idx + 1; nextIdx < directBodyParagraphs.length; nextIdx++) {
+            const nextP = directBodyParagraphs[nextIdx];
+            const nextTxt = getParagraphText(nextP).trim();
+            if (nextTxt) {
+              if (nextTxt.endsWith(':') || nextTxt.toUpperCase().startsWith('IMPRESSION') || nextTxt.toUpperCase().startsWith('CONCLUSION')) {
+                break; // Reached next heading
+              }
+              const joinedContent = contentLines.map(cl => cl.replace(/^BOLD::\s*/, '').trim()).filter(Boolean).join(' ');
+              if (joinedContent) {
+                updateParagraphSurgical(xmlDoc, nextP, joinedContent);
+              }
+              break;
+            }
+          }
+          sectionMap.delete(secKey);
+          continue;
+        }
+      }
+
+      // Labeled Paragraphs (Inline "Label: Value" like "RV diameter: --- cm" or "Azygous vein: 0.6 cm.")
+      if (origText.includes(':') && origText.split(':', 2)[1]?.trim() && !origText.toUpperCase().startsWith('IMPRESSION') && !origText.toUpperCase().startsWith('FINDINGS') && !origText.toUpperCase().startsWith('OBSERVATIONS') && !origText.toUpperCase().startsWith('MEASUREMENTS') && !origText.toUpperCase().startsWith('INDIRECT')) {
         const colonIdx = origText.indexOf(':');
         const prefix = origText.slice(0, colonIdx).trim();
         const key = normalizeKey(prefix);
 
-        if (key && findingMap.has(key)) {
-          const matchedFinding = findingMap.get(key)!;
-          updateParagraphSurgical(xmlDoc, p, matchedFinding);
-          findingMap.delete(key);
+        if (key && sectionMap.has(key)) {
+          const matchedLines = sectionMap.get(key)!;
+          if (matchedLines.length > 0) {
+            updateParagraphSurgical(xmlDoc, p, matchedLines[0]);
+          }
+          sectionMap.delete(key);
           continue;
         }
       }
@@ -873,7 +918,9 @@ export async function mergeFindingsIntoDocx(
           if (pText.includes('MD') || pText.includes('RADIOLOGIST') || pText.includes('Page ')) {
             break;
           }
-          impressionSlotParagraphs.push(p);
+          if (pText) {
+            impressionSlotParagraphs.push(p);
+          }
         }
 
         if (impressionSlotParagraphs.length > 0) {
@@ -881,7 +928,7 @@ export async function mergeFindingsIntoDocx(
           let lastInserted = lastSlot;
 
           for (let i = 0; i < impressionItems.length; i++) {
-            const cleanBullet = impressionItems[i].replace(/^•\s*/, '').trim();
+            const cleanBullet = impressionItems[i].replace(/^[•\-\*\s]+/, '').trim();
             if (i < impressionSlotParagraphs.length) {
               updateParagraphSurgical(xmlDoc, impressionSlotParagraphs[i], `• ${cleanBullet}`);
             } else {
