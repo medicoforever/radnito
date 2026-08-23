@@ -692,6 +692,13 @@ function oldSetParagraphContent(
  * perfectly preserving native Word tables (<w:tbl>), matching colon keys and narratives,
  * and dynamically inserting OTHER / INCIDENTAL FINDINGS before IMPRESSION.
  */
+/**
+ * High-Fidelity Universal Deterministic DOCX In-Place Merger
+ * Table-aware & 100% Comprehensive:
+ * Filters out markdown table strings, matches colon keys and narrative paragraphs,
+ * and GUARANTEES that all unconsumed abnormal/incidental findings are inserted directly
+ * into the Word document body before IMPRESSION.
+ */
 export async function mergeFindingsIntoDocx(
   templateBase64?: string | null,
   findings?: string[] | null,
@@ -729,10 +736,8 @@ export async function mergeFindingsIntoDocx(
 
     const allBodyParagraphs = collectBodyParagraphs(bodyElem);
 
-    // 1. Separate Findings into Body Findings, Other/Incidental Findings, Impression Items, and Colon Map
+    // 1. Separate Findings into Body Findings, Impression Items, and Colon Map
     const bodyFindingLines: string[] = [];
-    const narrativeFindings: string[] = [];
-    const otherIncidentalFindings: string[] = [];
     const impressionItems: string[] = [];
     const colonFindingsMap = new Map<string, string>();
     let clinicalProfile: string | null = null;
@@ -771,12 +776,6 @@ export async function mergeFindingsIntoDocx(
         continue;
       }
 
-      // Check for OTHER FINDINGS / INCIDENTAL FINDINGS
-      if (lower.startsWith('other findings:') || lower.startsWith('other findings') || lower.startsWith('incidental findings:') || lower.startsWith('incidental findings') || lower.startsWith('additional findings:')) {
-        otherIncidentalFindings.push(trimmed);
-        continue;
-      }
-
       bodyFindingLines.push(trimmed);
       const cleanNoBold = trimmed.replace(/^BOLD::\s*/, '').trim();
 
@@ -787,8 +786,6 @@ export async function mergeFindingsIntoDocx(
         if (key && key.length >= 2) {
           colonFindingsMap.set(key, trimmed);
         }
-      } else {
-        narrativeFindings.push(trimmed);
       }
     }
 
@@ -816,6 +813,8 @@ export async function mergeFindingsIntoDocx(
     }
 
     // 4. Update Body Paragraphs
+    const usedFindings = new Set<string>();
+
     // A. Update Clinical Profile if present
     if (clinicalProfile) {
       for (const { p, origText } of nonBlankBodyParagraphs) {
@@ -835,12 +834,10 @@ export async function mergeFindingsIntoDocx(
         const isBold = finding.startsWith('BOLD::') || (finding !== origText && i >= 3 && !origText.endsWith(':'));
         const cleanVal = finding.replace(/^BOLD::\s*/, '').trim();
         updateParagraphPreservingStyle(xmlDoc, p, cleanVal, isBold);
+        usedFindings.add(finding);
       }
     } else {
-      // Mixed / Table template alignment
-      const usedFindings = new Set<string>();
-
-      // 1. Colon-key matching (e.g. L3-L4:, RV diameter:, Superior vena cava:)
+      // Mixed / Table template alignment: Match colon keys
       for (const { p, origText } of nonBlankBodyParagraphs) {
         if (origText.includes(':') && !origText.endsWith(':')) {
           const prefix = origText.split(':', 2)[0].trim();
@@ -854,31 +851,39 @@ export async function mergeFindingsIntoDocx(
           }
         }
       }
+    }
 
-      // 2. Narrative abnormal replacement
-      for (const { p, origText } of nonBlankBodyParagraphs) {
-        const currentText = getParagraphText(p).trim();
-        if (currentText === origText && !origText.endsWith(':')) {
-          const abnormalFinding = narrativeFindings.find(nf => nf.startsWith('BOLD::') && !usedFindings.has(nf));
-          if (abnormalFinding) {
-            updateParagraphPreservingStyle(xmlDoc, p, abnormalFinding.replace(/^BOLD::\s*/, '').trim(), true);
-            usedFindings.add(abnormalFinding);
-          }
-        }
+    // 5. Universal Insertion of All Unconsumed Abnormal / Incidental Findings Before IMPRESSION
+    const unconsumedFindings: string[] = [];
+    for (const f of bodyFindingLines) {
+      if (usedFindings.has(f)) continue;
+      const cleanF = f.replace(/^BOLD::\s*/, '').trim();
+      const upper = cleanF.toUpperCase();
+
+      // Skip generic static template headings and titles
+      if (upper === 'FINDINGS:' || upper === 'FINDINGS' || upper.startsWith('MEASUREMENTS OF') || upper.startsWith('INDIRECT SIGNS') || upper.startsWith('CARDIAC MEASUREMENTS') || upper.startsWith('VENOUS MEASUREMENTS') || upper.startsWith('OBSERVATIONS')) {
+        continue;
+      }
+      if (cleanF.toLowerCase().startsWith('ct scan') || cleanF.toLowerCase().startsWith('c.t.scan') || cleanF.toLowerCase().startsWith('mri scan') || cleanF.toLowerCase().startsWith('ct angiography')) {
+        continue;
+      }
+
+      // Check if abnormal finding or incidental finding
+      if (f.startsWith('BOLD::') || upper.startsWith('OTHER FINDINGS:') || upper.startsWith('OTHER FINDINGS') || upper.startsWith('INCIDENTAL FINDINGS:') || upper.startsWith('INCIDENTAL FINDINGS') || upper.startsWith('ADDITIONAL FINDINGS:') || cleanF.length > 20) {
+        unconsumedFindings.push(f);
       }
     }
 
-    // 5. Insert Any OTHER / INCIDENTAL FINDINGS Before IMPRESSION
-    if (otherIncidentalFindings.length > 0) {
+    if (unconsumedFindings.length > 0) {
       const targetAnchor = impressionHeaderIdx !== -1 ? allBodyParagraphs[impressionHeaderIdx] : null;
-      for (const extraFinding of otherIncidentalFindings) {
+      for (const extraFinding of unconsumedFindings) {
         const isBold = extraFinding.startsWith('BOLD::') || extraFinding.toUpperCase().startsWith('OTHER FINDINGS:') || extraFinding.toUpperCase().startsWith('INCIDENTAL FINDINGS:');
         const cleanVal = extraFinding.replace(/^BOLD::\s*/, '').trim();
 
         const newP = xmlDoc.createElementNS(W_NS, 'w:p');
         const pPr = xmlDoc.createElementNS(W_NS, 'w:pPr');
         const spacing = xmlDoc.createElementNS(W_NS, 'w:spacing');
-        spacing.setAttributeNS(W_NS, 'w:after', '120');
+        spacing.setAttributeNS(W_NS, 'w:after', '120'); // 6pt after
         pPr.appendChild(spacing);
         newP.appendChild(pPr);
 
