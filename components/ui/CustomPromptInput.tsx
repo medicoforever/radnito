@@ -6,22 +6,68 @@ import { transcribeAudioForPrompt } from '../../services/geminiService';
 import MicIcon from '../icons/MicIcon';
 import StopIcon from '../icons/StopIcon';
 import Spinner from './Spinner';
-import TemplateSelectionModal from './TemplateSelectionModal';
-import { REPORT_TEMPLATES, ReportTemplate } from '../../constants';
+import TemplateSelectionModal, { SelectedTemplateData } from './TemplateSelectionModal';
 import ImageIcon from '../icons/ImageIcon';
 import CloseIcon from '../icons/CloseIcon';
 import TrashIcon from '../icons/TrashIcon';
-import { saveCustomTemplate, getAllCustomTemplates, deleteCustomTemplate, CustomTemplate } from '../../services/templateStorage';
+import {
+  saveCustomTemplate,
+  getAllCustomTemplates,
+  deleteCustomTemplate,
+  savePromptOverride,
+  getPromptOverride,
+  CustomTemplate,
+} from '../../services/templateStorage';
 
-const CustomPromptInput: React.FC<{
+export interface StyleToggles {
+  telegraphic: boolean;
+  boldAbnormalities: boolean;
+  radsAutoCompute: boolean;
+  compactImpression: boolean;
+}
+
+export interface CustomPromptInputProps {
   prompt: string;
   onPromptChange: (prompt: string) => void;
   className?: string;
   images?: Array<{ data: string; mimeType: string }>;
   onImagesChange?: (images: Array<{ data: string; mimeType: string }>) => void;
   isLiveMode?: boolean;
-}> = ({ prompt, onPromptChange, className, images = [], onImagesChange, isLiveMode = false }) => {
+  styleToggles?: StyleToggles;
+  onStyleTogglesChange?: (toggles: StyleToggles) => void;
+}
+
+const MAX_CUSTOM_RULES_LENGTH = 5000;
+
+export function sanitizeRuleInput(input: string): string {
+  if (!input) return '';
+  return input
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
+    .replace(/<img[^>]*onerror=[^>]*>/gi, '')
+    .replace(/<svg[^>]*onload=[^>]*>/gi, '')
+    .replace(/javascript:/gi, '')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+const CustomPromptInput: React.FC<CustomPromptInputProps> = ({
+  prompt,
+  onPromptChange,
+  className = '',
+  images = [],
+  onImagesChange,
+  isLiveMode = false,
+  styleToggles = {
+    telegraphic: true,
+    boldAbnormalities: true,
+    radsAutoCompute: true,
+    compactImpression: true,
+  },
+  onStyleTogglesChange,
+}) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const { isRecording, startRecording, stopRecording, error: recorderError } = useAudioRecorder();
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -39,7 +85,10 @@ const CustomPromptInput: React.FC<{
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
   const [isSavedTemplatesOpen, setIsSavedTemplatesOpen] = useState<boolean>(true);
 
-  // Load saved custom templates on mount and when opening
+  // Local style toggles state
+  const [localToggles, setLocalToggles] = useState<StyleToggles>(styleToggles);
+
+  // Load saved custom templates on mount
   const refreshSavedTemplates = async () => {
     const list = await getAllCustomTemplates();
     setSavedTemplates(list);
@@ -48,6 +97,21 @@ const CustomPromptInput: React.FC<{
   useEffect(() => {
     refreshSavedTemplates();
   }, []);
+
+  useEffect(() => {
+    setLocalToggles(styleToggles);
+  }, [styleToggles]);
+
+  const handleToggleChange = (key: keyof StyleToggles) => {
+    const updated = {
+      ...localToggles,
+      [key]: !localToggles[key],
+    };
+    setLocalToggles(updated);
+    if (onStyleTogglesChange) {
+      onStyleTogglesChange(updated);
+    }
+  };
 
   const handleMicClick = async () => {
     setTranscriptionError(null);
@@ -58,7 +122,7 @@ const CustomPromptInput: React.FC<{
         if (audioBlob && audioBlob.size > 0) {
           const transcript = await transcribeAudioForPrompt(audioBlob);
           const newPrompt = prompt ? `${prompt} ${transcript}` : transcript;
-          onPromptChange(newPrompt);
+          onPromptChange(newPrompt.slice(0, MAX_CUSTOM_RULES_LENGTH));
         }
       } catch (err) {
         setTranscriptionError(err instanceof Error ? err.message : 'An unknown error occurred during transcription.');
@@ -70,12 +134,12 @@ const CustomPromptInput: React.FC<{
     }
   };
 
-  const handleSelectTemplate = (template: any) => {
+  const handleSelectTemplate = (template: SelectedTemplateData | any) => {
     setActiveTemplateId(template.id || null);
     setActiveTemplateName(template.name || 'Selected Template');
     const textLines = template.lines && Array.isArray(template.lines) && template.lines.length > 0 ? template.lines.join('\n') : '';
     const finalText = textLines || `Use the ${template.name} report template format.`;
-    onPromptChange(finalText);
+    onPromptChange(finalText.slice(0, MAX_CUSTOM_RULES_LENGTH));
     setTemplateName(template.name);
     setTemplateTextToSave(textLines);
     if (onImagesChange && template.images) {
@@ -119,7 +183,7 @@ const CustomPromptInput: React.FC<{
   const handleImageFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     processFiles(event.target.files);
     if (event.target) {
-      event.target.value = "";
+      event.target.value = '';
     }
   };
 
@@ -137,7 +201,7 @@ const CustomPromptInput: React.FC<{
     const finalTemplateText = templateTextToSave.trim() || prompt.trim();
 
     if (!finalTemplateText && images.length === 0) {
-      alert("Please enter template text or upload at least one screenshot image before saving.");
+      alert('Please enter template text or upload at least one screenshot image before saving.');
       return;
     }
 
@@ -157,10 +221,10 @@ const CustomPromptInput: React.FC<{
   const handleApplySavedTemplate = (tmpl: CustomTemplate) => {
     setActiveTemplateId(tmpl.id);
     setActiveTemplateName(tmpl.name);
-    
+
     // 1. Apply Text
-    const text = tmpl.textContent || '';
-    onPromptChange(text);
+    const text = tmpl.textContent || tmpl.text || '';
+    onPromptChange(text.slice(0, MAX_CUSTOM_RULES_LENGTH));
     setTemplateName(tmpl.name);
     setTemplateTextToSave(text);
 
@@ -215,12 +279,12 @@ const CustomPromptInput: React.FC<{
       setIsDraggingOver(false);
     }
   };
-  
+
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
   };
-  
+
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
@@ -235,44 +299,62 @@ const CustomPromptInput: React.FC<{
 
   return (
     <div className={`w-full ${className}`}>
-      <TemplateSelectionModal 
+      <TemplateSelectionModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onSelectTemplate={handleSelectTemplate}
+        selectedTemplateId={activeTemplateId}
+        onRefreshCustomTemplates={refreshSavedTemplates}
       />
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex justify-between items-center p-2.5 rounded-xl bg-slate-100 dark:bg-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors shadow-sm"
-        aria-expanded={isOpen}
-        aria-controls="custom-prompt-container"
-      >
-        <div className="flex items-center gap-2 flex-wrap">
-          <SparklesIcon className="w-5 h-5 text-yellow-500" />
-          <span className="font-bold text-slate-700 dark:text-slate-200 text-sm sm:text-base">
-            Custom Instructions & Template Manager
-          </span>
-          {activeTemplateName && (
-            <span className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-xs px-2 py-0.5 rounded-full font-bold border border-emerald-300 dark:border-emerald-700">
-              Active: {activeTemplateName}
-            </span>
-          )}
-          {savedTemplates.length > 0 && (
-            <span className="bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 text-xs px-2 py-0.5 rounded-full font-semibold">
-              {savedTemplates.length} Saved
-            </span>
-          )}
-          {images.length > 0 && (
-            <span className="bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 text-xs px-2 py-0.5 rounded-full font-semibold">
-              🖼️ {images.length} Image(s)
-            </span>
-          )}
-        </div>
-        <ChevronDownIcon className={`w-5 h-5 text-slate-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-      </button>
 
+      {/* Main Header / Drawer Trigger */}
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setIsOpen(!isOpen)}
+          className="flex-1 flex justify-between items-center p-2.5 rounded-xl bg-slate-100 dark:bg-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors shadow-sm"
+          aria-expanded={isOpen}
+          aria-controls="custom-prompt-container"
+        >
+          <div className="flex items-center gap-2 flex-wrap">
+            <SparklesIcon className="w-5 h-5 text-yellow-500" />
+            <span className="font-bold text-slate-700 dark:text-slate-200 text-sm sm:text-base">
+              Custom Instructions & Template Manager
+            </span>
+            {activeTemplateName && (
+              <span className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-xs px-2 py-0.5 rounded-full font-bold border border-emerald-300 dark:border-emerald-700">
+                Active: {activeTemplateName}
+              </span>
+            )}
+            {savedTemplates.length > 0 && (
+              <span className="bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 text-xs px-2 py-0.5 rounded-full font-semibold">
+                {savedTemplates.length} Saved
+              </span>
+            )}
+            {images.length > 0 && (
+              <span className="bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 text-xs px-2 py-0.5 rounded-full font-semibold">
+                🖼️ {images.length} Image(s)
+              </span>
+            )}
+          </div>
+          <ChevronDownIcon className={`w-5 h-5 text-slate-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        </button>
+
+        {/* Slide-Over Drawer Toggle Button */}
+        <button
+          type="button"
+          onClick={() => setIsDrawerOpen(true)}
+          className="p-2.5 rounded-xl bg-indigo-100 text-indigo-800 hover:bg-indigo-200 dark:bg-indigo-950 dark:text-indigo-300 dark:hover:bg-indigo-900 font-bold text-xs flex items-center gap-1.5 transition-colors shadow-sm"
+          title="Open Slide-Over Drawer for Full Prompt & Style Editing"
+        >
+          <span>📐 Drawer Mode</span>
+        </button>
+      </div>
+
+      {/* Inline Collapsible Section */}
       {isOpen && (
-        <div 
-          id="custom-prompt-container" 
+        <div
+          id="custom-prompt-container"
           className={`relative mt-2 space-y-4 p-4 border-2 border-dashed rounded-xl transition-colors duration-200 bg-slate-50/50 dark:bg-slate-800/40 ${
             isDraggingOver
               ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30'
@@ -317,6 +399,54 @@ const CustomPromptInput: React.FC<{
             </div>
           )}
 
+          {/* STYLE TOGGLES BAR */}
+          <div className="bg-slate-100 dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-2">
+              ⚙️ Consultant Style & Formatting Toggles:
+            </span>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              <label className="flex items-center gap-2 p-1.5 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={localToggles.telegraphic}
+                  onChange={() => handleToggleChange('telegraphic')}
+                  className="rounded text-blue-600 focus:ring-blue-500"
+                />
+                <span className="font-medium text-slate-800 dark:text-slate-200">Telegraphic</span>
+              </label>
+
+              <label className="flex items-center gap-2 p-1.5 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={localToggles.boldAbnormalities}
+                  onChange={() => handleToggleChange('boldAbnormalities')}
+                  className="rounded text-blue-600 focus:ring-blue-500"
+                />
+                <span className="font-medium text-slate-800 dark:text-slate-200">BOLD:: Protocol</span>
+              </label>
+
+              <label className="flex items-center gap-2 p-1.5 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={localToggles.radsAutoCompute}
+                  onChange={() => handleToggleChange('radsAutoCompute')}
+                  className="rounded text-blue-600 focus:ring-blue-500"
+                />
+                <span className="font-medium text-slate-800 dark:text-slate-200">RADS Scoring</span>
+              </label>
+
+              <label className="flex items-center gap-2 p-1.5 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={localToggles.compactImpression}
+                  onChange={() => handleToggleChange('compactImpression')}
+                  className="rounded text-blue-600 focus:ring-blue-500"
+                />
+                <span className="font-medium text-slate-800 dark:text-slate-200">Compact Impression</span>
+              </label>
+            </div>
+          </div>
+
           {/* SAVED TEMPLATES LIBRARY */}
           {savedTemplates.length > 0 && (
             <div className="bg-white dark:bg-slate-800 border border-blue-200 dark:border-blue-800/60 rounded-xl p-3 shadow-sm space-y-2">
@@ -336,7 +466,7 @@ const CustomPromptInput: React.FC<{
               {isSavedTemplatesOpen && (
                 <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-700 max-h-64 overflow-y-auto">
                   {savedTemplates.map((tmpl) => {
-                    const isActive = activeTemplateId === tmpl.id || (activeTemplateName === tmpl.name);
+                    const isActive = activeTemplateId === tmpl.id || activeTemplateName === tmpl.name;
                     const firstImage = tmpl.images && tmpl.images.length > 0 ? tmpl.images[0] : null;
 
                     return (
@@ -412,13 +542,18 @@ const CustomPromptInput: React.FC<{
 
           {/* ACTIVE INSTRUCTIONS / TEMPLATE TEXTAREA */}
           <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Active Template Text & Custom Rules:
-            </label>
+            <div className="flex justify-between items-center mb-1">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                Active Template Text & Custom Rules:
+              </label>
+              <span className={`text-[10px] ${prompt.length > MAX_CUSTOM_RULES_LENGTH ? 'text-red-500 font-bold' : 'text-slate-500'}`}>
+                {prompt.length} / {MAX_CUSTOM_RULES_LENGTH} chars
+              </span>
+            </div>
             <div className="relative">
               <textarea
                 value={prompt}
-                onChange={(e) => onPromptChange(e.target.value)}
+                onChange={(e) => onPromptChange(e.target.value.slice(0, MAX_CUSTOM_RULES_LENGTH))}
                 placeholder="Paste your standard report template text or custom rules here (e.g., 'CHEST CT REPORT\nFINDINGS:...')."
                 className="w-full p-3 pr-12 border border-slate-300 rounded-xl text-sm bg-white text-slate-900 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none dark:bg-slate-900 dark:text-white dark:border-slate-600 dark:placeholder-slate-400"
                 rows={4}
@@ -450,9 +585,9 @@ const CustomPromptInput: React.FC<{
               </p>
             )}
           </div>
-          
+
+          {/* SCREENSHOTS & ACTIONS SECTION */}
           <div className="pt-3 border-t border-slate-200 dark:border-slate-700 space-y-3">
-            {/* SCREENSHOT EXPLANATION NOTE */}
             <div className="p-3 bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-xl text-xs text-blue-900 dark:text-blue-200 space-y-1">
               <p className="font-bold flex items-center gap-1">
                 <span>💡 How to replicate your report template:</span>
@@ -462,7 +597,7 @@ const CustomPromptInput: React.FC<{
               </p>
             </div>
 
-            {/* SCREENSHOTS ATTACHMENT SECTION */}
+            {/* SCREENSHOTS ATTACHMENT */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
@@ -519,12 +654,12 @@ const CustomPromptInput: React.FC<{
                       <ImageIcon className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                       Add Screenshot Image(s)
                     </button>
-                    <button 
+                    <button
                       type="button"
                       onClick={() => setIsModalOpen(true)}
                       className="text-xs font-bold py-2 px-3.5 rounded-xl bg-blue-100 text-blue-900 hover:bg-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-900 transition-colors shadow-sm"
                     >
-                      Select Standard Template...
+                      Select Standard Template (72 KBs)...
                     </button>
                   </div>
                 </div>
@@ -573,6 +708,154 @@ const CustomPromptInput: React.FC<{
                   {saveSuccessMsg}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FULL SLIDE-OVER DRAWER MODAL */}
+      {isDrawerOpen && (
+        <div className="fixed inset-0 z-50 overflow-hidden" aria-labelledby="slide-over-title" role="dialog" aria-modal="true">
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity"
+            onClick={() => setIsDrawerOpen(false)}
+          />
+
+          <div className="fixed inset-y-0 right-0 max-w-full flex pl-10">
+            <div className="w-screen max-w-xl bg-white dark:bg-slate-900 shadow-2xl flex flex-col border-l border-slate-200 dark:border-slate-700">
+              {/* Drawer Header */}
+              <div className="p-4 bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <SparklesIcon className="w-5 h-5 text-yellow-500" />
+                  <h2 className="text-base font-bold text-slate-900 dark:text-white" id="slide-over-title">
+                    Template & Prompt Customization Drawer
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsDrawerOpen(false)}
+                  className="p-1 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                >
+                  <CloseIcon className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Drawer Body */}
+              <div className="p-5 flex-1 overflow-y-auto space-y-5">
+                {/* Active Template Badge */}
+                {activeTemplateName && (
+                  <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 rounded-xl flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">Active Template:</span>
+                      <p className="text-sm font-bold text-emerald-950 dark:text-emerald-100 font-mono">{activeTemplateName}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleClearActiveTemplate}
+                      className="text-xs bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 px-2 py-1 rounded-md font-bold"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                )}
+
+                {/* Style Toggles */}
+                <div className="space-y-2">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Consultant Style Toggles
+                  </h3>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <label className="flex items-center gap-2 p-2 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={localToggles.telegraphic}
+                        onChange={() => handleToggleChange('telegraphic')}
+                        className="rounded text-blue-600"
+                      />
+                      <span className="font-semibold text-slate-800 dark:text-slate-200">Telegraphic Density</span>
+                    </label>
+
+                    <label className="flex items-center gap-2 p-2 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={localToggles.boldAbnormalities}
+                        onChange={() => handleToggleChange('boldAbnormalities')}
+                        className="rounded text-blue-600"
+                      />
+                      <span className="font-semibold text-slate-800 dark:text-slate-200">BOLD:: Abnormalities</span>
+                    </label>
+
+                    <label className="flex items-center gap-2 p-2 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={localToggles.radsAutoCompute}
+                        onChange={() => handleToggleChange('radsAutoCompute')}
+                        className="rounded text-blue-600"
+                      />
+                      <span className="font-semibold text-slate-800 dark:text-slate-200">Auto-Compute RADS</span>
+                    </label>
+
+                    <label className="flex items-center gap-2 p-2 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={localToggles.compactImpression}
+                        onChange={() => handleToggleChange('compactImpression')}
+                        className="rounded text-blue-600"
+                      />
+                      <span className="font-semibold text-slate-800 dark:text-slate-200">Non-Verb Impression</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Prompt Rules Area */}
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Custom Prompt Rules / Baseline Text
+                    </h3>
+                    <span className="text-[10px] text-slate-400">
+                      {prompt.length} / {MAX_CUSTOM_RULES_LENGTH}
+                    </span>
+                  </div>
+                  <textarea
+                    value={prompt}
+                    onChange={(e) => onPromptChange(e.target.value.slice(0, MAX_CUSTOM_RULES_LENGTH))}
+                    placeholder="Enter custom formatting directives, hospital specific guidelines, or full baseline template text..."
+                    rows={6}
+                    className="w-full p-3 border border-slate-300 dark:border-slate-600 rounded-xl text-xs bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Quick Actions */}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(true)}
+                    className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors shadow"
+                  >
+                    Select From 72 Template Catalog
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveCurrentTemplate}
+                    className="py-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-colors shadow"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+
+              {/* Drawer Footer */}
+              <div className="p-4 bg-slate-100 dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsDrawerOpen(false)}
+                  className="px-4 py-2 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold rounded-lg"
+                >
+                  Done
+                </button>
+              </div>
             </div>
           </div>
         </div>

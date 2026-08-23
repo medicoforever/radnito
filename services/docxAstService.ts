@@ -2,12 +2,13 @@ import { parseZip, createZip, base64ToUint8Array, ZipEntry } from './docxService
 
 export interface DocumentAstNode {
   id: string;
-  type: 'title' | 'section_heading' | 'inline_field' | 'narrative' | 'impression_header' | 'table_cell';
+  type: 'title' | 'clinical_profile' | 'technique' | 'section_heading' | 'inline_field' | 'narrative' | 'impression_header' | 'impression_item' | 'table_cell';
   label?: string;
   current_text: string;
   current_val?: string;
   row_label?: string;
   col_label?: string;
+  bold?: boolean;
 }
 
 export interface AstMutation {
@@ -101,10 +102,15 @@ export async function buildDocumentAstFromDocx(docxBase64: string): Promise<{
         impressionHeaderId = nodeId;
         inImpressionSection = true;
       } else if (inImpressionSection) {
+        pType = 'impression_item';
         if (txt && !txt.includes('MD') && !txt.includes('RADIOLOGIST') && !txt.includes('Page ')) {
           impressionSlotIds.push(nodeId);
         }
-      } else if (txt.endsWith(':') || (txt.includes(':') && txt.split(':')[0].split(/\\s+/).length <= 4 && !txt.split(':')[1].trim())) {
+      } else if (upper.startsWith('*CLINICAL PROFILE') || upper.startsWith('CLINICAL PROFILE:')) {
+        pType = 'clinical_profile';
+      } else if (upper.startsWith('TECHNIQUE:') || upper.startsWith('SCANNING TECHNIQUE:') || upper.startsWith('PROTOCOL:')) {
+        pType = 'technique';
+      } else if (txt.endsWith(':') || (txt.includes(':') && txt.split(':')[0].split(/\s+/).length <= 4 && !txt.split(':')[1].trim())) {
         pType = 'section_heading';
         label = txt.split(':')[0].trim();
       } else if (txt.includes(':') && !upper.startsWith('FINDINGS') && !upper.startsWith('OBSERVATIONS') && !upper.startsWith('C.T.') && !upper.startsWith('MRI')) {
@@ -185,23 +191,40 @@ export async function applyAstMutationsToDocx(
   impressionItems?: string[],
   impressionSlotIds: string[] = []
 ): Promise<Blob> {
+  const ensureBoldOnRun = (run: Element, makeBold: boolean) => {
+    let rPr = run.getElementsByTagName('w:rPr')[0];
+    if (makeBold) {
+      if (!rPr) {
+        rPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rPr');
+        run.insertBefore(rPr, run.firstChild);
+      }
+      let bTag = rPr.getElementsByTagName('w:b')[0];
+      if (!bTag) {
+        bTag = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:b');
+        rPr.appendChild(bTag);
+      }
+    }
+  };
+
   // 1. Apply Paragraph and Table Cell mutations
   for (const mut of mutations) {
     const nid = mut.node_id;
-    const cleanText = mut.new_text.replace(/^BOLD::\\s*/, '').trim();
+    const isAbnormal = mut.bold || mut.new_text.startsWith('BOLD::');
+    const cleanText = mut.new_text.replace(/^BOLD::\s*/, '').trim();
     if (!cleanText) continue;
 
     if (pMap.has(nid)) {
       const p = pMap.get(nid)!;
       const allRuns: Element[] = [];
       for (let i = 0; i < p.childNodes.length; i++) {
-        if (p.childNodes[i].nodeName === 'w:r') {
+        if (p.childNodes[i].nodeName === 'w:r' || (p.childNodes[i] as Element).localName === 'r') {
           allRuns.push(p.childNodes[i] as Element);
         }
       }
 
       if (allRuns.length > 0) {
         const firstRun = allRuns[0];
+        ensureBoldOnRun(firstRun, isAbnormal);
         const tTags = firstRun.getElementsByTagName('w:t');
         if (tTags.length > 0) {
           tTags[0].textContent = cleanText;
@@ -217,11 +240,19 @@ export async function applyAstMutationsToDocx(
       const tc = cellMap.get(nid)!;
       const p = tc.getElementsByTagName('w:p')[0];
       if (p) {
-        const tTags = p.getElementsByTagName('w:t');
-        if (tTags.length > 0) {
-          tTags[0].textContent = cleanText;
-          tTags[0].setAttribute('xml:space', 'preserve');
-          for (let i = 1; i < tTags.length; i++) tTags[i].textContent = '';
+        const runs = p.getElementsByTagName('w:r');
+        if (runs.length > 0) {
+          ensureBoldOnRun(runs[0], isAbnormal);
+          const tTags = runs[0].getElementsByTagName('w:t');
+          if (tTags.length > 0) {
+            tTags[0].textContent = cleanText;
+            tTags[0].setAttribute('xml:space', 'preserve');
+            for (let i = 1; i < tTags.length; i++) tTags[i].textContent = '';
+          }
+          for (let j = 1; j < runs.length; j++) {
+            const laterTags = runs[j].getElementsByTagName('w:t');
+            for (let k = 0; k < laterTags.length; k++) laterTags[k].textContent = '';
+          }
         }
       }
     }

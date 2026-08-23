@@ -1,4 +1,4 @@
-import { getStoredApiKey } from './apiKeyStore';
+import { getStoredApiKeys } from './apiKeyStore';
 
 export interface ReportTemplateItem {
   id: string;
@@ -27,18 +27,21 @@ let isFetchingKnowledgebase = false;
  * Check whether RAG Style Matching is enabled by user preference
  */
 export function isRAGStyleMatchingEnabled(): boolean {
-  return false; // Stopped for now per user request
+  if (typeof window === 'undefined' || !window.localStorage) return false;
+  return localStorage.getItem(RAG_ENABLED_STORAGE_KEY) === 'true';
 }
 
 /**
  * Toggle RAG Style Matching preference
  */
 export function setRAGStyleMatchingEnabled(enabled: boolean): void {
-  localStorage.setItem(RAG_ENABLED_STORAGE_KEY, enabled ? 'true' : 'false');
+  if (typeof window !== 'undefined' && window.localStorage) {
+    localStorage.setItem(RAG_ENABLED_STORAGE_KEY, enabled ? 'true' : 'false');
+  }
 }
 
 /**
- * Asynchronously fetch and cache the report_knowledgebase.json (1,066 distinct templates from NEWWWWW.zip)
+ * Asynchronously fetch and cache the report_knowledgebase.json (1,066 distinct templates)
  */
 export async function loadReportKnowledgebase(): Promise<KnowledgebaseData | null> {
   if (knowledgebaseCache) return knowledgebaseCache;
@@ -49,7 +52,7 @@ export async function loadReportKnowledgebase(): Promise<KnowledgebaseData | nul
 
   isFetchingKnowledgebase = true;
   try {
-    const baseUrl = (import.meta as any).env?.BASE_URL || './';
+    const baseUrl = (typeof import.meta !== 'undefined' && (import.meta as any).env?.BASE_URL) || './';
     const cleanBase = baseUrl.endsWith('/') ? baseUrl : baseUrl + '/';
     const targetUrl = `${cleanBase}report_knowledgebase.json`;
 
@@ -74,28 +77,48 @@ export async function loadReportKnowledgebase(): Promise<KnowledgebaseData | nul
 }
 
 /**
- * Detects modality and organ region from text to filter relevant templates from NEWWWWW.zip
+ * Detects modality and organ region from text with high precision
  */
 export function detectModalityAndRegion(text: string): { modality?: string; region?: string } {
   const t = text.toLowerCase();
   
   let modality: string | undefined;
-  if (t.includes('mri') || t.includes('magnetic resonance')) modality = 'MRI';
-  else if (t.includes('ct') || t.includes('computed tomography') || t.includes('c.t.') || t.includes('hrct')) modality = 'CT';
-  else if (t.includes('usg') || t.includes('ultrasound') || t.includes('sonography') || t.includes('foetal') || t.includes('fetal') || t.includes('doppler')) modality = 'USG';
-  else if (t.includes('x-ray') || t.includes('xray') || t.includes('radiograph') || t.includes('pa view')) modality = 'X-Ray';
-  else if (t.includes('mammogram') || t.includes('mammography') || t.includes('birads')) modality = 'Mammogram';
-  else if (t.includes('nuclear') || t.includes('pet') || t.includes('spect')) modality = 'Nuclear Medicine';
+  if (t.includes('mri') || t.includes('magnetic resonance') || t.includes('mr brain') || t.includes('mr spine') || t.includes('mrcp')) {
+    modality = 'MRI';
+  } else if (t.includes('hrct') || t.includes('c.t.') || t.includes('ct scan') || t.includes('computed tomography') || t.includes('cta ') || t.includes('angiography')) {
+    modality = 'CT';
+  } else if (t.includes('usg') || t.includes('ultrasound') || t.includes('sonography') || t.includes('foetal') || t.includes('fetal') || t.includes('doppler')) {
+    modality = 'USG';
+  } else if (t.includes('mammogram') || t.includes('mammography') || t.includes('birads') || t.includes('breast')) {
+    modality = 'Mammogram';
+  } else if (t.includes('x-ray') || t.includes('xray') || t.includes('radiograph') || t.includes('pa view')) {
+    modality = 'X-Ray';
+  } else if (t.includes('pet') || t.includes('nuclear') || t.includes('spect') || t.includes('renogram') || t.includes('dmsa') || t.includes('dtpa')) {
+    modality = 'Nuclear Medicine';
+  }
 
   let region: string | undefined;
-  if (anyKeyword(t, ['brain', 'head', 'orbit', 'cranial', 'cerebral', 'stroke', 'infarct', 'pns', 'sinus', 'dacryo', 'lacrimal', 'pituitary'])) region = 'Brain & Head';
-  else if (anyKeyword(t, ['chest', 'thorax', 'lung', 'pleural', 'mediastinum', 'hrct chest', 'pneumonia'])) region = 'Thorax & Chest';
-  else if (anyKeyword(t, ['abdomen', 'pelvis', 'liver', 'kidney', 'spleen', 'gallbladder', 'kub', 'calculus', 'cholecystitis'])) region = 'Abdomen & Pelvis';
-  else if (anyKeyword(t, ['spine', 'lumbar', 'cervical', 'dorsal', 'vertebra', 'lumbosacral', 'disc'])) region = 'Spine';
-  else if (anyKeyword(t, ['knee', 'shoulder', 'joint', 'femur', 'ankle', 'hip', 'wrist', 'elbow', 'extremit', 'fracture'])) region = 'Extremities & Joints';
-  else if (anyKeyword(t, ['breast', 'mammog'])) region = 'Breast';
-  else if (anyKeyword(t, ['neck', 'thyroid', 'carotid'])) region = 'Neck';
-  else if (anyKeyword(t, ['obstetric', 'fetal', 'foetal', 'pregnancy', 'gestation', 'anomaly'])) region = 'Obstetrics';
+  if (anyKeyword(t, ['trauma', 'whole body trauma', 'polytrauma', 'head to pelvis'])) {
+    region = 'Multitrauma & Whole Body';
+  } else if (anyKeyword(t, ['brain', 'head', 'orbit', 'cranial', 'cerebral', 'stroke', 'infarct', 'pns', 'sinus', 'dacryo', 'lacrimal', 'pituitary', 'temporal bone', 'mastoid'])) {
+    region = 'Brain & Head';
+  } else if (anyKeyword(t, ['coronary', 'cardiac', 'tavi', 'cabg', 'aorta', 'pulmonary artery', 'myocard'])) {
+    region = 'Cardiovascular & Thoracic';
+  } else if (anyKeyword(t, ['chest', 'thorax', 'lung', 'pleural', 'mediastinum', 'hrct chest', 'pneumonia', 'interstitial'])) {
+    region = 'Thorax & Chest';
+  } else if (anyKeyword(t, ['abdomen', 'pelvis', 'liver', 'kidney', 'spleen', 'gallbladder', 'pancreas', 'kub', 'calculus', 'cholecystitis', 'prostate', 'uterus', 'ovary', 'rectal', 'perianal'])) {
+    region = 'Abdomen & Pelvis';
+  } else if (anyKeyword(t, ['spine', 'lumbar', 'cervical', 'dorsal', 'vertebra', 'lumbosacral', 'thecal', 'disc', 'cord'])) {
+    region = 'Spine';
+  } else if (anyKeyword(t, ['knee', 'shoulder', 'joint', 'femur', 'ankle', 'hip', 'wrist', 'elbow', 'extremit', 'fracture', 'forearm', 'brachial plexus', 'foot', 'leg'])) {
+    region = 'Extremities & Joints';
+  } else if (anyKeyword(t, ['breast', 'mammog', 'nipple', 'axilla', 'fibroadenoma'])) {
+    region = 'Breast';
+  } else if (anyKeyword(t, ['neck', 'thyroid', 'carotid', 'parotid', 'submandibular', 'pharynx', 'larynx'])) {
+    region = 'Neck';
+  } else if (anyKeyword(t, ['obstetric', 'fetal', 'foetal', 'pregnancy', 'gestation', 'anomaly', 'trimester', 'placenta'])) {
+    region = 'Obstetrics';
+  }
 
   return { modality, region };
 }
@@ -105,7 +128,7 @@ function anyKeyword(text: string, list: string[]): boolean {
 }
 
 /**
- * Retrieves the top matching style report templates from NEWWWWW.zip dataset for a given dictation/hint
+ * Retrieves the top matching style report templates from knowledgebase dataset for a given dictation/hint
  */
 export async function getRelevantStyleTemplates(
   hintContext: string,
@@ -126,7 +149,7 @@ export async function getRelevantStyleTemplates(
   for (const [catName, list] of Object.entries(kb.reports_by_category)) {
     const catLower = catName.toLowerCase();
     
-    // Modality & Region Scoring
+    // Modality & Region Scoring with heavy penalty to isolate cross-template contamination
     let catBoost = 0;
     if (modality) {
       if (catLower.includes(modality.toLowerCase())) catBoost += 100;
@@ -157,7 +180,7 @@ export async function getRelevantStyleTemplates(
 }
 
 /**
- * Augment base system prompt into a FULL RAG REPORT GENERATOR MODE system prompt using matched templates from NEWWWWW.zip
+ * Augment base system prompt into a FULL RAG REPORT GENERATOR MODE system prompt using matched reference templates
  */
 export function augmentPromptWithStyleTemplates(
   basePrompt: string,
@@ -167,9 +190,9 @@ export function augmentPromptWithStyleTemplates(
 
   const primaryTpl = templates[0];
 
-  let ragPrompt = `You are an expert Radiologist AI assistant. RAG (Retrieval Augmented Generation) has searched our 100,000+ report dataset (from NEWWWWW.zip) and matched the exact reference radiology report template for this dictation!\n\n`;
+  let ragPrompt = `You are an expert Radiologist AI assistant. RAG (Retrieval Augmented Generation) has matched an authoritative reference radiology report template for this dictation:\n\n`;
 
-  ragPrompt += `=== 🌟 MATCHED RAG RADIOLOGY REPORT EXEMPLAR TEMPLATE [${primaryTpl.category}: ${primaryTpl.title}] ===\n`;
+  ragPrompt += `=== 🌟 PRIMARY REFERENCE EXEMPLAR [${primaryTpl.category}: ${primaryTpl.title}] ===\n`;
   ragPrompt += `${primaryTpl.content}\n\n`;
 
   if (templates.length > 1) {
@@ -177,16 +200,18 @@ export function augmentPromptWithStyleTemplates(
     ragPrompt += `${templates[1].content.slice(0, 1200)}\n\n`;
   }
 
-  ragPrompt += `=== MANDATORY RAG REPORT GENERATION DIRECTIVES ===
-1. **GENERATE A COMPLETE, FULLY STRUCTURED RADIOLOGY REPORT**: You MUST produce a complete, professional, line-by-line radiology report using the exact layout, section headings (Technique, Brain Parenchyma, Orbits, Spine, Impression, etc.), and clinical tone of the matched RAG exemplar template above.
-2. **REPLICATE TEMPLATE LAYOUT & HEADINGS**: Retain the exact examination title, technique section, and anatomical section headings shown in the matched exemplar template.
-3. **INCORPORATE DICTATED CLINICAL FINDINGS**: Listen carefully to the spoken audio dictation / input text. Populate the report with all dictated observations, measurements, anatomical sides (left/right), and specific diagnoses (e.g. dacryocystitis, lacrimal sac swelling, infarct, fracture, mass) into the appropriate section.
-4. **FILL NORMAL ANATOMICAL SECTIONS**: For any anatomical structures present in the matched exemplar template that were not explicitly dictated as abnormal, keep the standard normal report statements from the template so the output is a complete, ready-to-sign radiology report.
-5. **SYNTHESIZE IMPRESSION**: Include a clear, non-verb IMPRESSION section at the end summarized from the findings, formatted as "IMPRESSION:###Point 1###Point 2".
-6. **FORMATTING RULES**:
-   - Prefix every finding line/technique/header string in the "findings" array with \`BOLD::\`.
-   - Format the impression line starting with \`IMPRESSION:###\`.
-7. **OUTPUT FORMAT**: You MUST respond ONLY with a single JSON object with key "findings", containing an array of strings representing the report lines.
+  ragPrompt += `=== MANDATORY CONSULTANT STYLE & FORMATTING DIRECTIVES ===
+1. **ZERO CONVERSATIONAL FILLER**: Output ONLY pure clinical report text inside the JSON schema. NEVER include greetings, preambles, introductory filler, or sign-offs.
+2. **5-LAYER STRUCTURAL DNA**:
+   - Layer 1: Capitalized Examination Title.
+   - Layer 2: Clinical Profile formatted as '*Clinical Profile: ...*' (or '*Clinical Profile:*' if none).
+   - Layer 3: Scanning Technique.
+   - Layer 4: Structured Findings by anatomical subsystem. Baseline normal findings are preserved verbatim. Dictated/abnormal findings are prefixed with \`BOLD::\`.
+   - Layer 5: Synthesized non-verb Impression starting with \`IMPRESSION:###\` with points delimited by \`###\`.
+3. **VAGUE DICTATION TRANSLATION**: Translate colloquial radiologist speech (e.g., "fuzzy liver thing", "whited out base", "dirty fat", "blown acl") into crisp board-certified terminology.
+4. **RADS CLASSIFICATION**: Standardize scoring for BI-RADS, PI-RADS v2.1, TI-RADS, LI-RADS, Lung-RADS v2022, and CAD-RADS 2.0.
+5. **CONTAMINATION ISOLATION**: Strictly constrain findings to the active template's anatomical domain.
+6. **OUTPUT FORMAT**: Respond ONLY with a single JSON object: { "findings": string[] }.
 `;
 
   return ragPrompt;

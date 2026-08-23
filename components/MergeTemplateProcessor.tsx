@@ -13,7 +13,7 @@ import TemplateSelectionModal, { SelectedTemplateData } from './ui/TemplateSelec
 import { mergeFindingsWithTemplate, mergeFindingsWithAst, modifyReportWithText, modifyReportWithAudio } from '../services/geminiService';
 import { mergeFindingsIntoDocx, downloadDocxBlob } from '../services/docxService';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
-import { getUserTemplates, UserTemplate } from '../services/templateStorage';
+import { getUserTemplates, UserTemplate, isTemplateSkillEnabled, setTemplateSkillEnabled, getTemplateCustomPrompt, setTemplateCustomPrompt, resetTemplateCustomPrompt } from '../services/templateStorage';
 
 interface MergeTemplateProcessorProps {
   selectedModel: string;
@@ -40,6 +40,10 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
 
   const [findingsInput, setFindingsInput] = useState<string>('');
   const [customNotes, setCustomNotes] = useState<string>('');
+  const [isSkillEnabled, setIsSkillEnabled] = useState<boolean>(() => isTemplateSkillEnabled());
+  const [isSkillDrawerOpen, setIsSkillDrawerOpen] = useState<boolean>(false);
+  const [customSkillPrompt, setCustomSkillPrompt] = useState<string>('');
+  const [skillSavedNotice, setSkillSavedNotice] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [mergedFindings, setMergedFindings] = useState<string[] | null>(null);
@@ -55,6 +59,15 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
       setActiveTemplate(initialTemplate);
     }
   }, [selectedTemplateProp, initialTemplate]);
+
+  useEffect(() => {
+    if (activeTemplate?.id) {
+      const custom = getTemplateCustomPrompt(activeTemplate.id);
+      setCustomSkillPrompt(custom || activeTemplate.skillPrompt || '');
+    } else {
+      setCustomSkillPrompt('');
+    }
+  }, [activeTemplate?.id, activeTemplate?.skillPrompt]);
 
   // Load custom templates
   useEffect(() => {
@@ -111,7 +124,10 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
         findingsInput.trim(),
         activeTemplate,
         selectedModel,
-        customNotes.trim() || undefined
+        customNotes.trim() || undefined,
+        null,
+        isSkillEnabled,
+        customSkillPrompt.trim() || undefined
       );
 
       setMergedFindings(result);
@@ -224,6 +240,27 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
     }
   };
 
+
+  const handleToggleSkill = (enabled: boolean) => {
+    setIsSkillEnabled(enabled);
+    setTemplateSkillEnabled(enabled);
+  };
+
+  const handleSaveSkillPrompt = () => {
+    if (!activeTemplate?.id) return;
+    setTemplateCustomPrompt(activeTemplate.id, customSkillPrompt);
+    setSkillSavedNotice('Skill prompt saved for this template!');
+    setTimeout(() => setSkillSavedNotice(null), 3000);
+  };
+
+  const handleResetSkillPrompt = () => {
+    if (!activeTemplate?.id) return;
+    resetTemplateCustomPrompt(activeTemplate.id);
+    setCustomSkillPrompt(activeTemplate.skillPrompt || '');
+    setSkillSavedNotice('Reset to archive default skill prompt.');
+    setTimeout(() => setSkillSavedNotice(null), 3000);
+  };
+
   const handleSaveEdit = (idx: number) => {
     if (!mergedFindings) return;
     const updated = [...mergedFindings];
@@ -319,6 +356,96 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
         <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 rounded-xl text-xs text-emerald-800 dark:text-emerald-200 font-bold flex items-center gap-2 animate-fade-in">
           <span>✓</span>
           <span>{downloadSuccess}</span>
+        </div>
+      )}
+
+            {/* Consultant Skill Toggle & Customizer Banner */}
+      {activeTemplate && (
+        <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm transition-all space-y-3">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isSkillEnabled}
+                  onChange={e => handleToggleSkill(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+              </label>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${
+                    isSkillEnabled 
+                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                      : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400'
+                  }`}>
+                    {isSkillEnabled ? '⚡ Consultant Skill Active' : 'Consultant Skill Disabled'}
+                  </span>
+                  <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                    {isSkillEnabled ? '100% Archive-Derived Directives' : 'Standard Template Baseline'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  {isSkillEnabled
+                    ? 'AI enforces zero-filler consultant reporting, AST line replacement, and RADS scoring.'
+                    : 'Standard template replacement without specialized consultant skill prompt.'}
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsSkillDrawerOpen(!isSkillDrawerOpen)}
+              className="text-xs font-bold px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors flex items-center gap-1.5 whitespace-nowrap"
+            >
+              <span>{isSkillDrawerOpen ? '▲ Hide Prompt' : '⚙️ View / Edit Skill Prompt'}</span>
+            </button>
+          </div>
+
+          {/* Collapsible Skill Prompt Drawer */}
+          {isSkillDrawerOpen && (
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-700 space-y-3 animate-fade-in">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Specialized Prompt for <span className="text-blue-600 dark:text-blue-400">{activeTemplate.name}</span>:
+                </span>
+                {skillSavedNotice && (
+                  <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 animate-pulse">
+                    ✓ {skillSavedNotice}
+                  </span>
+                )}
+              </div>
+              <textarea
+                rows={6}
+                value={customSkillPrompt}
+                onChange={e => setCustomSkillPrompt(e.target.value)}
+                placeholder="Enter or modify consultant instructions for this specific template..."
+                className="w-full p-3 text-xs font-mono border border-slate-300 dark:border-slate-600 rounded-xl bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none leading-relaxed"
+              />
+              <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
+                <span className="text-[11px] text-slate-400">
+                  Edits are saved locally for this template and persist across sessions.
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleResetSkillPrompt}
+                    className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 font-semibold"
+                  >
+                    Reset to Default
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveSkillPrompt}
+                    className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-sm"
+                  >
+                    Save Custom Prompt
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

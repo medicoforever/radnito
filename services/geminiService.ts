@@ -653,13 +653,15 @@ ${JSON.stringify({ findings: currentFindings })}
 
 export const mergeFindingsWithAst = async (
   findingsText: string,
-  selectedTemplate: { id?: string; name: string; category?: string; modality?: string; lines?: string[]; docxBase64?: string },
+  selectedTemplate: { id?: string; name: string; category?: string; modality?: string; lines?: string[]; docxBase64?: string; skillPrompt?: string },
   model: string,
   customPrompt?: string,
-  customImages?: Array<{ data: string; mimeType: string }> | null
+  customImages?: Array<{ data: string; mimeType: string }> | null,
+  skillEnabled: boolean = true,
+  activeSkillPrompt?: string
 ): Promise<{ findings: string[]; docxBlob?: Blob }> => {
   if (!selectedTemplate.docxBase64) {
-    const findings = await mergeFindingsWithTemplate(findingsText, selectedTemplate, model, customPrompt, customImages);
+    const findings = await mergeFindingsWithTemplate(findingsText, selectedTemplate, model, customPrompt, customImages, skillEnabled, activeSkillPrompt);
     return { findings };
   }
 
@@ -668,6 +670,9 @@ export const mergeFindingsWithAst = async (
 
     const astPrompt = `You are an expert radiology report integration engine.
 Your task is to merge the radiologist's findings into the target document's exact Abstract Syntax Tree (AST) nodes.
+
+### ZERO CONVERSATIONAL FILLER MANDATE:
+Do NOT output any conversational preamble, commentary, AI pleasantries, or sign-offs. Produce ONLY pure clinical data in the JSON schema.
 
 ## TARGET DOCUMENT AST NODES:
 ${JSON.stringify(ast, null, 2)}
@@ -681,17 +686,25 @@ ${findingsText}
 
 ---
 
-## STRICT AST MUTATION RULES:
-1. Identify the exact node_id for each finding:
-   - For standalone headings (e.g. "Right brachial plexus:"), update the narrative node directly following it with the finding.
-   - For inline fields (e.g. "RV diameter: --- cm"), update that field's node with the new value.
-   - For narrative organ sentences (e.g. liver, spleen), update that specific organ node.
-   - For table cells (e.g. clot matrices, score boxes), update that table cell node.
-2. Only include nodes in "updates" that NEED modifications. Do NOT return untouched normal nodes.
-3. If clinical history is provided, update the Clinical Profile node.
-4. Synthesize concise bullet points under "impression".
-5. Also produce full final report lines in "display_findings" array (prefixing abnormal lines with "BOLD::" and final impression as "IMPRESSION:###point 1###point 2...").
-6. Return JSON with structure:
+## STRICT AST MUTATION & CONSULTANT MIRROR RULES:
+1. **Node Identification & In-Place Replacement**:
+   - Identify the exact node_id for each finding (e.g. narrative organ node, inline field, table cell).
+   - Only include nodes in "updates" that NEED modifications. Do NOT return untouched normal nodes.
+   - For unaffected nodes, preserve baseline template text 100% intact.
+2. **5-Layer Structural DNA & BOLD Protocol**:
+   - Update Clinical Profile node if history/indication is dictated (wrapped as "*Clinical Profile: ...*").
+   - In "display_findings", produce the full ordered report array: Capitalized Title -> "*Clinical Profile: ...*" (or "*Clinical Profile:*") -> Technique -> Findings (prefix modified lines with "BOLD::", preserve normal lines verbatim without "BOLD::") -> Synthesized Impression starting with "IMPRESSION:###".
+3. **Vague Dictation Translation**:
+   - Translate colloquial phrases into formal consultant terminology: "fuzzy liver thing" -> "Ill-defined focal lesion in segment VI...", "whited out left base" -> "Homogeneous dense opacification of the left hemithorax base...", "dirty fat around appendix" -> "Blind-ending thickened appendix with surrounding fat stranding...", "bright spot on dwi" -> "Focal area of acute restricted diffusion on DWI...", "torn meniscus" -> "Linear high signal intensity... consistent with meniscal tear", "broken hip ball" -> "Displaced subcapital fracture of femoral neck".
+4. **RADS Scoring Standards**:
+   - BI-RADS (0-6), PI-RADS v2.1 (PZ vs TZ sequence dominance, categories 1-5), TI-RADS (TR1-TR5), LI-RADS (LR-1 to LR-5), Lung-RADS v2022 (Categories 1-4X), CAD-RADS 2.0 (0-5 with modifiers).
+5. **Cross-Template Contamination Isolation**:
+   - Restrict findings strictly to the active template's anatomical domain. Do NOT merge mismatched organ findings into unrelated template nodes.
+6. **Non-Verb Impression Synthesis**:
+   - Synthesize concise, non-verb bullet points under "impression": ["Point 1", "Point 2"].
+   - In "display_findings", format impression as: "IMPRESSION:###Point 1###Point 2".
+   - If all findings normal: "IMPRESSION:###Normal study.###No significant abnormality detected."
+7. Return JSON schema:
 {
   "updates": [
     { "node_id": "p_...", "new_text": "...", "bold": true }
@@ -699,6 +712,8 @@ ${findingsText}
   "impression": ["..."],
   "display_findings": ["..."]
 }
+${(skillEnabled && (activeSkillPrompt || (selectedTemplate as any).skillPrompt)) ? `\n=== AUTHORITATIVE CONSULTANT SKILL DIRECTIVES ===\n${activeSkillPrompt || (selectedTemplate as any).skillPrompt}\n` : ''}
+${(skillEnabled && (activeSkillPrompt || (selectedTemplate as any).skillPrompt)) ? `\n=== AUTHORITATIVE CONSULTANT SKILL DIRECTIVES ===\n${activeSkillPrompt || (selectedTemplate as any).skillPrompt}\n` : ''}
 ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
 `;
 
@@ -752,16 +767,18 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
     console.warn('AST merge failed, falling back to standard merger:', astErr);
   }
 
-  const findings = await mergeFindingsWithTemplate(findingsText, selectedTemplate, model, customPrompt, customImages);
+  const findings = await mergeFindingsWithTemplate(findingsText, selectedTemplate, model, customPrompt, customImages, skillEnabled, activeSkillPrompt);
   return { findings };
 };
 
 export const mergeFindingsWithTemplate = async (
   findingsText: string,
-  selectedTemplate: { id?: string; name: string; category?: string; modality?: string; lines?: string[]; docxBase64?: string },
+  selectedTemplate: { id?: string; name: string; category?: string; modality?: string; lines?: string[]; docxBase64?: string; skillPrompt?: string },
   model: string,
   customPrompt?: string,
-  customImages?: Array<{ data: string; mimeType: string }> | null
+  customImages?: Array<{ data: string; mimeType: string }> | null,
+  skillEnabled: boolean = true,
+  activeSkillPrompt?: string
 ): Promise<string[]> => {
   const normalFindingsText = selectedTemplate.lines && selectedTemplate.lines.length > 0
     ? selectedTemplate.lines.map((l, i) => `${i + 1}. ${l}`).join('\n')
@@ -769,6 +786,9 @@ export const mergeFindingsWithTemplate = async (
 
   const prompt = `You are an expert radiologist and medical transcriptionist.
 Your task is to merge the radiologist's findings directly into the target standard radiology report template.
+
+### ZERO CONVERSATIONAL FILLER MANDATE:
+Do NOT include any conversational preamble, pleasantries, commentary, or sign-offs. Produce ONLY pure clinical report strings within the JSON array.
 
 ## TARGET REPORT TEMPLATE:
 Title: ${selectedTemplate.name}
@@ -787,17 +807,25 @@ ${findingsText}
 
 ---
 
-## STRICT MERGING AND INTEGRATION RULES:
-1. Carefully analyze each anatomical organ/structure and line in the target template.
-2. Structure Matching:
-   - If the template has standalone headings (e.g. "Right brachial plexus:") with description lines beneath them, output the heading followed by the updated finding line.
-   - If the template has inline labeled lines (e.g. "RV diameter: --- cm" or "Liver: Normal..."), output the exact label prefix followed by the updated finding or measurement.
-3. For any organ/region where the radiologist provided abnormal findings or specific observations, replace or update the normal description with the patient's actual findings, and prefix that abnormal/dictated line with "BOLD::".
-4. For all other organs/regions where no abnormality or mention was made, keep the standard normal line from the template exactly as is, without "BOLD::".
-5. If clinical history or indication is mentioned in the findings, format as "Clinical Profile: [history]".
-6. If the template has a Technique line (e.g. "Technique: ..."), keep it intact.
-7. Synthesize a concise, bulleted "IMPRESSION:" section at the end summarizing all abnormal findings. Format as a single string: "IMPRESSION:###point 1###point 2...". If all findings are normal, format as "IMPRESSION:###Normal study.###No significant abnormality detected."
-8. Output JSON format: { "findings": string[] }.
+## STRICT 5-LAYER MERGING AND INTEGRATION RULES:
+1. **5-Layer Structural Hierarchy**:
+   - Layer 1: Title: ${selectedTemplate.name}
+   - Layer 2: Clinical Profile: format as "*Clinical Profile: C/o [complaint] with H/o [history].*" or "*Clinical Profile:*" if none provided.
+   - Layer 3: Scanning Technique: preserve the template's technique line.
+   - Layer 4: Anatomical Findings: organized by anatomical subsystem.
+   - Layer 5: Synthesized Impression: starting with "IMPRESSION:###".
+2. **Deterministic Baseline Preservation & BOLD Marker Protocol**:
+   - For any organ/structure where abnormal or dictated findings were provided, replace or update the normal description with the patient's actual finding and prefix that abnormal/dictated line with "BOLD::".
+   - For all other structures where no abnormality was mentioned, keep the standard normal baseline line from the template VERBATIM, without "BOLD::".
+3. **Vague Dictation Translation & RADS Scoring**:
+   - Translate colloquial radiologist dictation into formal board-certified terminology ("fuzzy liver thing" -> "Ill-defined focal lesion in segment VI...", "whited out base" -> "Homogeneous dense opacification...", "dirty fat" -> "perilesional fat stranding...").
+   - Apply standardized scoring criteria for BI-RADS, PI-RADS v2.1, TI-RADS, LI-RADS, Lung-RADS v2022, CAD-RADS 2.0.
+4. **Contamination Isolation Gate**:
+   - Strictly map findings to the active template's anatomical domain. Do NOT overwrite baseline normal organs with mismatched organ findings. Place out-of-domain incidental findings in a distinct paragraph before the impression.
+5. **Non-Verb Impression Synthesis**:
+   - Format: "IMPRESSION:###Point 1###Point 2". Non-verb, concise summaries. No extraneous numbers/measurements.
+   - If all findings normal: "IMPRESSION:###Normal study.###No significant abnormality detected."
+6. Output JSON format: { "findings": string[] }.
 ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
 `;
 
