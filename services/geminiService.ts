@@ -72,7 +72,6 @@ export const isTextBlob = (blob: Blob, fileName?: string): boolean => {
   return false;
 };
 
-export 
 // User's strictly configured model list in exact order
 export const USER_CONFIGURED_MODELS = [
   'gemini-3.5-flash',
@@ -849,18 +848,7 @@ export const mergeFindingsWithAst = async (
       : [];
 
     let crossSkillBlock = '';
-    if (secondarySkills.length > 0) {
-      crossSkillBlock = `
-
-### ⚡ CROSS-MODALITY & INCIDENTAL PATHOLOGY CONSULTANT DIRECTIVES (Auto-Detected Secondary Skills):
-The radiologist's dictation includes clinical findings related to adjacent or incidental organ systems. You MUST cross-reference the following specialized consultant directives for those findings:
-` + secondarySkills.map(s => `
-[CROSS-MODALITY SKILL: ${s.name} (${s.category || 'Specialized'})]:
-${s.skillPrompt}
-`).join('
-') + `
-*Directive for Cross-Modality Findings*: Use the exact consultant grading, AST pathological translation, and diagnostic criteria from the matching secondary skill above.`;
-    }
+      crossSkillBlock = `\n\n### ⚡ CROSS-MODALITY & INCIDENTAL PATHOLOGY CONSULTANT DIRECTIVES (Auto-Detected Secondary Skills):\nThe radiologist's dictation includes clinical findings related to adjacent or incidental organ systems. You MUST cross-reference the following specialized consultant directives for those findings:\n` + secondarySkills.map(s => `[CROSS-MODALITY SKILL: ${s.name} (${s.category || 'Specialized'})]:\n${s.skillPrompt}`).join('\n\n') + `\n*Directive for Cross-Modality Findings*: Use the exact consultant grading, AST pathological translation, and diagnostic criteria from the matching secondary skill above.`;
 
     const astPrompt = `You are an expert radiology report integration engine.
 Your task is to merge the radiologist's findings into the target document's exact Abstract Syntax Tree (AST) nodes.
