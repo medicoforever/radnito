@@ -552,7 +552,90 @@ function collectBodyParagraphs(parent: Element): Element[] {
   return paragraphs;
 }
 
-function setParagraphContent(
+function updateParagraphPreservingStyle(
+  xmlDoc: Document,
+  p: Element,
+  newText: string,
+  isAbnormal?: boolean
+): void {
+  const cleanVal = newText.replace(/^BOLD::\s*/, '').trim();
+  const runs = p.getElementsByTagName('w:r');
+
+  if (runs.length > 0) {
+    const firstRun = runs[0];
+    let rPr = firstRun.getElementsByTagName('w:rPr')[0];
+
+    if (!rPr) {
+      rPr = xmlDoc.createElementNS(W_NS, 'w:rPr');
+      const rFonts = xmlDoc.createElementNS(W_NS, 'w:rFonts');
+      rFonts.setAttributeNS(W_NS, 'w:ascii', 'Times New Roman');
+      rFonts.setAttributeNS(W_NS, 'w:hAnsi', 'Times New Roman');
+      rPr.appendChild(rFonts);
+      const sz = xmlDoc.createElementNS(W_NS, 'w:sz');
+      sz.setAttributeNS(W_NS, 'w:val', '24'); // 12pt
+      rPr.appendChild(sz);
+      firstRun.insertBefore(rPr, firstRun.firstChild);
+    }
+
+    // Apply or ensure boldness on abnormal finding
+    if (isAbnormal) {
+      let bElem = rPr.getElementsByTagName('w:b')[0];
+      if (!bElem) {
+        bElem = xmlDoc.createElementNS(W_NS, 'w:b');
+        bElem.setAttributeNS(W_NS, 'w:val', '1');
+        rPr.appendChild(bElem);
+      } else {
+        bElem.setAttributeNS(W_NS, 'w:val', '1');
+      }
+    }
+
+    // Update text of the first run
+    let tElem = firstRun.getElementsByTagName('w:t')[0];
+    if (!tElem) {
+      tElem = xmlDoc.createElementNS(W_NS, 'w:t');
+      firstRun.appendChild(tElem);
+    }
+    tElem.textContent = cleanVal;
+    tElem.setAttribute('xml:space', 'preserve');
+
+    // Remove any trailing extra runs from the original paragraph
+    const extraRuns: Element[] = [];
+    for (let i = 1; i < runs.length; i++) {
+      extraRuns.push(runs[i]);
+    }
+    for (const er of extraRuns) {
+      if (er.parentNode === p) {
+        p.removeChild(er);
+      }
+    }
+  } else {
+    // Create new run with standard Times New Roman 12pt
+    const r = xmlDoc.createElementNS(W_NS, 'w:r');
+    const rPr = xmlDoc.createElementNS(W_NS, 'w:rPr');
+    const rFonts = xmlDoc.createElementNS(W_NS, 'w:rFonts');
+    rFonts.setAttributeNS(W_NS, 'w:ascii', 'Times New Roman');
+    rFonts.setAttributeNS(W_NS, 'w:hAnsi', 'Times New Roman');
+    rPr.appendChild(rFonts);
+    const sz = xmlDoc.createElementNS(W_NS, 'w:sz');
+    sz.setAttributeNS(W_NS, 'w:val', '24');
+    rPr.appendChild(sz);
+
+    if (isAbnormal) {
+      const b = xmlDoc.createElementNS(W_NS, 'w:b');
+      b.setAttributeNS(W_NS, 'w:val', '1');
+      rPr.appendChild(b);
+    }
+
+    r.appendChild(rPr);
+    const t = xmlDoc.createElementNS(W_NS, 'w:t');
+    t.textContent = cleanVal;
+    t.setAttribute('xml:space', 'preserve');
+    r.appendChild(t);
+    p.appendChild(r);
+  }
+}
+
+function oldSetParagraphContent(
   xmlDoc: Document,
   p: Element,
   newText: string,
@@ -704,7 +787,7 @@ export async function mergeFindingsIntoDocx(
         const finding = bodyFindingLines[i];
         const isBold = finding.startsWith('BOLD::') || (finding !== origText && i >= 3);
         const cleanVal = finding.replace(/^BOLD::\s*/, '').trim();
-        setParagraphContent(xmlDoc, p, cleanVal, isBold);
+        updateParagraphPreservingStyle(xmlDoc, p, cleanVal, isBold);
       }
     } else {
       // Mixed alignment: First match colon-keys, then sequential fill
@@ -718,7 +801,7 @@ export async function mergeFindingsIntoDocx(
             const finding = colonFindingsMap.get(key)!;
             const isBold = finding.startsWith('BOLD::') || (finding !== origText);
             const cleanVal = finding.replace(/^BOLD::\s*/, '').trim();
-            setParagraphContent(xmlDoc, p, cleanVal, isBold);
+            updateParagraphPreservingStyle(xmlDoc, p, cleanVal, isBold);
             usedFindings.add(finding);
           }
         }
@@ -735,7 +818,7 @@ export async function mergeFindingsIntoDocx(
             const finding = bodyFindingLines[bodyCursor];
             const isBold = finding.startsWith('BOLD::') || (finding !== origText);
             const cleanVal = finding.replace(/^BOLD::\s*/, '').trim();
-            setParagraphContent(xmlDoc, p, cleanVal, isBold);
+            updateParagraphPreservingStyle(xmlDoc, p, cleanVal, isBold);
             usedFindings.add(finding);
             bodyCursor++;
           }
@@ -771,14 +854,14 @@ export async function mergeFindingsIntoDocx(
           const p = postImpressionParagraphs[i];
           const isNative = hasNativeBullet(p);
           const textToInsert = isNative ? cleanBulletText : `•  ${cleanBulletText}`;
-          setParagraphContent(xmlDoc, p, textToInsert, true);
+          updateParagraphPreservingStyle(xmlDoc, p, textToInsert, true);
         } else {
           // Insert new bullet paragraph
           const lastSlot = postImpressionParagraphs[postImpressionParagraphs.length - 1] || allBodyParagraphs[impressionHeaderIdx];
           const newP = lastSlot.cloneNode(true) as Element;
           const isNative = hasNativeBullet(newP);
           const textToInsert = isNative ? cleanBulletText : `•  ${cleanBulletText}`;
-          setParagraphContent(xmlDoc, newP, textToInsert, true);
+          updateParagraphPreservingStyle(xmlDoc, newP, textToInsert, true);
           lastSlot.parentNode?.insertBefore(newP, lastSlot.nextSibling);
           postImpressionParagraphs.push(newP);
         }
