@@ -899,8 +899,8 @@ ${findingsText}
    - **Automatic Contradiction Removal**: If an abnormal finding supersedes, covers, or contradicts an existing baseline normal node (e.g. ventricular atrophy finding supersedes normal ventricular system node, or disc bulge finding supersedes 'no significant disc bulge' node), you MUST include that superseded normal node in "updates" with "new_text": "" (empty string) so it is cleanly removed from the Word document with zero leftover contradictory text.
    - For unaffected normal nodes, do NOT include them in "updates" (they remain 100% intact with their original template styles).
 2. **5-Layer Structural DNA & BOLD Protocol**:
-   - Update Clinical Profile node if history/indication is dictated (wrapped as "*Clinical Profile: ...*").
-   - In "display_findings", produce the full ordered report array: Capitalized Title -> "*Clinical Profile: ...*" (or "*Clinical Profile:*") -> Technique -> Findings (prefix modified lines with "BOLD::", preserve normal lines verbatim without "BOLD::") -> Synthesized Impression starting with "IMPRESSION:###".
+   - Update Clinical Profile node if history/indication is dictated (written as "Clinical Profile: ...").
+   - In "display_findings", produce the full ordered report array: Capitalized Title -> "Clinical Profile: ..." (or "Clinical Profile:") -> Technique -> Findings (prefix modified lines with "BOLD::", preserve normal lines verbatim without "BOLD::") -> Synthesized Impression starting with "IMPRESSION:###".
 3. **Vague Dictation Translation**:
    - Translate colloquial phrases into formal consultant terminology: "fuzzy liver thing" -> "Ill-defined focal lesion in segment VI...", "whited out left base" -> "Homogeneous dense opacification of the left hemithorax base...", "dirty fat around appendix" -> "Blind-ending thickened appendix with surrounding fat stranding...", "bright spot on dwi" -> "Focal area of acute restricted diffusion on DWI...", "torn meniscus" -> "Linear high signal intensity... consistent with meniscal tear", "broken hip ball" -> "Displaced subcapital fracture of femoral neck".
 4. **RADS Scoring Standards**:
@@ -914,7 +914,7 @@ ${findingsText}
 7. Return JSON schema:
 {
   "updates": [
-    { "node_id": "p_...", "new_text": "...", "bold": true }
+    { "node_id": "node_...", "new_text": "...", "bold": true }
   ],
   "impression": ["..."],
   "display_findings": ["..."]

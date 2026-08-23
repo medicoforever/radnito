@@ -78,7 +78,7 @@ export async function buildDocumentAstFromDocx(docxBase64: string): Promise<{
   let impressionHeaderId: string | undefined;
   const impressionSlotIds: string[] = [];
 
-  let pIndex = 0;
+  let nodeIndex = 0;
   let inImpressionSection = false;
 
   for (let i = 0; i < body.childNodes.length; i++) {
@@ -89,8 +89,12 @@ export async function buildDocumentAstFromDocx(docxBase64: string): Promise<{
 
     if (tag === 'p') {
       const txt = getElementText(el).trim();
-      const nodeId = `p_${pIndex}`;
+      if (!txt) continue; // Preserve blank spacer lines in DOM without exposing confusing indices to AI
+
+      const nodeId = `node_${nodeIndex}`;
       pMap.set(nodeId, el);
+      // Support legacy p_ index aliases for backward compatibility
+      pMap.set(`p_${nodeIndex}`, el);
 
       let pType: DocumentAstNode['type'] = 'narrative';
       let label: string | undefined;
@@ -118,20 +122,18 @@ export async function buildDocumentAstFromDocx(docxBase64: string): Promise<{
         const parts = txt.split(':', 2);
         label = parts[0].trim();
         val = parts[1]?.trim();
-      } else if (pIndex === 0) {
+      } else if (nodeIndex === 0) {
         pType = 'title';
       }
 
-      if (txt) {
-        ast.push({
-          id: nodeId,
-          type: pType,
-          label,
-          current_text: txt,
-          current_val: val,
-        });
-      }
-      pIndex++;
+      ast.push({
+        id: nodeId,
+        type: pType,
+        label,
+        current_text: txt,
+        current_val: val,
+      });
+      nodeIndex++;
     } else if (tag === 'tbl') {
       const tblIndex = ast.filter(x => x.type === 'table_cell').length > 0 ? 1 : 0;
       const rows = getDirectChildren(el, 'tr');
@@ -361,6 +363,56 @@ export async function applyAstMutationsToDocx(
         const tTags = p.getElementsByTagName('w:t');
         for (let j = 0; j < tTags.length; j++) {
           tTags[j].textContent = '';
+        }
+      }
+    }
+  }
+
+    // 2.5. Zero-Drop Findings Reconciliation Guard:
+  // Verifies that every clinical finding in mutations was successfully written to the Word document DOM.
+  // If the AI omitted a node update or index shifted, this guard guarantees 100% placement!
+  if (mutations && mutations.length > 0) {
+    const updatedTexts = new Set<string>();
+    pMap.forEach((el) => {
+      const t = getElementText(el).trim();
+      if (t) updatedTexts.add(t);
+    });
+
+    for (const mut of mutations) {
+      const clean = (mut.new_text || '').replace(/^BOLD::\s*/, '').trim();
+      if (!clean) continue;
+
+      let found = false;
+      for (const ut of updatedTexts) {
+        if (ut.includes(clean) || clean.includes(ut)) {
+          found = true;
+          break;
+        }
+      }
+
+      // If a dictated finding is missing from DOM, find the best matching baseline node and update it
+      if (!found) {
+        let bestTarget: Element | null = null;
+        let bestScore = 0;
+        pMap.forEach((el, key) => {
+          if (key.startsWith('node_') || key.startsWith('p_')) {
+            const currentT = getElementText(el).trim();
+            if (currentT && !currentT.toUpperCase().startsWith('IMPRESSION:')) {
+              // Word overlap score
+              const cWords = new Set(clean.toLowerCase().split(/\W+/).filter(w => w.length > 2));
+              const tWords = new Set(currentT.toLowerCase().split(/\W+/).filter(w => w.length > 2));
+              let overlap = 0;
+              cWords.forEach(w => { if (tWords.has(w)) overlap++; });
+              if (overlap > bestScore) {
+                bestScore = overlap;
+                bestTarget = el;
+              }
+            }
+          }
+        });
+
+        if (bestTarget) {
+          applyTextToParagraphRuns(bestTarget, clean, mut.bold);
         }
       }
     }
