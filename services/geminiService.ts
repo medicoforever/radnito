@@ -911,7 +911,7 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
     }
     parts.push({ text: astPrompt });
 
-    const response: GenerateContentResponse = await getAiClient().client.models.generateContent({
+    const response: GenerateContentResponse = await generateContentWithRetry({
       model: getValidModelName(model),
       contents: parts,
       config: {

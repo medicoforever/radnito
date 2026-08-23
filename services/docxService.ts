@@ -346,9 +346,12 @@ function extractSignificantWords(text: string): Set<string> {
 }
 
 function computeParagraphSimilarity(fWords: Set<string>, pWords: Set<string>, fText: string, pText: string): number {
+  const cleanFText = fText.replace(/^BOLD::\s*/, '').trim();
+  const cleanPText = pText.replace(/^BOLD::\s*/, '').trim();
+
   // 1. Colon key match (highest priority, e.g. "L1-L2:", "Clinical Profile:", "Liver:")
-  const fParts = fText.split(':', 2);
-  const pParts = pText.split(':', 2);
+  const fParts = cleanFText.split(':', 2);
+  const pParts = cleanPText.split(':', 2);
   if (fParts.length > 1 && pParts.length > 1 && fParts[0].trim().split(/\s+/).length <= 6 && pParts[0].trim().split(/\s+/).length <= 6) {
     const fKey = fParts[0].replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
     const pKey = pParts[0].replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
