@@ -280,16 +280,27 @@ export async function applyAstMutationsToDocx(
   // 1. Apply Paragraph and Table Cell mutations
   for (const mut of mutations) {
     const nid = mut.node_id;
-    if (!mut.new_text || !mut.new_text.trim()) continue;
+    const cleanText = (mut.new_text || '').trim();
 
     if (pMap.has(nid)) {
       const p = pMap.get(nid)!;
-      applyTextToParagraphRuns(p, mut.new_text, mut.bold);
+      if (!cleanText) {
+        // Clear paragraph text cleanly
+        const tTags = p.getElementsByTagName('w:t');
+        for (let k = 0; k < tTags.length; k++) tTags[k].textContent = '';
+      } else {
+        applyTextToParagraphRuns(p, cleanText, mut.bold);
+      }
     } else if (cellMap.has(nid)) {
       const tc = cellMap.get(nid)!;
       const p = tc.getElementsByTagName('w:p')[0];
       if (p) {
-        applyTextToParagraphRuns(p, mut.new_text, mut.bold);
+        if (!cleanText) {
+          const tTags = p.getElementsByTagName('w:t');
+          for (let k = 0; k < tTags.length; k++) tTags[k].textContent = '';
+        } else {
+          applyTextToParagraphRuns(p, cleanText, mut.bold);
+        }
       }
     }
   }

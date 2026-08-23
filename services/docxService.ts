@@ -332,7 +332,200 @@ export async function mergeFindingsIntoDocx(
   findings?: string[] | null,
   examTitle: string = 'Radiology Report'
 ): Promise<Blob> {
-  return generateDocxFromFindings(findings || [], examTitle);
+  if (!findings || findings.length === 0) {
+    if (templateBase64 && templateBase64.trim()) {
+      return new Blob([base64ToUint8Array(templateBase64)], {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
+    }
+    return generateDocxFromFindings([], examTitle);
+  }
+
+  // If a native template is uploaded/selected, preserve 100% of its native styles, fonts, margins, and headers
+  if (templateBase64 && templateBase64.trim()) {
+    try {
+      const templateBytes = base64ToUint8Array(templateBase64);
+      const zipEntries = await parseZip(templateBytes.buffer);
+      const docXmlEntry = zipEntries.get('word/document.xml');
+      if (docXmlEntry) {
+        const xmlStr = new TextDecoder('utf-8').decode(docXmlEntry.data);
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(xmlStr, 'application/xml');
+        const bodyElem = xmlDoc.getElementsByTagName('w:body')[0];
+
+        if (bodyElem) {
+          const allP: Element[] = [];
+          for (let i = 0; i < bodyElem.childNodes.length; i++) {
+            const node = bodyElem.childNodes[i];
+            if (node.nodeType === 1) {
+              const el = node as Element;
+              if (el.localName === 'p' || el.nodeName === 'w:p') {
+                allP.push(el);
+              }
+            }
+          }
+
+          // Separate body findings and impression items
+          const bodyFindings: string[] = [];
+          const impressionItems: string[] = [];
+          let isInImpression = false;
+
+          for (const f of findings) {
+            let trimmed = f.trim();
+            if (!trimmed) continue;
+            if (trimmed.includes('|') || trimmed.startsWith('+-') || trimmed.startsWith('|-')) continue;
+            if (trimmed.toLowerCase().startsWith('title:')) {
+              trimmed = trimmed.substring(trimmed.indexOf(':') + 1).trim();
+              if (!trimmed) continue;
+            }
+
+            if (trimmed.toUpperCase() === 'IMPRESSION:' || trimmed.toUpperCase().startsWith('IMPRESSION:') || trimmed.toUpperCase() === 'CONCLUSION:' || trimmed.toUpperCase().startsWith('CONCLUSION:')) {
+              isInImpression = true;
+              if (trimmed.includes('###')) {
+                const parts = trimmed.split('###').slice(1);
+                for (const p of parts) {
+                  const cleanP = p.replace(/^[•\-\*\d\.\s\u2022\u25cf]+/, '').trim();
+                  if (cleanP) impressionItems.push(cleanP);
+                }
+              }
+              continue;
+            }
+
+            if (isInImpression) {
+              const cleanP = trimmed.replace(/^[•\-\*\d\.\s\u2022\u25cf]+/, '').trim();
+              if (cleanP) impressionItems.push(cleanP);
+              continue;
+            }
+
+            bodyFindings.push(trimmed);
+          }
+
+          // Locate impression header index
+          let impIdx = -1;
+          for (let i = 0; i < allP.length; i++) {
+            const tTags = allP[i].getElementsByTagName('w:t');
+            let t = '';
+            for (let j = 0; j < tTags.length; j++) t += tTags[j].textContent || '';
+            const u = t.trim().toUpperCase();
+            if (u === 'IMPRESSION:' || u.startsWith('IMPRESSION:') || u === 'CONCLUSION:' || u.startsWith('CONCLUSION:')) {
+              impIdx = i;
+              break;
+            }
+          }
+
+          // Collect non-empty template paragraphs before impression
+          const endLimit = impIdx !== -1 ? impIdx : allP.length;
+          const nonBlankSlots: Element[] = [];
+          for (let i = 0; i < endLimit; i++) {
+            const tTags = allP[i].getElementsByTagName('w:t');
+            let t = '';
+            for (let j = 0; j < tTags.length; j++) t += tTags[j].textContent || '';
+            if (t.trim()) {
+              nonBlankSlots.push(allP[i]);
+            }
+          }
+
+          // Map body findings 1-to-1 onto template non-blank slots, preserving styles
+          for (let i = 0; i < nonBlankSlots.length; i++) {
+            const p = nonBlankSlots[i];
+            const tTags = p.getElementsByTagName('w:t');
+            if (i < bodyFindings.length) {
+              const finding = bodyFindings[i];
+              const isBold = finding.startsWith('BOLD::');
+              const cleanVal = finding.replace(/^BOLD::\s*/, '').trim();
+
+              if (tTags.length > 0) {
+                tTags[0].textContent = cleanVal;
+                tTags[0].setAttribute('xml:space', 'preserve');
+                for (let k = 1; k < tTags.length; k++) tTags[k].textContent = '';
+              }
+
+              if (isBold) {
+                const runs = p.getElementsByTagName('w:r');
+                if (runs.length > 0) {
+                  let rPr = runs[0].getElementsByTagName('w:rPr')[0];
+                  if (!rPr) {
+                    rPr = xmlDoc.createElementNS(W_NS, 'w:rPr');
+                    runs[0].insertBefore(rPr, runs[0].firstChild);
+                  }
+                  let bTag = rPr.getElementsByTagName('w:b')[0];
+                  if (!bTag) {
+                    bTag = xmlDoc.createElementNS(W_NS, 'w:b');
+                    bTag.setAttributeNS(W_NS, 'w:val', '1');
+                    rPr.appendChild(bTag);
+                  }
+                }
+              }
+            } else {
+              // Clear extra leftover template slot if findings had fewer lines
+              for (let k = 0; k < tTags.length; k++) tTags[k].textContent = '';
+            }
+          }
+
+          // Update impression bullets
+          if (impIdx !== -1 && impressionItems.length > 0) {
+            const postImpressionSlots: Element[] = [];
+            for (let i = impIdx + 1; i < allP.length; i++) {
+              const tTags = allP[i].getElementsByTagName('w:t');
+              let t = '';
+              for (let j = 0; j < tTags.length; j++) t += tTags[j].textContent || '';
+              if (t.includes('MD') || t.includes('RADIOLOGIST') || t.includes('Page ') || t.toLowerCase().includes('consultant')) break;
+              if (t.trim()) postImpressionSlots.push(allP[i]);
+            }
+
+            for (let i = 0; i < impressionItems.length; i++) {
+              const bullet = impressionItems[i];
+              if (i < postImpressionSlots.length) {
+                const p = postImpressionSlots[i];
+                const tTags = p.getElementsByTagName('w:t');
+                if (tTags.length > 0) {
+                  tTags[0].textContent = `•  ${bullet}`;
+                  tTags[0].setAttribute('xml:space', 'preserve');
+                  for (let k = 1; k < tTags.length; k++) tTags[k].textContent = '';
+                }
+              } else {
+                const lastSlot = postImpressionSlots[postImpressionSlots.length - 1] || allP[impIdx];
+                const newP = lastSlot.cloneNode(true) as Element;
+                const tTags = newP.getElementsByTagName('w:t');
+                if (tTags.length > 0) {
+                  tTags[0].textContent = `•  ${bullet}`;
+                  tTags[0].setAttribute('xml:space', 'preserve');
+                  for (let k = 1; k < tTags.length; k++) tTags[k].textContent = '';
+                }
+                lastSlot.parentNode?.insertBefore(newP, lastSlot.nextSibling);
+                postImpressionSlots.push(newP);
+              }
+            }
+
+            for (let i = impressionItems.length; i < postImpressionSlots.length; i++) {
+              const tTags = postImpressionSlots[i].getElementsByTagName('w:t');
+              for (let k = 0; k < tTags.length; k++) tTags[k].textContent = '';
+            }
+          }
+
+          // Serialize modified XML back into template ZIP
+          const serializer = new XMLSerializer();
+          const modifiedDocXml = serializer.serializeToString(xmlDoc);
+
+          const updatedEntries = new Map<string, Uint8Array>();
+          for (const [name, entry] of zipEntries) {
+            if (name === 'word/document.xml') {
+              const updatedBytes = new TextEncoder().encode(modifiedDocXml);
+              updatedEntries.set(name, updatedBytes);
+            } else {
+              updatedEntries.set(name, entry.data);
+            }
+          }
+
+          return createZip(updatedEntries);
+        }
+      }
+    } catch (err) {
+      console.warn('mergeFindingsIntoDocx template styling preservation error, using fallback:', err);
+    }
+  }
+
+  return generateDocxFromFindings(findings, examTitle);
 }
 
 export function downloadDocxBlob(blob: Blob, filename: string): void {
