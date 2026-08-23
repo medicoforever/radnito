@@ -2,13 +2,14 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import SearchIcon from '../icons/SearchIcon';
 import CloseIcon from '../icons/CloseIcon';
 import SparklesIcon from '../icons/SparklesIcon';
+import TrashIcon from '../icons/TrashIcon';
 import UploadIcon from '../icons/UploadIcon';
 import Spinner from './Spinner';
 import {
   RADIOLOGY_TEMPLATES_CATALOG,
   RadiologyDocxTemplate,
 } from '../../services/templateCatalog';
-import { saveUserTemplate, UserTemplate, isTemplateSkillEnabled, setTemplateSkillEnabled } from '../../services/templateStorage';
+import { saveUserTemplate, UserTemplate, isTemplateSkillEnabled, setTemplateSkillEnabled, deleteUserTemplate } from '../../services/templateStorage';
 import { extractLinesFromDocxBlob } from '../../services/docxService';
 
 export interface SelectedTemplateData {
@@ -228,6 +229,21 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
       setUploadSuccess(`Successfully uploaded and configured Word template: "${pendingDocx.name}"!`);
     } catch (err: any) {
       setUploadError('Failed to save custom template.');
+    }
+  };
+
+  const handleDeleteCustomTemplate = async (id: string, name: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (window.confirm(`Are you sure you want to delete custom template "${name}"?`)) {
+      try {
+        await deleteUserTemplate(id);
+        if (onRefreshCustomTemplates) onRefreshCustomTemplates();
+        if (previewTemplate?.id === id) {
+          setPreviewTemplate(RADIOLOGY_TEMPLATES_CATALOG[0]);
+        }
+      } catch (err) {
+        console.error('Failed to delete template:', err);
+      }
     }
   };
 
@@ -481,6 +497,16 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
                           {tmpl.lines?.length || 0} normal sections • {tmpl.code || tmpl.id}
                         </p>
                       </div>
+                      {tmpl.isCustom && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteCustomTemplate(tmpl.id, tmpl.name, e)}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors"
+                          title="Delete Custom Template"
+                        >
+                          <TrashIcon className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
