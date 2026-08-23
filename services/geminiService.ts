@@ -73,17 +73,33 @@ export const isTextBlob = (blob: Blob, fileName?: string): boolean => {
 };
 
 export 
+// User's strictly configured model list in exact order
+export const USER_CONFIGURED_MODELS = [
+  'gemini-3.5-flash',
+  'gemini-3.7-flash',
+  'gemini-3-flash-preview',
+  'gemini-3.6-flash',
+  'gemini-2.5-flash',
+  'gemini-3.5-flash-lite',
+];
+
 /**
- * Auto-retrying Gemini API caller with Exponential Backoff and Fallback Model Chaining
- * Eliminates 503 "Service Unavailable / High Demand" and 429 rate limit errors during rapid dictations.
+ * Auto-retrying Gemini API caller with Exponential Backoff
+ * Fallback sequence strictly follows the user's configured model list in exact order.
+ * NO arbitrary models outside the user's list are ever used.
  */
 async function generateContentWithRetry(
   params: any,
   maxRetries: number = 3
 ): Promise<GenerateContentResponse> {
-  const fallbackModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
   let currentParams = { ...params };
   let lastError: any = null;
+
+  const currentRawModel = currentParams.model || 'gemini-3.5-flash';
+  const modelQueue = [
+    currentRawModel,
+    ...USER_CONFIGURED_MODELS.filter(m => getValidModelName(m) !== getValidModelName(currentRawModel))
+  ];
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
@@ -104,16 +120,16 @@ async function generateContentWithRetry(
         break;
       }
 
-      // Exponential backoff: 700ms, 1400ms, 2500ms
+      // Exponential backoff
       const delay = (attempt + 1) * 700 + Math.random() * 300;
       console.warn(`[Gemini API] 503/Transient error on attempt ${attempt + 1}. Retrying in ${Math.round(delay)}ms...`);
       await new Promise(r => setTimeout(r, delay));
 
-      // If attempt 2 fails, seamlessly switch to fast backup model
-      if (attempt >= 1) {
-        const nextModel = fallbackModels.find(m => m !== currentParams.model) || 'gemini-2.0-flash';
-        console.warn(`[Gemini API] Switching to backup model: ${nextModel}`);
-        currentParams.model = getValidModelName(nextModel);
+      // Strictly try next model from user's configured model list only
+      const nextCandidate = modelQueue[(attempt + 1) % modelQueue.length];
+      if (nextCandidate) {
+        console.warn(`[Gemini API] Trying configured fallback model: ${nextCandidate}`);
+        currentParams.model = getValidModelName(nextCandidate);
       }
     }
   }

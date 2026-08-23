@@ -206,28 +206,54 @@ export async function applyAstMutationsToDocx(
     }
   };
 
-  // 1. Apply Paragraph and Table Cell mutations
-  for (const mut of mutations) {
-    const nid = mut.node_id;
-    const isAbnormal = mut.bold || mut.new_text.startsWith('BOLD::');
-    const cleanText = mut.new_text.replace(/^BOLD::\s*/, '').trim();
-    if (!cleanText) continue;
-
-    if (pMap.has(nid)) {
-      const p = pMap.get(nid)!;
-      const allRuns: Element[] = [];
-      for (let i = 0; i < p.childNodes.length; i++) {
-        if (p.childNodes[i].nodeName === 'w:r' || (p.childNodes[i] as Element).localName === 'r') {
-          allRuns.push(p.childNodes[i] as Element);
-        }
+  const applyTextToParagraphRuns = (p: Element, rawText: string, defaultBold?: boolean) => {
+    const allRuns: Element[] = [];
+    for (let i = 0; i < p.childNodes.length; i++) {
+      if (p.childNodes[i].nodeName === 'w:r' || (p.childNodes[i] as Element).localName === 'r') {
+        allRuns.push(p.childNodes[i] as Element);
       }
+    }
+    if (allRuns.length === 0) return;
 
-      if (allRuns.length > 0) {
-        const firstRun = allRuns[0];
-        ensureBoldOnRun(firstRun, isAbnormal);
+    const firstRun = allRuns[0];
+    if (rawText.includes('BOLD::')) {
+      const boldIdx = rawText.indexOf('BOLD::');
+      const prefix = rawText.substring(0, boldIdx);
+      const boldText = rawText.substring(boldIdx + 6);
+
+      if (prefix) {
+        ensureBoldOnRun(firstRun, !!defaultBold);
         const tTags = firstRun.getElementsByTagName('w:t');
         if (tTags.length > 0) {
-          tTags[0].textContent = cleanText;
+          tTags[0].textContent = prefix;
+          tTags[0].setAttribute('xml:space', 'preserve');
+          for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
+        }
+
+        let secondRun: Element;
+        if (allRuns.length > 1) {
+          secondRun = allRuns[1];
+        } else {
+          secondRun = firstRun.cloneNode(true) as Element;
+          firstRun.parentNode?.insertBefore(secondRun, firstRun.nextSibling);
+        }
+        ensureBoldOnRun(secondRun, true);
+        const secondTTags = secondRun.getElementsByTagName('w:t');
+        if (secondTTags.length > 0) {
+          secondTTags[0].textContent = boldText;
+          secondTTags[0].setAttribute('xml:space', 'preserve');
+          for (let j = 1; j < secondTTags.length; j++) secondTTags[j].textContent = '';
+        }
+
+        for (let j = 2; j < allRuns.length; j++) {
+          const laterTags = allRuns[j].getElementsByTagName('w:t');
+          for (let k = 0; k < laterTags.length; k++) laterTags[k].textContent = '';
+        }
+      } else {
+        ensureBoldOnRun(firstRun, true);
+        const tTags = firstRun.getElementsByTagName('w:t');
+        if (tTags.length > 0) {
+          tTags[0].textContent = boldText;
           tTags[0].setAttribute('xml:space', 'preserve');
           for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
         }
@@ -236,24 +262,34 @@ export async function applyAstMutationsToDocx(
           for (let k = 0; k < laterTags.length; k++) laterTags[k].textContent = '';
         }
       }
+    } else {
+      ensureBoldOnRun(firstRun, !!defaultBold);
+      const tTags = firstRun.getElementsByTagName('w:t');
+      if (tTags.length > 0) {
+        tTags[0].textContent = rawText;
+        tTags[0].setAttribute('xml:space', 'preserve');
+        for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
+      }
+      for (let j = 1; j < allRuns.length; j++) {
+        const laterTags = allRuns[j].getElementsByTagName('w:t');
+        for (let k = 0; k < laterTags.length; k++) laterTags[k].textContent = '';
+      }
+    }
+  };
+
+  // 1. Apply Paragraph and Table Cell mutations
+  for (const mut of mutations) {
+    const nid = mut.node_id;
+    if (!mut.new_text || !mut.new_text.trim()) continue;
+
+    if (pMap.has(nid)) {
+      const p = pMap.get(nid)!;
+      applyTextToParagraphRuns(p, mut.new_text, mut.bold);
     } else if (cellMap.has(nid)) {
       const tc = cellMap.get(nid)!;
       const p = tc.getElementsByTagName('w:p')[0];
       if (p) {
-        const runs = p.getElementsByTagName('w:r');
-        if (runs.length > 0) {
-          ensureBoldOnRun(runs[0], isAbnormal);
-          const tTags = runs[0].getElementsByTagName('w:t');
-          if (tTags.length > 0) {
-            tTags[0].textContent = cleanText;
-            tTags[0].setAttribute('xml:space', 'preserve');
-            for (let i = 1; i < tTags.length; i++) tTags[i].textContent = '';
-          }
-          for (let j = 1; j < runs.length; j++) {
-            const laterTags = runs[j].getElementsByTagName('w:t');
-            for (let k = 0; k < laterTags.length; k++) laterTags[k].textContent = '';
-          }
-        }
+        applyTextToParagraphRuns(p, mut.new_text, mut.bold);
       }
     }
   }
