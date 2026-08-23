@@ -1071,15 +1071,35 @@ export const processTextFindings = async (
   model: string,
   customPrompt?: string,
   customImages?: Array<{ data: string; mimeType: string }> | null,
-  selectedTemplate?: { id: string; name: string; category?: string; modality?: string; lines: string[] } | null
-): Promise<string[]> => {
+  selectedTemplate?: { id: string; name: string; category?: string; modality?: string; lines: string[]; docxBase64?: string; skillPrompt?: string } | null
+): Promise<{ findings: string[]; docxBlob?: Blob }> => {
   if (selectedTemplate) {
-    return mergeFindingsWithTemplate(rawText, selectedTemplate, model, customPrompt, customImages);
+    if (selectedTemplate.docxBase64) {
+      try {
+        const astRes = await mergeFindingsWithAst(
+          rawText,
+          selectedTemplate as any,
+          model,
+          customPrompt,
+          customImages,
+          true,
+          selectedTemplate.skillPrompt
+        );
+        if (astRes && astRes.findings && astRes.findings.length > 0) {
+          return astRes;
+        }
+      } catch (e) {
+        console.warn('AST text merge error, falling back:', e);
+      }
+    }
+    const findings = await mergeFindingsWithTemplate(rawText, selectedTemplate, model, customPrompt, customImages);
+    return { findings };
   }
 
   const baseBlob = new Blob([rawText], { type: 'text/plain' });
   (baseBlob as any).name = 'pasted_dictation.txt';
-  return processAudio(baseBlob, model, customPrompt, customImages, undefined, undefined, selectedTemplate);
+  const directFindings = await processAudio(baseBlob, model, customPrompt, customImages, undefined, undefined, selectedTemplate);
+  return { findings: directFindings };
 };
 
 export const transcribeAudioForPrompt = async (audioBlob: Blob, modelName = 'gemini-2.5-flash'): Promise<string> => {

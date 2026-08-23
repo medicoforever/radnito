@@ -927,7 +927,9 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                     if (isBatchCancelledRef.current) return;
                     chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || [], activeModel);
                 } else if (batch.inputText && batch.inputText.trim()) {
-                    findings = await processTextFindings(batch.inputText.trim(), activeModel, batch.customPrompt, batch.customImages || [], selectedTemplate);
+                    const textRes = await processTextFindings(batch.inputText.trim(), activeModel, batch.customPrompt, batch.customImages || [], selectedTemplate as any);
+                    findings = textRes.findings;
+                    generatedDocxBlob = textRes.docxBlob;
                     if (isBatchCancelledRef.current) return;
                     const textBlob = new Blob([batch.inputText.trim()], { type: 'text/plain' });
                     (textBlob as any).name = 'batch_dictation.txt';
@@ -1001,7 +1003,9 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                 if (isBatchCancelledRef.current) return;
                 chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || [], activeModel);
             } else if (batch.inputText && batch.inputText.trim()) {
-                findings = await processTextFindings(batch.inputText.trim(), activeModel, batch.customPrompt, batch.customImages || [], selectedTemplate);
+                const textRes = await processTextFindings(batch.inputText.trim(), activeModel, batch.customPrompt, batch.customImages || [], selectedTemplate as any);
+                findings = textRes.findings;
+                generatedDocxBlob = textRes.docxBlob;
                 if (isBatchCancelledRef.current) return;
                 const textBlob = new Blob([batch.inputText.trim()], { type: 'text/plain' });
                 (textBlob as any).name = 'batch_dictation.txt';
