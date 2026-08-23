@@ -1461,7 +1461,28 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                 const templateBase64 = selectedTemplate?.docxBase64;
                 const title = selectedTemplate?.name || batch.name || 'Radiology_Report';
                 const cleanName = `${(batch.name || title).replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().slice(0, 10)}.docx`;
-                const blob = batch.docxBlob || await mergeFindingsIntoDocx(templateBase64, batch.findings!, title);
+                let blob = batch.docxBlob;
+                if (!blob) {
+                    if (templateBase64 && batch.findings && batch.findings.length > 0) {
+                        try {
+                            const astRes = await mergeFindingsWithAst(
+                                batch.findings.join('\n'),
+                                selectedTemplate as any,
+                                activeModel,
+                                batch.customPrompt,
+                                batch.customImages || [],
+                                true,
+                                (selectedTemplate as any).skillPrompt
+                            );
+                            blob = astRes.docxBlob;
+                        } catch (e) {
+                            console.warn('AST docx generation fallback error:', e);
+                        }
+                    }
+                    if (!blob) {
+                        blob = await mergeFindingsIntoDocx(templateBase64, batch.findings!, title);
+                    }
+                }
                 downloadDocxBlob(blob, cleanName);
             }
             showNotification(`Downloaded ${batchesWithFindings.length} Word DOCX report${batchesWithFindings.length > 1 ? 's' : ''} (Times New Roman 12pt)!`);

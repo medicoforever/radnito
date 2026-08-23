@@ -326,11 +326,7 @@ export const processAudioWithDocx = async (
         (selectedTemplate as any).skillPrompt
       );
       if (astResult && astResult.findings && astResult.findings.length > 0) {
-        // Always generate docxBlob from the deterministic mergeFindingsIntoDocx 
-        // instead of relying on AI-generated AST node mutations
-        const { mergeFindingsIntoDocx } = await import('./docxService');
-        const docxBlob = await mergeFindingsIntoDocx(selectedTemplate.docxBase64, astResult.findings, selectedTemplate.name);
-        return { findings: astResult.findings, docxBlob };
+        return astResult;
       }
       const fallbackFindings = await mergeFindingsWithTemplate(transcribedText, selectedTemplate, model, customPrompt, customImages);
       return { findings: fallbackFindings };
