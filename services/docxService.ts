@@ -656,26 +656,23 @@ function updateCellSurgical(xmlDoc: Document, tc: Element, value: string, bold?:
 /**
  * Merge findings into a DOCX template with 100% formatting, headings, and style preservation!
  */
+/**
+ * High-Fidelity Surgical DOCX In-Place Merger
+ * Replaces normal baseline template paragraphs, spinal level labels (even with empty values like "L3-L4:"),
+ * anatomical narratives, and Impression bullets while preserving 100% of the original Word styles, fonts, and layout.
+ */
 export async function mergeFindingsIntoDocx(
-  templateDocxBase64?: string,
-  findings: string[] = [],
-  fallbackTitle?: string
+  templateBase64?: string | null,
+  findings?: string[] | null,
+  examTitle: string = 'Radiology Report'
 ): Promise<Blob> {
-  if (!templateDocxBase64 || !templateDocxBase64.trim()) {
-    return generateDocxFromFindings(findings, fallbackTitle);
+  if (!templateBase64 || !templateBase64.trim()) {
+    return generateFallbackDocx(findings || [], examTitle);
   }
 
-  const templateBytes = base64ToUint8Array(templateDocxBase64);
+  const templateBytes = base64ToUint8Array(templateBase64);
 
-  // 1. Bit-Exact Preservation: If no abnormalities are dictated, return original file bit-for-bit!
-  const hasAbnormalities = findings.some(f => f.startsWith('BOLD::'));
-  const hasCustomHistory = findings.some(f => {
-    const l = f.toLowerCase().trim();
-    return (l.startsWith('clinical profile:') || l.startsWith('history:') || l.startsWith('clinical history:')) &&
-      l.length > 20 && !l.includes('none') && !l.includes('none specified');
-  });
-
-  if (!hasAbnormalities && !hasCustomHistory) {
+  if (!findings || findings.length === 0) {
     return new Blob([templateBytes], {
       type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     });
@@ -685,17 +682,12 @@ export async function mergeFindingsIntoDocx(
     const zipEntries = await parseZip(templateBytes.buffer);
     const docXmlEntry = zipEntries.get('word/document.xml');
     if (!docXmlEntry) {
-      return new Blob([templateBytes], {
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      });
+      return generateFallbackDocx(findings, examTitle);
     }
 
-    const decoder = new TextDecoder('utf-8');
-    const originalDocXml = decoder.decode(docXmlEntry.data);
-
-    // Parse template XML into DOM for surgical in-place editing
+    const xmlStr = new TextDecoder('utf-8').decode(docXmlEntry.data);
     const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(originalDocXml, 'application/xml');
+    const xmlDoc = parser.parseFromString(xmlStr, 'application/xml');
 
     const bodyElem = xmlDoc.getElementsByTagName('w:body')[0];
     if (!bodyElem) {
@@ -704,17 +696,15 @@ export async function mergeFindingsIntoDocx(
       });
     }
 
-    // Collect block-level body paragraphs (excluding table cells)
     const directBodyParagraphs = collectBodyParagraphs(bodyElem);
 
-    // Build section map and clean impression items
-    const sectionMap = new Map<string, string[]>();
-    let currentSectionKey: string | null = null;
+    // 1. Structure Findings into Lookups
+    const colonMap = new Map<string, string>();
+    const narrativeFindings: string[] = [];
+    const impressionItems: string[] = [];
     let clinicalHistoryText: string | null = null;
     let comparisonText: string | null = null;
     let techniqueText: string | null = null;
-    const impressionItems: string[] = [];
-    const abnormalNarratives: string[] = [];
 
     for (const f of findings) {
       const trimmed = f.trim();
@@ -727,56 +717,54 @@ export async function mergeFindingsIntoDocx(
         if (val && !val.toLowerCase().includes('none specified')) {
           clinicalHistoryText = val;
         }
-        currentSectionKey = null;
         continue;
       }
       if (lower.startsWith('comparison:')) {
         comparisonText = clean;
-        currentSectionKey = null;
         continue;
       }
       if (lower.startsWith('technique:') || lower.startsWith('ct technique:') || lower.startsWith('mri technique:')) {
         techniqueText = clean;
-        currentSectionKey = null;
         continue;
       }
       if (lower.startsWith('impression:')) {
         const impContent = clean.slice(11).trim();
         const parts = impContent.split('###').map(p => p.trim()).filter(Boolean);
         for (const p of parts) {
-          const b = p.replace(/^[•\-\*\s]+/, '').trim();
+          const b = p.replace(/^[•\-\*\d\.\s]+/, '').trim();
           if (b) impressionItems.push(b);
         }
-        currentSectionKey = null;
         continue;
       }
 
-      // Detect section heading line (e.g. "Right brachial plexus:" or "Liver:")
-      if (clean.endsWith(':') || (clean.includes(':') && clean.split(':')[0].split(/\s+/).length <= 4 && !clean.split(':')[1].trim())) {
-        currentSectionKey = normalizeKey(clean.split(':')[0]);
-        if (currentSectionKey) {
-          sectionMap.set(currentSectionKey, []);
-        }
-      } else if (currentSectionKey) {
-        sectionMap.get(currentSectionKey)?.push(trimmed);
-      } else if (clean.includes(':') && !clean.toUpperCase().startsWith('FINDINGS') && !clean.toUpperCase().startsWith('OBSERVATIONS') && !clean.toUpperCase().startsWith('MEASUREMENTS') && !clean.toUpperCase().startsWith('INDIRECT')) {
-        const colonIdx = clean.indexOf(':');
-        const prefix = clean.slice(0, colonIdx).trim();
+      // Check if finding is a colon-labeled line (e.g. "L3-L4: Disc bulge..." or "Screening of cervical spine: Normal.")
+      if (clean.includes(':') && clean.split(':', 2)[0].split(/\s+/).length <= 6 && !clean.toUpperCase().startsWith('FINDINGS') && !clean.toUpperCase().startsWith('OBSERVATIONS')) {
+        const prefix = clean.split(':', 2)[0].trim();
         const key = normalizeKey(prefix);
         if (key && key.length >= 2) {
-          sectionMap.set(key, [trimmed]);
+          colonMap.set(key, trimmed);
+          continue;
         }
-      } else if (trimmed.startsWith('BOLD::')) {
-        abnormalNarratives.push(clean);
       }
+
+      // Otherwise, it is a narrative finding line
+      narrativeFindings.push(trimmed);
     }
 
-    // 2. Update Direct Body Paragraphs Surgically In-Place
+    // 2. Iterate Direct Body Paragraphs Surgically In-Place
+    let impressionHeaderIdx = -1;
+
     for (let idx = 0; idx < directBodyParagraphs.length; idx++) {
       const p = directBodyParagraphs[idx];
       const origText = getParagraphText(p).trim();
       if (!origText) continue;
       const lower = origText.toLowerCase();
+
+      // Check if we reached the IMPRESSION header
+      if (lower.startsWith('impression:') || origText.toUpperCase() === 'IMPRESSION:' || origText.toUpperCase() === 'IMPRESSION' || origText.toUpperCase() === 'CONCLUSION:' || origText.toUpperCase() === 'CONCLUSION') {
+        impressionHeaderIdx = idx;
+        break;
+      }
 
       // Clinical History / Profile
       if (clinicalHistoryText && (lower.startsWith('clinical profile:') || lower.startsWith('history:') || lower.startsWith('clinical history:') || lower.startsWith('clinical indication:'))) {
@@ -796,180 +784,119 @@ export async function mergeFindingsIntoDocx(
         continue;
       }
 
-      // Check if this paragraph is a Section Heading (e.g. "Right brachial plexus:")
-      if (origText.endsWith(':') || (origText.includes(':') && origText.split(':')[0].split(/\s+/).length <= 4 && !origText.split(':')[1].trim())) {
-        const secKey = normalizeKey(origText.split(':')[0]);
-        if (secKey && sectionMap.has(secKey)) {
-          const contentLines = sectionMap.get(secKey)!;
-          // Find following narrative paragraph(s) before next heading
-          for (let nextIdx = idx + 1; nextIdx < directBodyParagraphs.length; nextIdx++) {
-            const nextP = directBodyParagraphs[nextIdx];
-            const nextTxt = getParagraphText(nextP).trim();
-            if (nextTxt) {
-              if (nextTxt.endsWith(':') || nextTxt.toUpperCase().startsWith('IMPRESSION') || nextTxt.toUpperCase().startsWith('CONCLUSION')) {
-                break; // Reached next heading
-              }
-              const joinedContent = contentLines.map(cl => cl.replace(/^BOLD::\s*/, '').trim()).filter(Boolean).join(' ');
-              if (joinedContent) {
-                updateParagraphSurgical(xmlDoc, nextP, joinedContent);
-              }
-              break;
-            }
-          }
-          sectionMap.delete(secKey);
-          continue;
-        }
-      }
-
-      // Labeled Paragraphs (Inline "Label: Value" like "RV diameter: --- cm" or "Azygous vein: 0.6 cm.")
-      if (origText.includes(':') && origText.split(':', 2)[1]?.trim() && !origText.toUpperCase().startsWith('IMPRESSION') && !origText.toUpperCase().startsWith('FINDINGS') && !origText.toUpperCase().startsWith('OBSERVATIONS') && !origText.toUpperCase().startsWith('MEASUREMENTS') && !origText.toUpperCase().startsWith('INDIRECT')) {
-        const colonIdx = origText.indexOf(':');
-        const prefix = origText.slice(0, colonIdx).trim();
+      // Labeled Paragraphs (Handles "L1-L2:", "L3-L4:", "Screening of cervical spine:", "Liver:", even if value after colon is empty in template!)
+      if (origText.includes(':')) {
+        const prefix = origText.split(':', 2)[0].trim();
         const key = normalizeKey(prefix);
 
-        if (key && sectionMap.has(key)) {
-          const matchedLines = sectionMap.get(key)!;
-          if (matchedLines.length > 0) {
-            updateParagraphSurgical(xmlDoc, p, matchedLines[0]);
-          }
-          sectionMap.delete(key);
+        if (key && colonMap.has(key)) {
+          const findingVal = colonMap.get(key)!;
+          const isBold = findingVal.startsWith('BOLD::');
+          const cleanVal = findingVal.replace(/^BOLD::\s*/, '').trim();
+          updateParagraphSurgical(xmlDoc, p, cleanVal, isBold);
+          colonMap.delete(key);
           continue;
         }
       }
 
-      // Anatomical Keyword Matching for Narrative Sentences (e.g. "The study shows normal anatomical configuration of the liver...")
-      if (!origText.toUpperCase().startsWith('IMPRESSION') && !origText.toUpperCase().startsWith('FINDINGS') && !origText.toUpperCase().startsWith('OBSERVATIONS') && !origText.toUpperCase().startsWith('C.T.') && !origText.toUpperCase().startsWith('MRI')) {
-        for (const [key, lines] of Array.from(sectionMap.entries())) {
-          if (key.length >= 3 && lower.includes(key)) {
-            const joined = lines.map(l => l.replace(/^BOLD::\s*/, '').trim()).filter(Boolean).join(' ');
-            if (joined) {
-              updateParagraphSurgical(xmlDoc, p, joined);
-            }
-            sectionMap.delete(key);
-            break;
-          }
-        }
-      }
+      // Keyword narrative matching for spine discs, vertebrae, curvature, marrow, ligaments, brain, etc.
+      let narrativeMatchIdx = -1;
+      for (let nIdx = 0; nIdx < narrativeFindings.length; nIdx++) {
+        const nf = narrativeFindings[nIdx];
+        const nfClean = nf.replace(/^BOLD::\s*/, '').toLowerCase();
 
-      // Normal narrative finding replacement (e.g. "No evidence of filling defect...")
-      const isNormalNarrative = /no evidence of filling defect|no evidence of acute|within normal limits|no significant abnormality/i.test(origText);
-      if (isNormalNarrative && abnormalNarratives.length > 0) {
-        const joinedNarrative = abnormalNarratives.join(' ');
-        updateParagraphSurgical(xmlDoc, p, joinedNarrative, true);
-        abnormalNarratives.length = 0;
-      }
-    }
-
-    // 3. Update Tables (e.g. Qanadli single-cell tables, clot matrix tables)
-    const allTables = Array.from(xmlDoc.getElementsByTagName('w:tbl'));
-
-    // Check single-cell score box (e.g. Qanadli 0 %)
-    const scoreUpdate = findings.find(f => f.includes('%') && (f.toLowerCase().includes('qanadli') || f.toLowerCase().includes('score') || f.toLowerCase().includes('clot load')));
-    if (scoreUpdate && allTables.length >= 2) {
-      for (const tbl of allTables) {
-        const rows = getDirectChildElements(tbl, 'tr');
-        if (rows.length === 1) {
-          const cells = getDirectChildElements(rows[0], 'tc');
-          if (cells.length === 1) {
-            const cellText = getParagraphText(cells[0]).trim();
-            if (cellText.includes('%') || cellText === '0') {
-              const val = scoreUpdate.replace(/^BOLD::\s*/, '').trim();
-              updateCellSurgical(xmlDoc, cells[0], val, true);
-              break;
-            }
-          }
-        }
-      }
-    }
-
-    // Auto-populate Clot Load Table (Table 3) if CTPA findings contain thrombosis mentions
-    if (allTables.length >= 3) {
-      const matrixTbl = allTables[2];
-      const allFindingsText = findings.join(' ').toLowerCase();
-
-      const peMapping: Record<string, string[]> = {
-        'right upper lobar': ['rul', 'apicalra1', 'anteriorra2', 'posteriorra3'],
-        'apicoposterior': ['apicopostla13'],
-        'superior segment of the left lower lobe': ['superiorla6'],
-        'left upper lobar': ['lul'],
-        'left lower lobar': ['lll'],
-        'right lower lobar': ['rll'],
-        'right middle lobar': ['rml']
-      };
-
-      const rows = getDirectChildElements(matrixTbl, 'tr');
-      for (let ri = 2; ri < rows.length; ri++) {
-        const cells = getDirectChildElements(rows[ri], 'tc');
-        if (cells.length < 2) continue;
-        const rowLabelNorm = normalizeKey(getParagraphText(cells[0]));
-
-        for (const [phrase, targets] of Object.entries(peMapping)) {
-          if (allFindingsText.includes(phrase)) {
-            if (targets.some(t => rowLabelNorm.includes(t) || t.includes(rowLabelNorm))) {
-              updateCellSurgical(xmlDoc, cells[1], '+', true);
-            }
-          }
-        }
-      }
-    }
-
-    // 4. Update Impression Section
-    if (impressionItems.length > 0 && hasAbnormalities) {
-      let impressionHeaderIdx = -1;
-      for (let idx = 0; idx < directBodyParagraphs.length; idx++) {
-        const pText = getParagraphText(directBodyParagraphs[idx]).trim().toUpperCase();
-        if (pText === 'IMPRESSION:' || pText.startsWith('IMPRESSION:') || pText === 'CONCLUSION:') {
-          impressionHeaderIdx = idx;
+        if (lower.includes('intervertebral disc') && (nfClean.includes('intervertebral disc') || nfClean.includes('disc desiccation') || nfClean.includes('desiccation') || nfClean.includes('disc'))) {
+          narrativeMatchIdx = nIdx;
+          break;
+        } else if (lower.includes('disc bulge') && (nfClean.includes('disc bulge') || nfClean.includes('bulge') || nfClean.includes('protrusion') || nfClean.includes('extrusion'))) {
+          narrativeMatchIdx = nIdx;
+          break;
+        } else if (lower.includes('vertebrae') && (nfClean.includes('vertebrae') || nfClean.includes('vertebral') || nfClean.includes('marrow'))) {
+          narrativeMatchIdx = nIdx;
+          break;
+        } else if (lower.includes('curvature') && (nfClean.includes('curvature') || nfClean.includes('lordotic') || nfClean.includes('alignment'))) {
+          narrativeMatchIdx = nIdx;
+          break;
+        } else if (lower.includes('conus') && (nfClean.includes('conus') || nfClean.includes('cauda'))) {
+          narrativeMatchIdx = nIdx;
+          break;
+        } else if (lower.includes('paravertebral') && (nfClean.includes('paravertebral') || nfClean.includes('prevertebral') || nfClean.includes('soft tissue'))) {
+          narrativeMatchIdx = nIdx;
+          break;
+        } else if (lower.includes('si joints') && (nfClean.includes('si joint') || nfClean.includes('sacroiliac'))) {
+          narrativeMatchIdx = nIdx;
+          break;
+        } else if (lower.includes('cerebral cortex') && (nfClean.includes('cerebral') || nfClean.includes('parenchyma') || nfClean.includes('infarct') || nfClean.includes('bleed'))) {
+          narrativeMatchIdx = nIdx;
+          break;
+        } else if (lower.includes('ventricular system') && (nfClean.includes('ventricle') || nfClean.includes('hydrocephalus'))) {
+          narrativeMatchIdx = nIdx;
+          break;
+        } else if (lower.includes('midline shift') && (nfClean.includes('midline') || nfClean.includes('shift') || nfClean.includes('herniation'))) {
+          narrativeMatchIdx = nIdx;
+          break;
+        } else if (lower.includes('meniscus') && (nfClean.includes('meniscus') || nfClean.includes('meniscal'))) {
+          narrativeMatchIdx = nIdx;
+          break;
+        } else if (lower.includes('cruciate') && (nfClean.includes('cruciate') || nfClean.includes('acl') || nfClean.includes('pcl'))) {
+          narrativeMatchIdx = nIdx;
           break;
         }
       }
 
-      if (impressionHeaderIdx !== -1) {
-        const impressionSlotParagraphs: Element[] = [];
-        for (let idx = impressionHeaderIdx + 1; idx < directBodyParagraphs.length; idx++) {
-          const p = directBodyParagraphs[idx];
-          const pText = getParagraphText(p).trim();
-          if (pText.includes('MD') || pText.includes('RADIOLOGIST') || pText.includes('Page ')) {
-            break;
-          }
-          if (pText) {
-            impressionSlotParagraphs.push(p);
-          }
+      if (narrativeMatchIdx !== -1) {
+        const matchedFinding = narrativeFindings.splice(narrativeMatchIdx, 1)[0];
+        const isBold = matchedFinding.startsWith('BOLD::');
+        const cleanVal = matchedFinding.replace(/^BOLD::\s*/, '').trim();
+        updateParagraphSurgical(xmlDoc, p, cleanVal, isBold);
+        continue;
+      }
+
+      // Normal generic narrative replacement (e.g. "No evidence of any significant...")
+      const isNormalNarrative = /no evidence of filling defect|no evidence of acute|within normal limits|no significant abnormality|no evidence of any significant|no significant neuroparenchymal/i.test(origText);
+      if (isNormalNarrative && narrativeFindings.length > 0) {
+        const nextNarrative = narrativeFindings.shift()!;
+        const isBold = nextNarrative.startsWith('BOLD::');
+        const cleanVal = nextNarrative.replace(/^BOLD::\s*/, '').trim();
+        updateParagraphSurgical(xmlDoc, p, cleanVal, isBold);
+      }
+    }
+
+    // 3. Update Impression Section with Prioritized Bullets
+    if (impressionHeaderIdx !== -1 && impressionItems.length > 0) {
+      const postImpressionParagraphs: Element[] = [];
+      for (let idx = impressionHeaderIdx + 1; idx < directBodyParagraphs.length; idx++) {
+        const p = directBodyParagraphs[idx];
+        const pText = getParagraphText(p).trim();
+        if (pText.includes('MD') || pText.includes('RADIOLOGIST') || pText.includes('Page ') || pText.toLowerCase().includes('consultant')) {
+          break;
         }
+        if (pText) {
+          postImpressionParagraphs.push(p);
+        }
+      }
 
-        if (impressionSlotParagraphs.length > 0) {
-          const lastSlot = impressionSlotParagraphs[impressionSlotParagraphs.length - 1];
-          let lastInserted = lastSlot;
+      for (let i = 0; i < impressionItems.length; i++) {
+        const cleanBullet = `• ${impressionItems[i]}`;
+        if (i < postImpressionParagraphs.length) {
+          const p = postImpressionParagraphs[i];
+          updateParagraphSurgical(xmlDoc, p, cleanBullet, true);
+        } else {
+          // Insert new bullet paragraph
+          const lastSlot = postImpressionParagraphs[postImpressionParagraphs.length - 1] || directBodyParagraphs[impressionHeaderIdx];
+          const newP = lastSlot.cloneNode(true) as Element;
+          updateParagraphSurgical(xmlDoc, newP, cleanBullet, true);
+          lastSlot.parentNode?.insertBefore(newP, lastSlot.nextSibling);
+          postImpressionParagraphs.push(newP);
+        }
+      }
 
-          const hasNativeBullet = (p: Element): boolean => {
-            const pPr = p.getElementsByTagName('w:pPr')[0];
-            if (!pPr) return false;
-            const numPr = pPr.getElementsByTagName('w:numPr')[0];
-            return !!numPr;
-          };
-
-          for (let i = 0; i < impressionItems.length; i++) {
-            const cleanBullet = impressionItems[i].replace(/^[•\-\*\s]+/, '').trim();
-            if (i < impressionSlotParagraphs.length) {
-              const p = impressionSlotParagraphs[i];
-              const isNative = hasNativeBullet(p);
-              updateParagraphSurgical(xmlDoc, p, isNative ? cleanBullet : `• ${cleanBullet}`);
-            } else {
-              const newP = lastSlot.cloneNode(true) as Element;
-              const isNative = hasNativeBullet(newP);
-              updateParagraphSurgical(xmlDoc, newP, isNative ? cleanBullet : `• ${cleanBullet}`);
-              lastInserted.parentNode?.insertBefore(newP, lastInserted.nextSibling);
-              lastInserted = newP;
-            }
-          }
-
-          for (let i = impressionItems.length; i < impressionSlotParagraphs.length; i++) {
-            const p = impressionSlotParagraphs[i];
-            const tTags = p.getElementsByTagName('w:t');
-            for (let j = 0; j < tTags.length; j++) {
-              tTags[j].textContent = '';
-            }
-          }
+      // Clear any unused old default bullets
+      for (let i = impressionItems.length; i < postImpressionParagraphs.length; i++) {
+        const p = postImpressionParagraphs[i];
+        const tTags = p.getElementsByTagName('w:t');
+        for (let j = 0; j < tTags.length; j++) {
+          tTags[j].textContent = '';
         }
       }
     }
@@ -990,12 +917,11 @@ export async function mergeFindingsIntoDocx(
 
     return createZip(updatedEntries);
   } catch (e) {
-    console.warn('mergeFindingsIntoDocx in-place error, returning original template:', e);
-    return new Blob([templateBytes], {
-      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    });
+    console.warn('mergeFindingsIntoDocx error, falling back to generateFallbackDocx:', e);
+    return generateFallbackDocx(findings, examTitle);
   }
 }
+
 
 /**
  * Helper to download Blob as file in browser
