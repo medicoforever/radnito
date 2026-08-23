@@ -469,9 +469,35 @@ export async function mergeFindingsIntoDocx(
             pWordsList.push(extractSignificantWords(cleanT));
           }
 
-          // 3. Match each Body Finding to its Best Matching Template Paragraph In-Place
+          const applyTextToParagraph = (p: Element, text: string, isBold: boolean) => {
+            const tTags = p.getElementsByTagName('w:t');
+            if (tTags.length > 0) {
+              tTags[0].textContent = text;
+              tTags[0].setAttribute('xml:space', 'preserve');
+              for (let k = 1; k < tTags.length; k++) tTags[k].textContent = '';
+            }
+            if (isBold) {
+              const runs = p.getElementsByTagName('w:r');
+              if (runs.length > 0) {
+                let rPr = runs[0].getElementsByTagName('w:rPr')[0];
+                if (!rPr) {
+                  rPr = xmlDoc.createElementNS(W_NS, 'w:rPr');
+                  runs[0].insertBefore(rPr, runs[0].firstChild);
+                }
+                let bTag = rPr.getElementsByTagName('w:b')[0];
+                if (!bTag) {
+                  bTag = xmlDoc.createElementNS(W_NS, 'w:b');
+                  bTag.setAttributeNS(W_NS, 'w:val', '1');
+                  rPr.appendChild(bTag);
+                }
+              }
+            }
+          };
+          // 3. Multi-Pass Matcher with Zero-Drop Positional Alignment
           const usedParagraphIndices = new Set<number>();
+          const unmatchedFindings: Array<{ finding: string; isBold: boolean; cleanVal: string }> = [];
 
+          // Pass 1: High-Confidence Exact / Colon-Key / Significant Word Overlap Matching
           for (const finding of bodyFindings) {
             const isBold = finding.startsWith('BOLD::');
             const cleanVal = finding.replace(/^BOLD::\s*/, '').trim();
@@ -492,34 +518,29 @@ export async function mergeFindingsIntoDocx(
               }
             }
 
-            // If a high-confidence match is found (colon key match or high word overlap), update paragraph in-place
             if (bestIdx !== -1 && bestScore >= 0.15) {
               usedParagraphIndices.add(bestIdx);
-              const p = allP[bestIdx];
-              const tTags = p.getElementsByTagName('w:t');
+              applyTextToParagraph(allP[bestIdx], cleanVal, isBold);
+            } else {
+              unmatchedFindings.push({ finding, isBold, cleanVal });
+            }
+          }
 
-              if (tTags.length > 0) {
-                tTags[0].textContent = cleanVal;
-                tTags[0].setAttribute('xml:space', 'preserve');
-                for (let k = 1; k < tTags.length; k++) tTags[k].textContent = '';
+          // Pass 2: Positional Sequential Alignment for Unmatched Findings
+          // Ensures that findings with completely new vocabulary (e.g. fibrocalcific opacities replacing normal lung pattern)
+          // take their exact corresponding unused template slot rather than being dropped!
+          for (const item of unmatchedFindings) {
+            let targetIdx = -1;
+            for (let i = 0; i < endLimit; i++) {
+              if (!usedParagraphIndices.has(i) && pTexts[i]) {
+                targetIdx = i;
+                break;
               }
+            }
 
-              if (isBold) {
-                const runs = p.getElementsByTagName('w:r');
-                if (runs.length > 0) {
-                  let rPr = runs[0].getElementsByTagName('w:rPr')[0];
-                  if (!rPr) {
-                    rPr = xmlDoc.createElementNS(W_NS, 'w:rPr');
-                    runs[0].insertBefore(rPr, runs[0].firstChild);
-                  }
-                  let bTag = rPr.getElementsByTagName('w:b')[0];
-                  if (!bTag) {
-                    bTag = xmlDoc.createElementNS(W_NS, 'w:b');
-                    bTag.setAttributeNS(W_NS, 'w:val', '1');
-                    rPr.appendChild(bTag);
-                  }
-                }
-              }
+            if (targetIdx !== -1) {
+              usedParagraphIndices.add(targetIdx);
+              applyTextToParagraph(allP[targetIdx], item.cleanVal, item.isBold);
             }
           }
 
