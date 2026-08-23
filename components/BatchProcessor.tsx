@@ -921,20 +921,24 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                 const aiGreeting = "I have reviewed the dictation and findings. How can I help you further?";
                 const initialChatHistory = [{ author: 'AI' as const, text: `${findings.join('\n\n')}\n\n${aiGreeting}` }];
 
-                                // Auto-download DOCX if template is selected and autoDownloadDocx is enabled
-                if (selectedTemplate && autoDownloadDocx && findings.length > 0) {
-                    try {
-                        const templateBase64 = selectedTemplate?.docxBase64;
-                        const title = selectedTemplate?.name || batch.name || 'Radiology_Report';
-                        const cleanName = `${(batch.name || title).replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().slice(0, 10)}.docx`;
-                        const blob = await mergeFindingsIntoDocx(templateBase64, findings, title);
-                        downloadDocxBlob(blob, cleanName);
-                    } catch (docErr) {
-                        console.warn('Auto DOCX download error:', docErr);
-                    }
-                }
-
+                                // Mark batch complete immediately
                 setBatches(prev => prev.map(b => b.id === batch.id ? { ...b, status: 'complete', findings, chat: chatSession, chatHistory: initialChatHistory, isChatting: false, matchedRAGTemplate: matchedRAG } : b));
+
+                // Safe asynchronous DOCX auto-download (never throws or causes error status)
+                try {
+                    if (selectedTemplate && findings && findings.length > 0 && typeof autoDownloadDocx !== 'undefined' && autoDownloadDocx) {
+                        const templateBase64 = selectedTemplate.docxBase64;
+                        const title = selectedTemplate.name || batch.name || 'Radiology_Report';
+                        const cleanName = `${(batch.name || title).replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().slice(0, 10)}.docx`;
+                        mergeFindingsIntoDocx(templateBase64, findings, title).then(blob => {
+                            downloadDocxBlob(blob, cleanName);
+                        }).catch(docErr => {
+                            console.warn('Auto DOCX download background error:', docErr);
+                        });
+                    }
+                } catch (dlErr) {
+                    console.warn('Auto DOCX trigger error:', dlErr);
+                }
             } catch (err) {
                 if (isBatchCancelledRef.current) return;
                 const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
