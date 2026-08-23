@@ -892,6 +892,7 @@ ${findingsText}
 1. **Node Identification & In-Place Replacement**:
    - Identify the exact node_id for each finding (e.g. narrative organ node, inline field, table cell).
    - Only include nodes in "updates" that NEED modifications. Do NOT return untouched normal nodes.
+   - **CRITICAL CONTRADICTION REMOVAL**: If an abnormal finding covers, supersedes, or contradicts an existing baseline normal node (e.g. ventricular atrophy finding supersedes normal ventricles node, or disc bulge finding supersedes 'no significant disc bulge' node), you MUST also include that superseded normal node in "updates" with "new_text": "" (empty string) to clear it cleanly from the Word document.
    - For unaffected nodes, preserve baseline template text 100% intact.
 2. **5-Layer Structural DNA & BOLD Protocol**:
    - Update Clinical Profile node if history/indication is dictated (wrapped as "*Clinical Profile: ...*").

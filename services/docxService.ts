@@ -523,6 +523,40 @@ export async function mergeFindingsIntoDocx(
             }
           }
 
+          // 3B. Universal Contradiction / Superseded Check:
+          // If an abnormal finding describes an anatomical structure that belongs to an unused normal template paragraph
+          // (e.g. ventricular system finding supersedes normal ventricles line, or disc bulge supersedes 'no disc bulge' line),
+          // clear that unused normal paragraph so contradictory normal text is never present in the Word document.
+          for (const finding of bodyFindings) {
+            const isAbnormal = finding.startsWith('BOLD::') || finding.toLowerCase().includes('atrophy') || finding.toLowerCase().includes('infarct') || finding.toLowerCase().includes('bulge') || finding.toLowerCase().includes('thickening');
+            if (!isAbnormal) continue;
+
+            const cleanVal = finding.replace(/^BOLD::\s*/, '').trim();
+            const fWords = extractSignificantWords(cleanVal);
+
+            for (let i = 0; i < endLimit; i++) {
+              if (usedParagraphIndices.has(i)) continue;
+              const pt = pTexts[i];
+              if (!pt || pt.toUpperCase().startsWith('IMPRESSION:')) continue;
+
+              const pWords = pWordsList[i];
+              let overlapCount = 0;
+              for (const w of pWords) {
+                if (fWords.has(w)) overlapCount++;
+              }
+
+              // If the unused normal template paragraph shares significant anatomical terms with the abnormal finding, clear it
+              if (overlapCount >= 1) {
+                usedParagraphIndices.add(i);
+                const p = allP[i];
+                const tTags = p.getElementsByTagName('w:t');
+                for (let k = 0; k < tTags.length; k++) {
+                  tTags[k].textContent = '';
+                }
+              }
+            }
+          }
+
           // 4. Update Impression Bullets
           if (impIdx !== -1 && impressionItems.length > 0) {
             const postImpressionSlots: Element[] = [];
