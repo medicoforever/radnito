@@ -317,6 +317,7 @@ const App: React.FC = () => {
               selectedModel={selectedModel} 
               isErrorCheckEnabled={isErrorCheckEnabled}
               selectedTemplate={selectedTemplate}
+              autoDownloadDocx={autoDownloadDocx}
               onBack={() => setMode('guide')} 
             />
           ) : mode === 'merge_template' ? (

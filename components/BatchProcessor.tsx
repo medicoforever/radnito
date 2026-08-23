@@ -920,6 +920,19 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                 const aiGreeting = "I have reviewed the dictation and findings. How can I help you further?";
                 const initialChatHistory = [{ author: 'AI' as const, text: `${findings.join('\n\n')}\n\n${aiGreeting}` }];
 
+                                // Auto-download DOCX if template is selected and autoDownloadDocx is enabled
+                if (selectedTemplate && autoDownloadDocx && findings.length > 0) {
+                    try {
+                        const templateBase64 = selectedTemplate?.docxBase64;
+                        const title = selectedTemplate?.name || batch.name || 'Radiology_Report';
+                        const cleanName = `${(batch.name || title).replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().slice(0, 10)}.docx`;
+                        const blob = await mergeFindingsIntoDocx(templateBase64, findings, title);
+                        downloadDocxBlob(blob, cleanName);
+                    } catch (docErr) {
+                        console.warn('Auto DOCX download error:', docErr);
+                    }
+                }
+
                 setBatches(prev => prev.map(b => b.id === batch.id ? { ...b, status: 'complete', findings, chat: chatSession, chatHistory: initialChatHistory, isChatting: false, matchedRAGTemplate: matchedRAG } : b));
             } catch (err) {
                 if (isBatchCancelledRef.current) return;

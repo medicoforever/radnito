@@ -532,20 +532,6 @@ function getParagraphText(p: Element): string {
   return txt;
 }
 
-function getDirectChildElements(parent: Element, localName: string): Element[] {
-  const result: Element[] = [];
-  for (let i = 0; i < parent.childNodes.length; i++) {
-    const node = parent.childNodes[i];
-    if (node.nodeType === 1) {
-      const el = node as Element;
-      if (el.localName === localName || el.nodeName === `w:${localName}`) {
-        result.push(el);
-      }
-    }
-  }
-  return result;
-}
-
 function collectBodyParagraphs(parent: Element): Element[] {
   const paragraphs: Element[] = [];
   for (let i = 0; i < parent.childNodes.length; i++) {
@@ -556,7 +542,7 @@ function collectBodyParagraphs(parent: Element): Element[] {
       if (name === 'p') {
         paragraphs.push(el);
       } else if (name === 'sdt') {
-        const sdtContent = getDirectChildElements(el, 'sdtContent')[0] || el.getElementsByTagName('w:sdtContent')[0];
+        const sdtContent = el.getElementsByTagName('w:sdtContent')[0];
         if (sdtContent) {
           paragraphs.push(...collectBodyParagraphs(sdtContent));
         }
@@ -566,163 +552,51 @@ function collectBodyParagraphs(parent: Element): Element[] {
   return paragraphs;
 }
 
-function updateParagraphSurgical(
+function setParagraphContent(
   xmlDoc: Document,
   p: Element,
   newText: string,
-  forceBold?: boolean
+  isBold?: boolean
 ): void {
-  const isBold = forceBold || newText.startsWith('BOLD::');
-  const cleanText = newText.replace(/^BOLD::\s*/, '').trim();
-
-  const allRuns: Element[] = [];
-  for (let i = 0; i < p.childNodes.length; i++) {
-    if (p.childNodes[i].nodeName === 'w:r') {
-      allRuns.push(p.childNodes[i] as Element);
-    }
-  }
-  const fullText = getParagraphText(p);
-
-  // 1. If paragraph has a colon (e.g. "Right brachial plexus:" or "RV diameter: --- cm")
-  if (fullText.includes(':')) {
-    const colonPos = fullText.indexOf(':');
-    const newVal = cleanText.includes(':') ? cleanText.slice(cleanText.indexOf(':') + 1).trim() : cleanText.trim();
-
-    let accLen = 0;
-    let colonRunIdx = -1;
-
-    for (let i = 0; i < allRuns.length; i++) {
-      const runTxt = getParagraphText(allRuns[i]);
-      if (accLen + runTxt.length > colonPos) {
-        colonRunIdx = i;
-        break;
-      }
-      accLen += runTxt.length;
-    }
-
-    if (colonRunIdx !== -1) {
-      if (colonRunIdx + 1 < allRuns.length) {
-        // Value is in a subsequent run -> update text node of that run
-        const valRun = allRuns[colonRunIdx + 1];
-        const tTags = valRun.getElementsByTagName('w:t');
-        if (tTags.length > 0) {
-          tTags[0].textContent = ' ' + newVal;
-          tTags[0].setAttribute('xml:space', 'preserve');
-          for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
-        }
-        for (let j = colonRunIdx + 2; j < allRuns.length; j++) {
-          const laterTags = allRuns[j].getElementsByTagName('w:t');
-          for (let k = 0; k < laterTags.length; k++) laterTags[k].textContent = '';
-        }
-        if (isBold) {
-          let rPr = valRun.getElementsByTagName('w:rPr')[0];
-          if (!rPr) {
-            rPr = xmlDoc.createElementNS(W_NS, 'w:rPr');
-            valRun.insertBefore(rPr, valRun.firstChild);
-          }
-          if (rPr.getElementsByTagName('w:b').length === 0) {
-            const b = xmlDoc.createElementNS(W_NS, 'w:b');
-            rPr.appendChild(b);
-          }
-        }
-      } else {
-        // Colon and value share the same run -> keep text up to colon, append new value
-        const valRun = allRuns[colonRunIdx];
-        const tTags = valRun.getElementsByTagName('w:t');
-        if (tTags.length > 0) {
-          const runTxt = getParagraphText(valRun);
-          const cInRun = runTxt.indexOf(':');
-          tTags[0].textContent = runTxt.slice(0, cInRun + 1) + ' ' + newVal;
-          tTags[0].setAttribute('xml:space', 'preserve');
-          for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
-        }
-        if (isBold) {
-          let rPr = valRun.getElementsByTagName('w:rPr')[0];
-          if (!rPr) {
-            rPr = xmlDoc.createElementNS(W_NS, 'w:rPr');
-            valRun.insertBefore(rPr, valRun.firstChild);
-          }
-          if (rPr.getElementsByTagName('w:b').length === 0) {
-            const b = xmlDoc.createElementNS(W_NS, 'w:b');
-            rPr.appendChild(b);
-          }
-        }
-      }
-      return;
+  // 1. Remove all existing w:r child nodes while keeping w:pPr
+  const childNodes = Array.from(p.childNodes);
+  for (const node of childNodes) {
+    if (node.nodeName === 'w:r' || (node as Element).localName === 'r') {
+      p.removeChild(node);
     }
   }
 
-  // 2. Plain narrative paragraph
-  if (allRuns.length > 0) {
-    const firstRun = allRuns[0];
-    const tTags = firstRun.getElementsByTagName('w:t');
-    if (tTags.length > 0) {
-      tTags[0].textContent = cleanText;
-      tTags[0].setAttribute('xml:space', 'preserve');
-      for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
-    }
-    for (let j = 1; j < allRuns.length; j++) {
-      const laterTags = allRuns[j].getElementsByTagName('w:t');
-      for (let k = 0; k < laterTags.length; k++) laterTags[k].textContent = '';
-    }
-    if (isBold) {
-      let rPr = firstRun.getElementsByTagName('w:rPr')[0];
-      if (!rPr) {
-        rPr = xmlDoc.createElementNS(W_NS, 'w:rPr');
-        firstRun.insertBefore(rPr, firstRun.firstChild);
-      }
-      if (rPr.getElementsByTagName('w:b').length === 0) {
-        const b = xmlDoc.createElementNS(W_NS, 'w:b');
-        rPr.appendChild(b);
-      }
-    }
-  } else {
-    // No runs present, create run
-    const r = xmlDoc.createElementNS(W_NS, 'w:r');
-    const rPr = xmlDoc.createElementNS(W_NS, 'w:rPr');
-    const rFonts = xmlDoc.createElementNS(W_NS, 'w:rFonts');
-    rFonts.setAttribute('w:ascii', 'Times New Roman');
-    rFonts.setAttribute('w:hAnsi', 'Times New Roman');
-    rPr.appendChild(rFonts);
-    const sz = xmlDoc.createElementNS(W_NS, 'w:sz');
-    sz.setAttribute('w:val', '24');
-    rPr.appendChild(sz);
-    if (isBold) {
-      const b = xmlDoc.createElementNS(W_NS, 'w:b');
-      rPr.appendChild(b);
-    }
-    r.appendChild(rPr);
-    const t = xmlDoc.createElementNS(W_NS, 'w:t');
-    t.textContent = cleanText;
-    t.setAttribute('xml:space', 'preserve');
-    r.appendChild(t);
-    p.appendChild(r);
-  }
-}
+  // 2. Create clean, high-fidelity Word run (Times New Roman 12pt)
+  const r = xmlDoc.createElementNS(W_NS, 'w:r');
+  const rPr = xmlDoc.createElementNS(W_NS, 'w:rPr');
 
-function updateCellSurgical(xmlDoc: Document, tc: Element, value: string, bold?: boolean): void {
-  const p = tc.getElementsByTagName('w:p')[0];
-  if (!p) return;
-  const tTags = p.getElementsByTagName('w:t');
-  if (tTags.length > 0) {
-    tTags[0].textContent = value;
-    tTags[0].setAttribute('xml:space', 'preserve');
-    for (let i = 1; i < tTags.length; i++) tTags[i].textContent = '';
+  const rFonts = xmlDoc.createElementNS(W_NS, 'w:rFonts');
+  rFonts.setAttributeNS(W_NS, 'w:ascii', 'Times New Roman');
+  rFonts.setAttributeNS(W_NS, 'w:hAnsi', 'Times New Roman');
+  rPr.appendChild(rFonts);
+
+  const sz = xmlDoc.createElementNS(W_NS, 'w:sz');
+  sz.setAttributeNS(W_NS, 'w:val', '24'); // 12pt
+  rPr.appendChild(sz);
+
+  if (isBold) {
+    const b = xmlDoc.createElementNS(W_NS, 'w:b');
+    b.setAttributeNS(W_NS, 'w:val', '1');
+    rPr.appendChild(b);
   }
+
+  r.appendChild(rPr);
+
+  const t = xmlDoc.createElementNS(W_NS, 'w:t');
+  t.textContent = newText;
+  t.setAttribute('xml:space', 'preserve');
+  r.appendChild(t);
+
+  p.appendChild(r);
 }
 
 /**
- * Merge findings into a DOCX template with 100% formatting, headings, and style preservation!
- */
-/**
- * High-Fidelity Surgical DOCX In-Place Merger
- * Replaces normal baseline template paragraphs, spinal level labels (even with empty values like "L3-L4:"),
- * anatomical narratives, and Impression bullets while preserving 100% of the original Word styles, fonts, and layout.
- */
-/**
- * High-Fidelity Deterministic DOCX In-Place Merger
- * Uses direct sequential 1-to-1 paragraph alignment and colon-key matching to ensure
- * all abnormal findings, replacements, and structured impressions are merged 100% into the Word document.
+ * High-Fidelity Universal Deterministic DOCX In-Place Merger
  */
 export async function mergeFindingsIntoDocx(
   templateBase64?: string | null,
@@ -764,18 +638,28 @@ export async function mergeFindingsIntoDocx(
     // 1. Separate Findings into Body Findings and Impression Items
     const bodyFindingLines: string[] = [];
     const impressionItems: string[] = [];
-    const colonMap = new Map<string, string>();
+    const colonFindingsMap = new Map<string, string>();
+    let isInImpression = false;
 
     for (const f of findings) {
       const trimmed = f.trim();
       if (!trimmed) continue;
 
-      if (trimmed.toUpperCase().startsWith('IMPRESSION:')) {
-        const parts = trimmed.slice(11).trim().split('###').map(p => p.trim()).filter(Boolean);
-        for (const p of parts) {
-          const cleanP = p.replace(/^[•\-\*\d\.\s\u2022\u25cf]+/, '').trim();
-          if (cleanP) impressionItems.push(cleanP);
+      if (trimmed.toUpperCase() === 'IMPRESSION:' || trimmed.toUpperCase().startsWith('IMPRESSION:') || trimmed.toUpperCase() === 'CONCLUSION:' || trimmed.toUpperCase().startsWith('CONCLUSION:')) {
+        isInImpression = true;
+        if (trimmed.includes('###')) {
+          const parts = trimmed.split('###').slice(1);
+          for (const p of parts) {
+            const cleanP = p.replace(/^[•\-\*\d\.\s\u2022\u25cf]+/, '').trim();
+            if (cleanP) impressionItems.push(cleanP);
+          }
         }
+        continue;
+      }
+
+      if (isInImpression) {
+        const cleanP = trimmed.replace(/^[•\-\*\d\.\s\u2022\u25cf]+/, '').trim();
+        if (cleanP) impressionItems.push(cleanP);
       } else {
         bodyFindingLines.push(trimmed);
         const cleanNoBold = trimmed.replace(/^BOLD::\s*/, '').trim();
@@ -783,7 +667,7 @@ export async function mergeFindingsIntoDocx(
           const prefix = cleanNoBold.split(':', 2)[0].trim();
           const key = normalizeKey(prefix);
           if (key && key.length >= 2) {
-            colonMap.set(key, trimmed);
+            colonFindingsMap.set(key, trimmed);
           }
         }
       }
@@ -794,60 +678,67 @@ export async function mergeFindingsIntoDocx(
     for (let idx = 0; idx < allBodyParagraphs.length; idx++) {
       const p = allBodyParagraphs[idx];
       const pText = getParagraphText(p).trim();
-      if (pText.toUpperCase().startsWith('IMPRESSION:') || pText.toUpperCase() === 'IMPRESSION' || pText.toUpperCase() === 'CONCLUSION:' || pText.toUpperCase() === 'CONCLUSION') {
+      if (pText.toUpperCase() === 'IMPRESSION:' || pText.toUpperCase().startsWith('IMPRESSION:') || pText.toUpperCase() === 'CONCLUSION:' || pText.toUpperCase().startsWith('CONCLUSION:')) {
         impressionHeaderIdx = idx;
         break;
       }
     }
 
     // 3. Collect Non-Empty Body Paragraphs Before IMPRESSION
-    const nonBlankBodyParagraphs: Element[] = [];
     const endBodyIdx = impressionHeaderIdx !== -1 ? impressionHeaderIdx : allBodyParagraphs.length;
+    const nonBlankBodyParagraphs: Array<{ p: Element; origText: string }> = [];
 
     for (let idx = 0; idx < endBodyIdx; idx++) {
       const p = allBodyParagraphs[idx];
       const pText = getParagraphText(p).trim();
       if (pText) {
-        nonBlankBodyParagraphs.push(p);
+        nonBlankBodyParagraphs.push({ p, origText: pText });
       }
     }
 
     // 4. Update Body Paragraphs
-    // Check if 1-to-1 count matches (or close match)
     if (nonBlankBodyParagraphs.length === bodyFindingLines.length) {
       // Exact 1-to-1 sequential alignment
       for (let i = 0; i < nonBlankBodyParagraphs.length; i++) {
-        const p = nonBlankBodyParagraphs[i];
+        const { p, origText } = nonBlankBodyParagraphs[i];
         const finding = bodyFindingLines[i];
-        const isBold = finding.startsWith('BOLD::');
-        const cleanFinding = finding.replace(/^BOLD::\s*/, '').trim();
-        updateParagraphSurgical(xmlDoc, p, cleanFinding, isBold);
+        const isBold = finding.startsWith('BOLD::') || (finding !== origText && i >= 3);
+        const cleanVal = finding.replace(/^BOLD::\s*/, '').trim();
+        setParagraphContent(xmlDoc, p, cleanVal, isBold);
       }
     } else {
       // Mixed alignment: First match colon-keys, then sequential fill
-      let findingCursor = 0;
-      for (let i = 0; i < nonBlankBodyParagraphs.length; i++) {
-        const p = nonBlankBodyParagraphs[i];
-        const origText = getParagraphText(p).trim();
+      const usedFindings = new Set<string>();
 
+      for (const { p, origText } of nonBlankBodyParagraphs) {
         if (origText.includes(':')) {
           const prefix = origText.split(':', 2)[0].trim();
           const key = normalizeKey(prefix);
-          if (key && colonMap.has(key)) {
-            const finding = colonMap.get(key)!;
-            const isBold = finding.startsWith('BOLD::');
-            const cleanFinding = finding.replace(/^BOLD::\s*/, '').trim();
-            updateParagraphSurgical(xmlDoc, p, cleanFinding, isBold);
-            colonMap.delete(key);
-            continue;
+          if (key && colonFindingsMap.has(key)) {
+            const finding = colonFindingsMap.get(key)!;
+            const isBold = finding.startsWith('BOLD::') || (finding !== origText);
+            const cleanVal = finding.replace(/^BOLD::\s*/, '').trim();
+            setParagraphContent(xmlDoc, p, cleanVal, isBold);
+            usedFindings.add(finding);
           }
         }
+      }
 
-        if (findingCursor < bodyFindingLines.length) {
-          const finding = bodyFindingLines[findingCursor++];
-          const isBold = finding.startsWith('BOLD::');
-          const cleanFinding = finding.replace(/^BOLD::\s*/, '').trim();
-          updateParagraphSurgical(xmlDoc, p, cleanFinding, isBold);
+      let bodyCursor = 0;
+      for (const { p, origText } of nonBlankBodyParagraphs) {
+        const currentText = getParagraphText(p).trim();
+        if (currentText === origText) {
+          while (bodyCursor < bodyFindingLines.length && usedFindings.has(bodyFindingLines[bodyCursor])) {
+            bodyCursor++;
+          }
+          if (bodyCursor < bodyFindingLines.length) {
+            const finding = bodyFindingLines[bodyCursor];
+            const isBold = finding.startsWith('BOLD::') || (finding !== origText);
+            const cleanVal = finding.replace(/^BOLD::\s*/, '').trim();
+            setParagraphContent(xmlDoc, p, cleanVal, isBold);
+            usedFindings.add(finding);
+            bodyCursor++;
+          }
         }
       }
     }
@@ -880,14 +771,14 @@ export async function mergeFindingsIntoDocx(
           const p = postImpressionParagraphs[i];
           const isNative = hasNativeBullet(p);
           const textToInsert = isNative ? cleanBulletText : `•  ${cleanBulletText}`;
-          updateParagraphSurgical(xmlDoc, p, textToInsert, true);
+          setParagraphContent(xmlDoc, p, textToInsert, true);
         } else {
           // Insert new bullet paragraph
           const lastSlot = postImpressionParagraphs[postImpressionParagraphs.length - 1] || allBodyParagraphs[impressionHeaderIdx];
           const newP = lastSlot.cloneNode(true) as Element;
           const isNative = hasNativeBullet(newP);
           const textToInsert = isNative ? cleanBulletText : `•  ${cleanBulletText}`;
-          updateParagraphSurgical(xmlDoc, newP, textToInsert, true);
+          setParagraphContent(xmlDoc, newP, textToInsert, true);
           lastSlot.parentNode?.insertBefore(newP, lastSlot.nextSibling);
           postImpressionParagraphs.push(newP);
         }
