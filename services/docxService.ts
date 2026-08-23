@@ -519,6 +519,10 @@ export async function generateDocxFromFindings(
 
 const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 
+function normalizeKey(str: string): string {
+  return (str || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+}
+
 function getParagraphText(p: Element): string {
   const tTags = p.getElementsByTagName('w:t');
   let txt = '';
@@ -610,6 +614,17 @@ function updateParagraphSurgical(
           const laterTags = allRuns[j].getElementsByTagName('w:t');
           for (let k = 0; k < laterTags.length; k++) laterTags[k].textContent = '';
         }
+        if (isBold) {
+          let rPr = valRun.getElementsByTagName('w:rPr')[0];
+          if (!rPr) {
+            rPr = xmlDoc.createElementNS(W_NS, 'w:rPr');
+            valRun.insertBefore(rPr, valRun.firstChild);
+          }
+          if (rPr.getElementsByTagName('w:b').length === 0) {
+            const b = xmlDoc.createElementNS(W_NS, 'w:b');
+            rPr.appendChild(b);
+          }
+        }
       } else {
         // Colon and value share the same run -> keep text up to colon, append new value
         const valRun = allRuns[colonRunIdx];
@@ -620,6 +635,17 @@ function updateParagraphSurgical(
           tTags[0].textContent = runTxt.slice(0, cInRun + 1) + ' ' + newVal;
           tTags[0].setAttribute('xml:space', 'preserve');
           for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
+        }
+        if (isBold) {
+          let rPr = valRun.getElementsByTagName('w:rPr')[0];
+          if (!rPr) {
+            rPr = xmlDoc.createElementNS(W_NS, 'w:rPr');
+            valRun.insertBefore(rPr, valRun.firstChild);
+          }
+          if (rPr.getElementsByTagName('w:b').length === 0) {
+            const b = xmlDoc.createElementNS(W_NS, 'w:b');
+            rPr.appendChild(b);
+          }
         }
       }
       return;
@@ -639,6 +665,38 @@ function updateParagraphSurgical(
       const laterTags = allRuns[j].getElementsByTagName('w:t');
       for (let k = 0; k < laterTags.length; k++) laterTags[k].textContent = '';
     }
+    if (isBold) {
+      let rPr = firstRun.getElementsByTagName('w:rPr')[0];
+      if (!rPr) {
+        rPr = xmlDoc.createElementNS(W_NS, 'w:rPr');
+        firstRun.insertBefore(rPr, firstRun.firstChild);
+      }
+      if (rPr.getElementsByTagName('w:b').length === 0) {
+        const b = xmlDoc.createElementNS(W_NS, 'w:b');
+        rPr.appendChild(b);
+      }
+    }
+  } else {
+    // No runs present, create run
+    const r = xmlDoc.createElementNS(W_NS, 'w:r');
+    const rPr = xmlDoc.createElementNS(W_NS, 'w:rPr');
+    const rFonts = xmlDoc.createElementNS(W_NS, 'w:rFonts');
+    rFonts.setAttribute('w:ascii', 'Times New Roman');
+    rFonts.setAttribute('w:hAnsi', 'Times New Roman');
+    rPr.appendChild(rFonts);
+    const sz = xmlDoc.createElementNS(W_NS, 'w:sz');
+    sz.setAttribute('w:val', '24');
+    rPr.appendChild(sz);
+    if (isBold) {
+      const b = xmlDoc.createElementNS(W_NS, 'w:b');
+      rPr.appendChild(b);
+    }
+    r.appendChild(rPr);
+    const t = xmlDoc.createElementNS(W_NS, 'w:t');
+    t.textContent = cleanText;
+    t.setAttribute('xml:space', 'preserve');
+    r.appendChild(t);
+    p.appendChild(r);
   }
 }
 
@@ -667,7 +725,7 @@ export async function mergeFindingsIntoDocx(
   examTitle: string = 'Radiology Report'
 ): Promise<Blob> {
   if (!templateBase64 || !templateBase64.trim()) {
-    return generateFallbackDocx(findings || [], examTitle);
+    return generateDocxFromFindings(findings || [], examTitle);
   }
 
   const templateBytes = base64ToUint8Array(templateBase64);
@@ -682,7 +740,7 @@ export async function mergeFindingsIntoDocx(
     const zipEntries = await parseZip(templateBytes.buffer);
     const docXmlEntry = zipEntries.get('word/document.xml');
     if (!docXmlEntry) {
-      return generateFallbackDocx(findings, examTitle);
+      return generateDocxFromFindings(findings, examTitle);
     }
 
     const xmlStr = new TextDecoder('utf-8').decode(docXmlEntry.data);
@@ -917,8 +975,8 @@ export async function mergeFindingsIntoDocx(
 
     return createZip(updatedEntries);
   } catch (e) {
-    console.warn('mergeFindingsIntoDocx error, falling back to generateFallbackDocx:', e);
-    return generateFallbackDocx(findings, examTitle);
+    console.warn('mergeFindingsIntoDocx error, falling back to generateDocxFromFindings:', e);
+    return generateDocxFromFindings(findings, examTitle);
   }
 }
 
