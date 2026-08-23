@@ -793,7 +793,7 @@ export async function mergeFindingsIntoDocx(
       bodyFindingLines.push(trimmed);
       const cleanNoBold = trimmed.replace(/^BOLD::\s*/, '').trim();
 
-      // Check if colon-labeled line (e.g. "L1-L2: Normal", "RV diameter: --- cm")
+      // Check if colon-labeled line (e.g. "L1-L2: No significant disc bulge.", "RV diameter: --- cm", "Screening of cervical spine: Normal.")
       if (cleanNoBold.includes(':') && cleanNoBold.split(':', 2)[0].split(/\s+/).length <= 6 && !cleanNoBold.toUpperCase().startsWith('FINDINGS') && !cleanNoBold.toUpperCase().startsWith('MEASUREMENTS') && !cleanNoBold.toUpperCase().startsWith('INDIRECT') && !cleanNoBold.toUpperCase().startsWith('CARDIAC') && !cleanNoBold.toUpperCase().startsWith('VENOUS') && !cleanNoBold.toUpperCase().startsWith('OBSERVATIONS') && !cleanNoBold.toUpperCase().startsWith('INCIDENTAL') && !cleanNoBold.toUpperCase().startsWith('OTHER')) {
         const prefix = cleanNoBold.split(':', 2)[0].trim();
         const key = normalizeKey(prefix);
@@ -826,7 +826,7 @@ export async function mergeFindingsIntoDocx(
       }
     }
 
-    // 4. Update Body Paragraphs
+    // 4. Update Body Paragraphs In-Place
     const usedFindings = new Set<string>();
 
     // A. Update Clinical Profile if present
@@ -851,9 +851,9 @@ export async function mergeFindingsIntoDocx(
         usedFindings.add(finding);
       }
     } else {
-      // Mixed / Table template alignment: Match colon keys
+      // Robust In-Place Matching for Colon Keys (e.g. "L1-L2:", "L3-L4:", "Screening of cervical spine:")
       for (const { p, origText } of nonBlankBodyParagraphs) {
-        if (origText.includes(':') && !origText.endsWith(':')) {
+        if (origText.includes(':')) {
           const prefix = origText.split(':', 2)[0].trim();
           const key = normalizeKey(prefix);
           if (key && colonFindingsMap.has(key)) {
@@ -862,12 +862,27 @@ export async function mergeFindingsIntoDocx(
             const cleanVal = finding.replace(/^BOLD::\s*/, '').trim();
             updateParagraphPreservingStyle(xmlDoc, p, cleanVal, isBold);
             usedFindings.add(finding);
+            continue;
+          }
+        }
+
+        // Narrative Matching (e.g. replacing normal disc baseline with "Multilevel disc desiccation changes noted...")
+        for (const fCand of bodyFindingLines) {
+          if (usedFindings.has(fCand)) continue;
+          const cleanCand = fCand.replace(/^BOLD::\s*/, '').trim();
+          if (origText.toLowerCase().includes('disc') && cleanCand.toLowerCase().includes('disc') && (cleanCand.toLowerCase().includes('desiccation') || cleanCand.toLowerCase().includes('bulge') || origText.toLowerCase().includes('normal'))) {
+            if (!cleanCand.toLowerCase().includes('l1-l2') && !cleanCand.toLowerCase().includes('l2-l3') && !cleanCand.toLowerCase().includes('l3-l4') && !cleanCand.toLowerCase().includes('l4-l5') && !cleanCand.toLowerCase().includes('l5-s1')) {
+              const isBold = fCand.startsWith('BOLD::') || cleanCand.toLowerCase().includes('desiccation');
+              updateParagraphPreservingStyle(xmlDoc, p, cleanCand, isBold);
+              usedFindings.add(fCand);
+              break;
+            }
           }
         }
       }
     }
 
-    // 5. Strict Insertion of ONLY Truly New / Incidental Findings Before IMPRESSION
+    // 5. Strict Insertion of ONLY Truly Unconsumed / Incidental Findings Before IMPRESSION
     const unconsumedFindings: string[] = [];
     for (const f of bodyFindingLines) {
       if (usedFindings.has(f)) continue;
@@ -986,7 +1001,6 @@ export async function mergeFindingsIntoDocx(
     return generateDocxFromFindings(findings || [], examTitle);
   }
 }
-
 
 export function downloadDocxBlob(blob: Blob, filename: string): void {
   try {
