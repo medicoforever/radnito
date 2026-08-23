@@ -314,12 +314,29 @@ export const processAudio = async (
       return selectedTemplate.lines;
     }
 
-    // Step 2: Merge transcribed findings into the template with auto-retry and zero-loss fallback
+    // Step 2: Merge transcribed findings using the exact AST-based merger (identical to Merge Only Mode)
     try {
+      const { findings } = await mergeFindingsWithAst(
+        transcribedText,
+        selectedTemplate,
+        model,
+        customPrompt,
+        customImages,
+        true,
+        (selectedTemplate as any).skillPrompt
+      );
+      if (findings && findings.length > 0) {
+        return findings;
+      }
       return await mergeFindingsWithTemplate(transcribedText, selectedTemplate, model, customPrompt, customImages);
     } catch (step2Error: any) {
-      console.warn('Template merge API failed after all retries. Generating emergency local merged fallback:', step2Error);
-      return generateLocalMergedFallback(transcribedText, selectedTemplate);
+      console.warn('AST merge failed, trying mergeFindingsWithTemplate fallback:', step2Error);
+      try {
+        return await mergeFindingsWithTemplate(transcribedText, selectedTemplate, model, customPrompt, customImages);
+      } catch (fallbackErr) {
+        console.warn('Generating emergency local merged fallback:', fallbackErr);
+        return generateLocalMergedFallback(transcribedText, selectedTemplate);
+      }
     }
   }
 
