@@ -110,6 +110,18 @@ const getCleanMimeType = (blob: Blob): string => {
 
 const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, isErrorCheckEnabled, selectedTemplate = null, autoDownloadDocx = true }) => {
     const [batches, setBatches] = useState<Batch[]>([]);
+    // Sync active model selection from top header to batches when changed
+    useEffect(() => {
+        if (selectedModel) {
+            setBatches(prev => prev.map(b => {
+                if (b.status === 'error' || b.status === 'idle' || !b.findings) {
+                    return { ...b, selectedModel };
+                }
+                return b;
+            }));
+        }
+    }, [selectedModel]);
+
     const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
     const {
         isRecording: isMainRecording,
@@ -903,18 +915,19 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                 let findings: string[] = [];
                 let chatSession: any = null;
 
+                const activeModel = selectedModel || batch.selectedModel;
                 if (batch.audioBlobs.length > 0) {
                     const mimeType = batch.audioBlobs[0].type;
                     const mergedBlob = new Blob(batch.audioBlobs, { type: mimeType });
-                    findings = await processAudio(mergedBlob, batch.selectedModel, batch.customPrompt, batch.customImages || [], undefined, batch.name, selectedTemplate);
+                    findings = await processAudio(mergedBlob, activeModel, batch.customPrompt, batch.customImages || [], undefined, batch.name, selectedTemplate);
                     if (isBatchCancelledRef.current) return;
-                    chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || [], batch.selectedModel);
+                    chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || [], activeModel);
                 } else if (batch.inputText && batch.inputText.trim()) {
-                    findings = await processTextFindings(batch.inputText.trim(), batch.selectedModel, batch.customPrompt, batch.customImages || [], selectedTemplate);
+                    findings = await processTextFindings(batch.inputText.trim(), activeModel, batch.customPrompt, batch.customImages || [], selectedTemplate);
                     if (isBatchCancelledRef.current) return;
                     const textBlob = new Blob([batch.inputText.trim()], { type: 'text/plain' });
                     (textBlob as any).name = 'batch_dictation.txt';
-                    chatSession = await createChat(textBlob, findings, batch.customPrompt, batch.customImages || [], batch.selectedModel);
+                    chatSession = await createChat(textBlob, findings, batch.customPrompt, batch.customImages || [], activeModel);
                 }
 
                 if (isBatchCancelledRef.current) return;
@@ -970,18 +983,19 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
             let findings: string[] = [];
             let chatSession: any = null;
 
+            const activeModel = selectedModel || batch.selectedModel;
             if (batch.audioBlobs.length > 0) {
                 const mimeType = batch.audioBlobs[0].type;
                 const mergedBlob = new Blob(batch.audioBlobs, { type: mimeType });
-                findings = await processAudio(mergedBlob, batch.selectedModel, batch.customPrompt, batch.customImages || [], undefined, batch.name, selectedTemplate);
+                findings = await processAudio(mergedBlob, activeModel, batch.customPrompt, batch.customImages || [], undefined, batch.name, selectedTemplate);
                 if (isBatchCancelledRef.current) return;
-                chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || [], batch.selectedModel);
+                chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || [], activeModel);
             } else if (batch.inputText && batch.inputText.trim()) {
-                findings = await processTextFindings(batch.inputText.trim(), batch.selectedModel, batch.customPrompt, batch.customImages || [], selectedTemplate);
+                findings = await processTextFindings(batch.inputText.trim(), activeModel, batch.customPrompt, batch.customImages || [], selectedTemplate);
                 if (isBatchCancelledRef.current) return;
                 const textBlob = new Blob([batch.inputText.trim()], { type: 'text/plain' });
                 (textBlob as any).name = 'batch_dictation.txt';
-                chatSession = await createChat(textBlob, findings, batch.customPrompt, batch.customImages || [], batch.selectedModel);
+                chatSession = await createChat(textBlob, findings, batch.customPrompt, batch.customImages || [], activeModel);
             }
 
             if (isBatchCancelledRef.current) return;
