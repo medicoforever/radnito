@@ -686,6 +686,12 @@ function oldSetParagraphContent(
  * Table-aware: Filters out markdown table strings from body paragraph replacement,
  * perfectly preserving native Word tables (<w:tbl>) and matching colon keys and narratives.
  */
+/**
+ * High-Fidelity Universal Deterministic DOCX In-Place Merger
+ * Table-aware: Filters out markdown table strings from body paragraph replacement,
+ * perfectly preserving native Word tables (<w:tbl>), matching colon keys and narratives,
+ * and dynamically inserting OTHER / INCIDENTAL FINDINGS before IMPRESSION.
+ */
 export async function mergeFindingsIntoDocx(
   templateBase64?: string | null,
   findings?: string[] | null,
@@ -723,10 +729,10 @@ export async function mergeFindingsIntoDocx(
 
     const allBodyParagraphs = collectBodyParagraphs(bodyElem);
 
-    // 1. Separate Findings into Body Findings, Impression Items, and Colon Map
-    // CRITICAL: Filter out raw markdown table lines (containing '|' or table delimiters)
+    // 1. Separate Findings into Body Findings, Other/Incidental Findings, Impression Items, and Colon Map
     const bodyFindingLines: string[] = [];
     const narrativeFindings: string[] = [];
+    const otherIncidentalFindings: string[] = [];
     const impressionItems: string[] = [];
     const colonFindingsMap = new Map<string, string>();
     let clinicalProfile: string | null = null;
@@ -756,26 +762,33 @@ export async function mergeFindingsIntoDocx(
       if (isInImpression) {
         const cleanP = trimmed.replace(/^[•\-\*\d\.\s\u2022\u25cf]+/, '').trim();
         if (cleanP) impressionItems.push(cleanP);
+        continue;
+      }
+
+      const lower = trimmed.toLowerCase();
+      if (lower.startsWith('clinical profile:') || lower.startsWith('history:')) {
+        clinicalProfile = trimmed.includes(':') ? trimmed.split(':', 2)[1].trim() : trimmed;
+        continue;
+      }
+
+      // Check for OTHER FINDINGS / INCIDENTAL FINDINGS
+      if (lower.startsWith('other findings:') || lower.startsWith('other findings') || lower.startsWith('incidental findings:') || lower.startsWith('incidental findings') || lower.startsWith('additional findings:')) {
+        otherIncidentalFindings.push(trimmed);
+        continue;
+      }
+
+      bodyFindingLines.push(trimmed);
+      const cleanNoBold = trimmed.replace(/^BOLD::\s*/, '').trim();
+
+      // Check if colon-labeled line (e.g. "L1-L2: Normal", "RV diameter: --- cm")
+      if (cleanNoBold.includes(':') && cleanNoBold.split(':', 2)[0].split(/\s+/).length <= 6 && !cleanNoBold.toUpperCase().startsWith('FINDINGS') && !cleanNoBold.toUpperCase().startsWith('MEASUREMENTS') && !cleanNoBold.toUpperCase().startsWith('INDIRECT') && !cleanNoBold.toUpperCase().startsWith('CARDIAC') && !cleanNoBold.toUpperCase().startsWith('VENOUS') && !cleanNoBold.toUpperCase().startsWith('OBSERVATIONS')) {
+        const prefix = cleanNoBold.split(':', 2)[0].trim();
+        const key = normalizeKey(prefix);
+        if (key && key.length >= 2) {
+          colonFindingsMap.set(key, trimmed);
+        }
       } else {
-        const lower = trimmed.toLowerCase();
-        if (lower.startsWith('clinical profile:') || lower.startsWith('history:')) {
-          clinicalProfile = trimmed.includes(':') ? trimmed.split(':', 2)[1].trim() : trimmed;
-          continue;
-        }
-
-        bodyFindingLines.push(trimmed);
-        const cleanNoBold = trimmed.replace(/^BOLD::\s*/, '').trim();
-
-        // Check if colon-labeled line (e.g. "L1-L2: Normal", "RV diameter: --- cm")
-        if (cleanNoBold.includes(':') && cleanNoBold.split(':', 2)[0].split(/\s+/).length <= 6 && !cleanNoBold.toUpperCase().startsWith('FINDINGS') && !cleanNoBold.toUpperCase().startsWith('MEASUREMENTS') && !cleanNoBold.toUpperCase().startsWith('INDIRECT') && !cleanNoBold.toUpperCase().startsWith('CARDIAC') && !cleanNoBold.toUpperCase().startsWith('VENOUS') && !cleanNoBold.toUpperCase().startsWith('OBSERVATIONS')) {
-          const prefix = cleanNoBold.split(':', 2)[0].trim();
-          const key = normalizeKey(prefix);
-          if (key && key.length >= 2) {
-            colonFindingsMap.set(key, trimmed);
-          }
-        } else {
-          narrativeFindings.push(trimmed);
-        }
+        narrativeFindings.push(trimmed);
       }
     }
 
@@ -846,7 +859,6 @@ export async function mergeFindingsIntoDocx(
       for (const { p, origText } of nonBlankBodyParagraphs) {
         const currentText = getParagraphText(p).trim();
         if (currentText === origText && !origText.endsWith(':')) {
-          // If there is an abnormal narrative finding, replace the normal narrative
           const abnormalFinding = narrativeFindings.find(nf => nf.startsWith('BOLD::') && !usedFindings.has(nf));
           if (abnormalFinding) {
             updateParagraphPreservingStyle(xmlDoc, p, abnormalFinding.replace(/^BOLD::\s*/, '').trim(), true);
@@ -856,7 +868,31 @@ export async function mergeFindingsIntoDocx(
       }
     }
 
-    // 5. Update Impression Section with Single Bullet Logic
+    // 5. Insert Any OTHER / INCIDENTAL FINDINGS Before IMPRESSION
+    if (otherIncidentalFindings.length > 0) {
+      const targetAnchor = impressionHeaderIdx !== -1 ? allBodyParagraphs[impressionHeaderIdx] : null;
+      for (const extraFinding of otherIncidentalFindings) {
+        const isBold = extraFinding.startsWith('BOLD::') || extraFinding.toUpperCase().startsWith('OTHER FINDINGS:') || extraFinding.toUpperCase().startsWith('INCIDENTAL FINDINGS:');
+        const cleanVal = extraFinding.replace(/^BOLD::\s*/, '').trim();
+
+        const newP = xmlDoc.createElementNS(W_NS, 'w:p');
+        const pPr = xmlDoc.createElementNS(W_NS, 'w:pPr');
+        const spacing = xmlDoc.createElementNS(W_NS, 'w:spacing');
+        spacing.setAttributeNS(W_NS, 'w:after', '120');
+        pPr.appendChild(spacing);
+        newP.appendChild(pPr);
+
+        updateParagraphPreservingStyle(xmlDoc, newP, cleanVal, isBold);
+
+        if (targetAnchor && targetAnchor.parentNode) {
+          targetAnchor.parentNode.insertBefore(newP, targetAnchor);
+        } else {
+          bodyElem.appendChild(newP);
+        }
+      }
+    }
+
+    // 6. Update Impression Section with Single Bullet Logic
     if (impressionHeaderIdx !== -1 && impressionItems.length > 0) {
       const postImpressionParagraphs: Element[] = [];
       for (let idx = impressionHeaderIdx + 1; idx < allBodyParagraphs.length; idx++) {
