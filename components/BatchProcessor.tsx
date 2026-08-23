@@ -30,6 +30,7 @@ import BrainIcon from './icons/BrainIcon';
 import { SelectedTemplateData } from './ui/TemplateSelectionModal';
 import { mergeFindingsIntoDocx, downloadDocxBlob } from '../services/docxService';
 import { RADIOLOGY_TEMPLATES_CATALOG } from '../services/templateCatalog';
+import { isTemplateSkillEnabled, getTemplateCustomPrompt } from '../services/templateStorage';
 
 
 type BatchStatus = 'idle' | 'recording' | 'paused' | 'complete' | 'processing' | 'error';

@@ -10,6 +10,7 @@ import StopIcon from './icons/StopIcon';
 import SendIcon from './icons/SendIcon';
 import MicScribbleIcon from './icons/MicScribbleIcon';
 import TemplateSelectionModal, { SelectedTemplateData } from './ui/TemplateSelectionModal';
+import CustomPromptInput from './ui/CustomPromptInput';
 import { mergeFindingsWithTemplate, mergeFindingsWithAst, modifyReportWithText, modifyReportWithAudio } from '../services/geminiService';
 import { mergeFindingsIntoDocx, downloadDocxBlob } from '../services/docxService';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
@@ -587,21 +588,11 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
             ))}
           </div>
 
-          {/* Optional Instructions */}
-          <div>
-            <label
-              htmlFor="merge-custom-notes"
-              className="text-xs font-bold text-slate-600 dark:text-slate-300 mb-1 block"
-            >
-              Optional Custom Instructions for AI (e.g. 'Keep impression under 2 lines', 'Add patient age 45M'):
-            </label>
-            <input
-              id="merge-custom-notes"
-              type="text"
-              value={customNotes}
-              onChange={e => setCustomNotes(e.target.value)}
-              placeholder="e.g. Clinical indication: headache and hypertension..."
-              className="w-full p-2.5 text-xs sm:text-sm border border-slate-300 dark:border-slate-600 rounded-xl bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+          {/* Global Custom Instructions & Doctor Preferences */}
+          <div className="pt-2">
+            <CustomPromptInput
+              prompt={customNotes}
+              onPromptChange={setCustomNotes}
             />
           </div>
 
