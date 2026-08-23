@@ -320,7 +320,7 @@ export async function applyAstMutationsToDocx(
       };
 
       for (let i = 0; i < impressionItems.length; i++) {
-        const cleanBullet = impressionItems[i].replace(/^[•\-\*\s]+/, '').trim();
+        const cleanBullet = impressionItems[i].replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
         if (i < slotElements.length) {
           const p = slotElements[i];
           const isNative = hasNativeBullet(p);

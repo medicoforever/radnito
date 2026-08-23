@@ -245,7 +245,7 @@ export function generateDocxFromFindings(
       if (raw.includes('###')) {
         const parts = raw.split('###').slice(1);
         for (const p of parts) {
-          const cleanP = p.replace(/^[•\-\*\d\.\s\u2022\u25cf]+/, '').trim();
+          const cleanP = p.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
           if (cleanP) {
             paragraphXmls.push(buildParagraphXml(buildRunXml(`•  ${cleanP}`, true, false, false)));
           }
@@ -255,7 +255,7 @@ export function generateDocxFromFindings(
     }
 
     if (inImpression) {
-      const cleanP = raw.replace(/^[•\-\*\d\.\s\u2022\u25cf]+/, '').trim();
+      const cleanP = raw.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
       if (cleanP) {
         paragraphXmls.push(buildParagraphXml(buildRunXml(`•  ${cleanP}`, true, false, false)));
       }
@@ -427,7 +427,7 @@ export async function mergeFindingsIntoDocx(
               if (trimmed.includes('###')) {
                 const parts = trimmed.split('###').slice(1);
                 for (const p of parts) {
-                  const cleanP = p.replace(/^[•\-\*\d\.\s\u2022\u25cf]+/, '').trim();
+                  const cleanP = p.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
                   if (cleanP) impressionItems.push(cleanP);
                 }
               }
@@ -435,7 +435,7 @@ export async function mergeFindingsIntoDocx(
             }
 
             if (isInImpression) {
-              const cleanP = trimmed.replace(/^[•\-\*\d\.\s\u2022\u25cf]+/, '').trim();
+              const cleanP = trimmed.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
               if (cleanP) impressionItems.push(cleanP);
               continue;
             }
