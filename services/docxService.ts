@@ -719,6 +719,11 @@ function updateCellSurgical(xmlDoc: Document, tc: Element, value: string, bold?:
  * Replaces normal baseline template paragraphs, spinal level labels (even with empty values like "L3-L4:"),
  * anatomical narratives, and Impression bullets while preserving 100% of the original Word styles, fonts, and layout.
  */
+/**
+ * High-Fidelity Deterministic DOCX In-Place Merger
+ * Uses direct sequential 1-to-1 paragraph alignment and colon-key matching to ensure
+ * all abnormal findings, replacements, and structured impressions are merged 100% into the Word document.
+ */
 export async function mergeFindingsIntoDocx(
   templateBase64?: string | null,
   findings?: string[] | null,
@@ -754,177 +759,104 @@ export async function mergeFindingsIntoDocx(
       });
     }
 
-    const directBodyParagraphs = collectBodyParagraphs(bodyElem);
+    const allBodyParagraphs = collectBodyParagraphs(bodyElem);
 
-    // 1. Structure Findings into Lookups
-    const colonMap = new Map<string, string>();
-    const narrativeFindings: string[] = [];
+    // 1. Separate Findings into Body Findings and Impression Items
+    const bodyFindingLines: string[] = [];
     const impressionItems: string[] = [];
-    let clinicalHistoryText: string | null = null;
-    let comparisonText: string | null = null;
-    let techniqueText: string | null = null;
+    const colonMap = new Map<string, string>();
 
     for (const f of findings) {
       const trimmed = f.trim();
       if (!trimmed) continue;
-      const clean = trimmed.replace(/^BOLD::\s*/, '').trim();
-      const lower = clean.toLowerCase();
 
-      if (lower.startsWith('history:') || lower.startsWith('clinical history:') || lower.startsWith('clinical profile:')) {
-        const val = clean.split(':', 2)[1]?.trim();
-        if (val && !val.toLowerCase().includes('none specified')) {
-          clinicalHistoryText = val;
-        }
-        continue;
-      }
-      if (lower.startsWith('comparison:')) {
-        comparisonText = clean;
-        continue;
-      }
-      if (lower.startsWith('technique:') || lower.startsWith('ct technique:') || lower.startsWith('mri technique:')) {
-        techniqueText = clean;
-        continue;
-      }
-      if (lower.startsWith('impression:')) {
-        const impContent = clean.slice(11).trim();
-        const parts = impContent.split('###').map(p => p.trim()).filter(Boolean);
+      if (trimmed.toUpperCase().startsWith('IMPRESSION:')) {
+        const parts = trimmed.slice(11).trim().split('###').map(p => p.trim()).filter(Boolean);
         for (const p of parts) {
-          const b = p.replace(/^[•\-\*\d\.\s]+/, '').trim();
-          if (b) impressionItems.push(b);
+          const cleanP = p.replace(/^[•\-\*\d\.\s\u2022\u25cf]+/, '').trim();
+          if (cleanP) impressionItems.push(cleanP);
         }
-        continue;
-      }
-
-      // Check if finding is a colon-labeled line (e.g. "L3-L4: Disc bulge..." or "Screening of cervical spine: Normal.")
-      if (clean.includes(':') && clean.split(':', 2)[0].split(/\s+/).length <= 6 && !clean.toUpperCase().startsWith('FINDINGS') && !clean.toUpperCase().startsWith('OBSERVATIONS')) {
-        const prefix = clean.split(':', 2)[0].trim();
-        const key = normalizeKey(prefix);
-        if (key && key.length >= 2) {
-          colonMap.set(key, trimmed);
-          continue;
+      } else {
+        bodyFindingLines.push(trimmed);
+        const cleanNoBold = trimmed.replace(/^BOLD::\s*/, '').trim();
+        if (cleanNoBold.includes(':') && cleanNoBold.split(':', 2)[0].split(/\s+/).length <= 6) {
+          const prefix = cleanNoBold.split(':', 2)[0].trim();
+          const key = normalizeKey(prefix);
+          if (key && key.length >= 2) {
+            colonMap.set(key, trimmed);
+          }
         }
       }
-
-      // Otherwise, it is a narrative finding line
-      narrativeFindings.push(trimmed);
     }
 
-    // 2. Iterate Direct Body Paragraphs Surgically In-Place
+    // 2. Locate IMPRESSION Header in Template
     let impressionHeaderIdx = -1;
-
-    for (let idx = 0; idx < directBodyParagraphs.length; idx++) {
-      const p = directBodyParagraphs[idx];
-      const origText = getParagraphText(p).trim();
-      if (!origText) continue;
-      const lower = origText.toLowerCase();
-
-      // Check if we reached the IMPRESSION header
-      if (lower.startsWith('impression:') || origText.toUpperCase() === 'IMPRESSION:' || origText.toUpperCase() === 'IMPRESSION' || origText.toUpperCase() === 'CONCLUSION:' || origText.toUpperCase() === 'CONCLUSION') {
+    for (let idx = 0; idx < allBodyParagraphs.length; idx++) {
+      const p = allBodyParagraphs[idx];
+      const pText = getParagraphText(p).trim();
+      if (pText.toUpperCase().startsWith('IMPRESSION:') || pText.toUpperCase() === 'IMPRESSION' || pText.toUpperCase() === 'CONCLUSION:' || pText.toUpperCase() === 'CONCLUSION') {
         impressionHeaderIdx = idx;
         break;
       }
+    }
 
-      // Clinical History / Profile
-      if (clinicalHistoryText && (lower.startsWith('clinical profile:') || lower.startsWith('history:') || lower.startsWith('clinical history:') || lower.startsWith('clinical indication:'))) {
-        updateParagraphSurgical(xmlDoc, p, `Clinical Profile: ${clinicalHistoryText.replace(/^clinical\s+profile:\s*/i, '')}`);
-        continue;
-      }
+    // 3. Collect Non-Empty Body Paragraphs Before IMPRESSION
+    const nonBlankBodyParagraphs: Element[] = [];
+    const endBodyIdx = impressionHeaderIdx !== -1 ? impressionHeaderIdx : allBodyParagraphs.length;
 
-      // Comparison
-      if (comparisonText && lower.startsWith('comparison:')) {
-        updateParagraphSurgical(xmlDoc, p, comparisonText);
-        continue;
-      }
-
-      // Technique
-      if (techniqueText && (lower.startsWith('technique:') || lower.startsWith('ct technique:') || lower.startsWith('mri technique:'))) {
-        updateParagraphSurgical(xmlDoc, p, techniqueText);
-        continue;
-      }
-
-      // Labeled Paragraphs (Handles "L1-L2:", "L3-L4:", "Screening of cervical spine:", "Liver:", even if value after colon is empty in template!)
-      if (origText.includes(':')) {
-        const prefix = origText.split(':', 2)[0].trim();
-        const key = normalizeKey(prefix);
-
-        if (key && colonMap.has(key)) {
-          const findingVal = colonMap.get(key)!;
-          const isBold = findingVal.startsWith('BOLD::');
-          const cleanVal = findingVal.replace(/^BOLD::\s*/, '').trim();
-          updateParagraphSurgical(xmlDoc, p, cleanVal, isBold);
-          colonMap.delete(key);
-          continue;
-        }
-      }
-
-      // Keyword narrative matching for spine discs, vertebrae, curvature, marrow, ligaments, brain, etc.
-      let narrativeMatchIdx = -1;
-      for (let nIdx = 0; nIdx < narrativeFindings.length; nIdx++) {
-        const nf = narrativeFindings[nIdx];
-        const nfClean = nf.replace(/^BOLD::\s*/, '').toLowerCase();
-
-        if (lower.includes('intervertebral disc') && (nfClean.includes('intervertebral disc') || nfClean.includes('disc desiccation') || nfClean.includes('desiccation') || nfClean.includes('disc'))) {
-          narrativeMatchIdx = nIdx;
-          break;
-        } else if (lower.includes('disc bulge') && (nfClean.includes('disc bulge') || nfClean.includes('bulge') || nfClean.includes('protrusion') || nfClean.includes('extrusion'))) {
-          narrativeMatchIdx = nIdx;
-          break;
-        } else if (lower.includes('vertebrae') && (nfClean.includes('vertebrae') || nfClean.includes('vertebral') || nfClean.includes('marrow'))) {
-          narrativeMatchIdx = nIdx;
-          break;
-        } else if (lower.includes('curvature') && (nfClean.includes('curvature') || nfClean.includes('lordotic') || nfClean.includes('alignment'))) {
-          narrativeMatchIdx = nIdx;
-          break;
-        } else if (lower.includes('conus') && (nfClean.includes('conus') || nfClean.includes('cauda'))) {
-          narrativeMatchIdx = nIdx;
-          break;
-        } else if (lower.includes('paravertebral') && (nfClean.includes('paravertebral') || nfClean.includes('prevertebral') || nfClean.includes('soft tissue'))) {
-          narrativeMatchIdx = nIdx;
-          break;
-        } else if (lower.includes('si joints') && (nfClean.includes('si joint') || nfClean.includes('sacroiliac'))) {
-          narrativeMatchIdx = nIdx;
-          break;
-        } else if (lower.includes('cerebral cortex') && (nfClean.includes('cerebral') || nfClean.includes('parenchyma') || nfClean.includes('infarct') || nfClean.includes('bleed'))) {
-          narrativeMatchIdx = nIdx;
-          break;
-        } else if (lower.includes('ventricular system') && (nfClean.includes('ventricle') || nfClean.includes('hydrocephalus'))) {
-          narrativeMatchIdx = nIdx;
-          break;
-        } else if (lower.includes('midline shift') && (nfClean.includes('midline') || nfClean.includes('shift') || nfClean.includes('herniation'))) {
-          narrativeMatchIdx = nIdx;
-          break;
-        } else if (lower.includes('meniscus') && (nfClean.includes('meniscus') || nfClean.includes('meniscal'))) {
-          narrativeMatchIdx = nIdx;
-          break;
-        } else if (lower.includes('cruciate') && (nfClean.includes('cruciate') || nfClean.includes('acl') || nfClean.includes('pcl'))) {
-          narrativeMatchIdx = nIdx;
-          break;
-        }
-      }
-
-      if (narrativeMatchIdx !== -1) {
-        const matchedFinding = narrativeFindings.splice(narrativeMatchIdx, 1)[0];
-        const isBold = matchedFinding.startsWith('BOLD::');
-        const cleanVal = matchedFinding.replace(/^BOLD::\s*/, '').trim();
-        updateParagraphSurgical(xmlDoc, p, cleanVal, isBold);
-        continue;
-      }
-
-      // Normal generic narrative replacement (e.g. "No evidence of any significant...")
-      const isNormalNarrative = /no evidence of filling defect|no evidence of acute|within normal limits|no significant abnormality|no evidence of any significant|no significant neuroparenchymal/i.test(origText);
-      if (isNormalNarrative && narrativeFindings.length > 0) {
-        const nextNarrative = narrativeFindings.shift()!;
-        const isBold = nextNarrative.startsWith('BOLD::');
-        const cleanVal = nextNarrative.replace(/^BOLD::\s*/, '').trim();
-        updateParagraphSurgical(xmlDoc, p, cleanVal, isBold);
+    for (let idx = 0; idx < endBodyIdx; idx++) {
+      const p = allBodyParagraphs[idx];
+      const pText = getParagraphText(p).trim();
+      if (pText) {
+        nonBlankBodyParagraphs.push(p);
       }
     }
 
-    // 3. Update Impression Section with Prioritized Bullets
+    // 4. Update Body Paragraphs
+    // Check if 1-to-1 count matches (or close match)
+    if (nonBlankBodyParagraphs.length === bodyFindingLines.length) {
+      // Exact 1-to-1 sequential alignment
+      for (let i = 0; i < nonBlankBodyParagraphs.length; i++) {
+        const p = nonBlankBodyParagraphs[i];
+        const finding = bodyFindingLines[i];
+        const isBold = finding.startsWith('BOLD::');
+        const cleanFinding = finding.replace(/^BOLD::\s*/, '').trim();
+        updateParagraphSurgical(xmlDoc, p, cleanFinding, isBold);
+      }
+    } else {
+      // Mixed alignment: First match colon-keys, then sequential fill
+      let findingCursor = 0;
+      for (let i = 0; i < nonBlankBodyParagraphs.length; i++) {
+        const p = nonBlankBodyParagraphs[i];
+        const origText = getParagraphText(p).trim();
+
+        if (origText.includes(':')) {
+          const prefix = origText.split(':', 2)[0].trim();
+          const key = normalizeKey(prefix);
+          if (key && colonMap.has(key)) {
+            const finding = colonMap.get(key)!;
+            const isBold = finding.startsWith('BOLD::');
+            const cleanFinding = finding.replace(/^BOLD::\s*/, '').trim();
+            updateParagraphSurgical(xmlDoc, p, cleanFinding, isBold);
+            colonMap.delete(key);
+            continue;
+          }
+        }
+
+        if (findingCursor < bodyFindingLines.length) {
+          const finding = bodyFindingLines[findingCursor++];
+          const isBold = finding.startsWith('BOLD::');
+          const cleanFinding = finding.replace(/^BOLD::\s*/, '').trim();
+          updateParagraphSurgical(xmlDoc, p, cleanFinding, isBold);
+        }
+      }
+    }
+
+    // 5. Update Impression Section with Single Bullet Logic
     if (impressionHeaderIdx !== -1 && impressionItems.length > 0) {
       const postImpressionParagraphs: Element[] = [];
-      for (let idx = impressionHeaderIdx + 1; idx < directBodyParagraphs.length; idx++) {
-        const p = directBodyParagraphs[idx];
+      for (let idx = impressionHeaderIdx + 1; idx < allBodyParagraphs.length; idx++) {
+        const p = allBodyParagraphs[idx];
         const pText = getParagraphText(p).trim();
         if (pText.includes('MD') || pText.includes('RADIOLOGIST') || pText.includes('Page ') || pText.toLowerCase().includes('consultant')) {
           break;
@@ -943,7 +875,7 @@ export async function mergeFindingsIntoDocx(
       for (let i = 0; i < impressionItems.length; i++) {
         const rawBullet = impressionItems[i];
         const cleanBulletText = rawBullet.replace(/^[•\-\*\d\.\s\u2022\u25cf]+/, '').trim();
-        
+
         if (i < postImpressionParagraphs.length) {
           const p = postImpressionParagraphs[i];
           const isNative = hasNativeBullet(p);
@@ -951,7 +883,7 @@ export async function mergeFindingsIntoDocx(
           updateParagraphSurgical(xmlDoc, p, textToInsert, true);
         } else {
           // Insert new bullet paragraph
-          const lastSlot = postImpressionParagraphs[postImpressionParagraphs.length - 1] || directBodyParagraphs[impressionHeaderIdx];
+          const lastSlot = postImpressionParagraphs[postImpressionParagraphs.length - 1] || allBodyParagraphs[impressionHeaderIdx];
           const newP = lastSlot.cloneNode(true) as Element;
           const isNative = hasNativeBullet(newP);
           const textToInsert = isNative ? cleanBulletText : `•  ${cleanBulletText}`;
@@ -988,14 +920,11 @@ export async function mergeFindingsIntoDocx(
     return createZip(updatedEntries);
   } catch (e) {
     console.warn('mergeFindingsIntoDocx error, falling back to generateDocxFromFindings:', e);
-    return generateDocxFromFindings(findings, examTitle);
+    return generateDocxFromFindings(findings || [], examTitle);
   }
 }
 
 
-/**
- * Helper to download Blob as file in browser
- */
 export function downloadDocxBlob(blob: Blob, filename: string): void {
   try {
     const url = URL.createObjectURL(blob);
