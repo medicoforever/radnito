@@ -699,6 +699,12 @@ function oldSetParagraphContent(
  * and GUARANTEES that all unconsumed abnormal/incidental findings are inserted directly
  * into the Word document body before IMPRESSION.
  */
+/**
+ * High-Fidelity Universal Deterministic DOCX In-Place Merger
+ * Table-aware & Strict Deduplication:
+ * Filters out markdown table strings, matches colon keys and narrative paragraphs,
+ * and strictly inserts ONLY true Incidental/Other Findings without duplicating baseline normal sentences.
+ */
 export async function mergeFindingsIntoDocx(
   templateBase64?: string | null,
   findings?: string[] | null,
@@ -734,14 +740,15 @@ export async function mergeFindingsIntoDocx(
       });
     }
 
-    const allBodyParagraphs = collectBodyParagraphs(bodyElem);
-
-    // Collect all baseline template text to prevent duplicate insertions of normal sentences
+    // Collect all paragraphs in the document (including inside tables) to build baseline text set
+    const allDocParagraphs = Array.from(xmlDoc.getElementsByTagName('w:p'));
     const templateBaselineTexts = new Set<string>();
-    for (const p of allBodyParagraphs) {
+    for (const p of allDocParagraphs) {
       const t = getParagraphText(p).trim().toLowerCase();
       if (t) templateBaselineTexts.add(t);
     }
+
+    const allBodyParagraphs = collectBodyParagraphs(bodyElem);
 
     // 1. Separate Findings into Body Findings, Impression Items, and Colon Map
     const bodyFindingLines: string[] = [];
@@ -860,7 +867,7 @@ export async function mergeFindingsIntoDocx(
       }
     }
 
-    // 5. Deduplicated Insertion of ONLY Truly New / Incidental Findings Before IMPRESSION
+    // 5. Strict Insertion of ONLY Truly New / Incidental Findings Before IMPRESSION
     const unconsumedFindings: string[] = [];
     for (const f of bodyFindingLines) {
       if (usedFindings.has(f)) continue;
@@ -868,21 +875,19 @@ export async function mergeFindingsIntoDocx(
       const upper = cleanF.toUpperCase();
       const lower = cleanF.toLowerCase();
 
-      // If it's already in the template baseline text, DO NOT insert or duplicate!
+      // If it matches existing baseline text from the template, DO NOT duplicate!
       if (templateBaselineTexts.has(lower)) {
         continue;
       }
 
-      // Skip generic static template headings and titles
-      if (upper === 'FINDINGS:' || upper === 'FINDINGS' || upper.startsWith('MEASUREMENTS OF') || upper.startsWith('INDIRECT SIGNS') || upper.startsWith('CARDIAC MEASUREMENTS') || upper.startsWith('VENOUS MEASUREMENTS') || upper.startsWith('OBSERVATIONS')) {
-        continue;
-      }
-      if (lower.startsWith('ct scan') || lower.startsWith('c.t.scan') || lower.startsWith('mri scan') || lower.startsWith('ct angiography')) {
-        continue;
-      }
+      // Check if incidental finding, other finding, or new abnormal finding
+      const isIncidental = upper.startsWith('INCIDENTAL FINDINGS') ||
+                           upper.startsWith('OTHER FINDINGS') ||
+                           upper.startsWith('ADDITIONAL FINDINGS') ||
+                           upper.startsWith('NOTE:');
+      const isAbnormalNew = f.startsWith('BOLD::') && !templateBaselineTexts.has(lower);
 
-      // Check if abnormal finding or incidental finding
-      if (f.startsWith('BOLD::') || upper.startsWith('OTHER FINDINGS') || upper.startsWith('INCIDENTAL FINDINGS') || upper.startsWith('ADDITIONAL FINDINGS')) {
+      if (isIncidental || isAbnormalNew) {
         unconsumedFindings.push(f);
       }
     }
@@ -890,7 +895,7 @@ export async function mergeFindingsIntoDocx(
     if (unconsumedFindings.length > 0) {
       const targetAnchor = impressionHeaderIdx !== -1 ? allBodyParagraphs[impressionHeaderIdx] : null;
       for (const extraFinding of unconsumedFindings) {
-        const isBold = extraFinding.startsWith('BOLD::') || extraFinding.toUpperCase().startsWith('OTHER FINDINGS') || extraFinding.toUpperCase().startsWith('INCIDENTAL FINDINGS');
+        const isBold = extraFinding.startsWith('BOLD::') || extraFinding.toUpperCase().startsWith('INCIDENTAL') || extraFinding.toUpperCase().startsWith('OTHER');
         const cleanVal = extraFinding.replace(/^BOLD::\s*/, '').trim();
 
         const newP = xmlDoc.createElementNS(W_NS, 'w:p');
@@ -981,6 +986,7 @@ export async function mergeFindingsIntoDocx(
     return generateDocxFromFindings(findings || [], examTitle);
   }
 }
+
 
 export function downloadDocxBlob(blob: Blob, filename: string): void {
   try {
