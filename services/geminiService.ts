@@ -668,6 +668,25 @@ export const mergeFindingsWithAst = async (
   try {
     const { ast, xmlDoc, zipEntries, pMap, cellMap, impressionSlotIds } = await buildDocumentAstFromDocx(selectedTemplate.docxBase64);
 
+    // Cross-Modality Auto-Skill Discovery for AST Merger
+    const secondarySkills = (skillEnabled !== false)
+      ? findCrossModalitySkills(findingsText, selectedTemplate.id)
+      : [];
+
+    let crossSkillBlock = '';
+    if (secondarySkills.length > 0) {
+      crossSkillBlock = `
+
+### ⚡ CROSS-MODALITY & INCIDENTAL PATHOLOGY CONSULTANT DIRECTIVES (Auto-Detected Secondary Skills):
+The radiologist's dictation includes clinical findings related to adjacent or incidental organ systems. You MUST cross-reference the following specialized consultant directives for those findings:
+` + secondarySkills.map(s => `
+[CROSS-MODALITY SKILL: ${s.name} (${s.category || 'Specialized'})]:
+${s.skillPrompt}
+`).join('
+') + `
+*Directive for Cross-Modality Findings*: Use the exact consultant grading, AST pathological translation, and diagnostic criteria from the matching secondary skill above.`;
+    }
+
     const astPrompt = `You are an expert radiology report integration engine.
 Your task is to merge the radiologist's findings into the target document's exact Abstract Syntax Tree (AST) nodes.
 
@@ -712,8 +731,7 @@ ${findingsText}
   "impression": ["..."],
   "display_findings": ["..."]
 }
-${(skillEnabled && (activeSkillPrompt || (selectedTemplate as any).skillPrompt)) ? `\n=== AUTHORITATIVE CONSULTANT SKILL DIRECTIVES ===\n${activeSkillPrompt || (selectedTemplate as any).skillPrompt}\n` : ''}
-${(skillEnabled && (activeSkillPrompt || (selectedTemplate as any).skillPrompt)) ? `\n=== AUTHORITATIVE CONSULTANT SKILL DIRECTIVES ===\n${activeSkillPrompt || (selectedTemplate as any).skillPrompt}\n` : ''}
+${(skillEnabled && (activeSkillPrompt || (selectedTemplate as any).skillPrompt)) ? `\n=== PRIMARY CONSULTANT SKILL DIRECTIVES ===\n${activeSkillPrompt || (selectedTemplate as any).skillPrompt}\n` : ''}${crossSkillBlock}
 ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
 `;
 
@@ -771,6 +789,90 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
   return { findings };
 };
 
+
+// Cross-Modality Auto-Skill Matching Matrix across 72 CT & MRI Templates
+const CROSS_MODALITY_TRIGGERS = [
+  {
+    keywords: ['temporal', 'mastoid', 'middle ear', 'ossic', 'scutum', 'tegmen', 'prussak', 'cholesteatoma', 'cochlea', 'eac', 'iac', 'labyrinth', 'facial canal', 'otomastoiditis'],
+    targetQuery: 'temporal'
+  },
+  {
+    keywords: ['sinus', 'maxillary', 'ethmoid', 'sphenoid', 'frontal sinus', 'osteomeatal', 'infundibulum', 'turbinate', 'nasal septum', 'sinusitis', 'polyposis', 'mucocoele'],
+    targetQuery: 'pns'
+  },
+  {
+    keywords: ['cervical', 'dens', 'odontoid', 'atlantoaxial', 'c1-c2', 'c3-c4', 'c4-c5', 'c5-c6', 'c6-c7', 'cervical cord', 'myelomalacia'],
+    targetQuery: 'cervical spine'
+  },
+  {
+    keywords: ['lumbar', 'lumbosacral', 'l1-l2', 'l2-l3', 'l3-l4', 'l4-l5', 'l5-s1', 'thecal sac', 'ligamentum flavum', 'conus medullaris', 'cauda equina'],
+    targetQuery: 'lumbar spine'
+  },
+  {
+    keywords: ['orbit', 'optic nerve', 'extraocular', 'retrobulbar', 'lacrimal', 'globe', 'proptosis', 'medial rectus', 'lateral rectus'],
+    targetQuery: 'orbit'
+  },
+  {
+    keywords: ['pulmonary', 'embolism', 'filling defect', 'qanadli', 'mpa', 'rpa', 'lpa', 'pulmonary infarct', 'mosaic perfusion'],
+    targetQuery: 'pulmonary'
+  },
+  {
+    keywords: ['coronary', 'cad-rads', 'lad', 'rca', 'lcx', 'calcium score', 'agatston', 'myocardial', 'aortic root'],
+    targetQuery: 'coronary'
+  },
+  {
+    keywords: ['liver', 'li-rads', 'hepatic', 'portal vein', 'segment vi', 'segment vii', 'steatosis', 'cirrhosis', 'cholelithiasis', 'gallbladder', 'pancreatitis'],
+    targetQuery: 'abdomen'
+  },
+  {
+    keywords: ['kidney', 'renal', 'calculus', 'hydronephrosis', 'ureter', 'bladder', 'vesicoureteric', 'calyceal'],
+    targetQuery: 'kub'
+  },
+  {
+    keywords: ['knee', 'meniscus', 'cruciate', 'acl', 'pcl', 'patellar', 'collateral ligament', 'chondromalacia', 'joint effusion'],
+    targetQuery: 'knee'
+  },
+  {
+    keywords: ['shoulder', 'rotator cuff', 'supraspinatus', 'infraspinatus', 'subscapularis', 'labrum', 'subacromial', 'glenohumeral', 'biceps tendon'],
+    targetQuery: 'shoulder'
+  },
+  {
+    keywords: ['prostate', 'pi-rads', 'transition zone', 'peripheral zone', 'seminal vesicle', 'capsular abutment'],
+    targetQuery: 'prostate'
+  }
+];
+
+export function findCrossModalitySkills(
+  dictatedText: string,
+  currentTemplateId?: string
+): Array<{ id: string; name: string; category?: string; skillPrompt: string }> {
+  if (!dictatedText || !dictatedText.trim()) return [];
+  const lower = dictatedText.toLowerCase();
+  const matched: Array<{ id: string; name: string; category?: string; skillPrompt: string }> = [];
+
+  for (const entry of CROSS_MODALITY_TRIGGERS) {
+    const isHit = entry.keywords.some(kw => lower.includes(kw));
+    if (isHit) {
+      const candidate = RADIOLOGY_TEMPLATES_CATALOG.find(t => 
+        (t.name.toLowerCase().includes(entry.targetQuery) || (t.category && t.category.toLowerCase().includes(entry.targetQuery))) &&
+        t.id !== currentTemplateId &&
+        (t as any).skillPrompt && (t as any).skillPrompt.trim().length > 0
+      );
+      if (candidate && !matched.some(m => m.id === candidate.id)) {
+        matched.push({
+          id: candidate.id,
+          name: candidate.name,
+          category: candidate.category,
+          skillPrompt: (candidate as any).skillPrompt
+        });
+      }
+    }
+  }
+
+  return matched.slice(0, 2); // Return top 2 matching cross-modality skills
+}
+
+
 export const mergeFindingsWithTemplate = async (
   findingsText: string,
   selectedTemplate: { id?: string; name: string; category?: string; modality?: string; lines?: string[]; docxBase64?: string; skillPrompt?: string },
@@ -783,6 +885,24 @@ export const mergeFindingsWithTemplate = async (
   const normalFindingsText = selectedTemplate.lines && selectedTemplate.lines.length > 0
     ? selectedTemplate.lines.map((l, i) => `${i + 1}. ${l}`).join('\n')
     : selectedTemplate.name;
+
+    // 1. Primary Template Skill Directives
+  const primarySkill = (skillEnabled !== false && (activeSkillPrompt || selectedTemplate.skillPrompt)) 
+    ? (activeSkillPrompt || selectedTemplate.skillPrompt)
+    : '';
+
+  // 2. Cross-Modality Auto-Skill Discovery (e.g. Temporal Bones finding dictated during CT Brain)
+  const secondarySkills = (skillEnabled !== false)
+    ? findCrossModalitySkills(findingsText, selectedTemplate.id)
+    : [];
+
+  let crossSkillBlock = '';
+  if (secondarySkills.length > 0) {
+    crossSkillBlock = `\n\n### ⚡ CROSS-MODALITY & INCIDENTAL PATHOLOGY CONSULTANT DIRECTIVES (Auto-Detected Secondary Skills):
+The radiologist's dictation includes clinical findings related to adjacent or incidental organ systems. You MUST cross-reference the following specialized consultant directives for those findings:
+` + secondarySkills.map(s => `\n[CROSS-MODALITY SKILL: ${s.name} (${s.category || 'Specialized'})]:\n${s.skillPrompt}\n`).join('\n') + `
+*Directive for Cross-Modality Findings*: Use the exact consultant grading, AST pathological translation, and diagnostic criteria from the matching secondary skill above. Formulate the finding in the proper section (e.g., mastoid/calvarium or "Incidental Findings:") and synthesize into the impression without conversational filler.`;
+  }
 
   const prompt = `You are an expert radiologist and medical transcriptionist.
 Your task is to merge the radiologist's findings directly into the target standard radiology report template.
@@ -797,6 +917,8 @@ Category: ${selectedTemplate.category || 'Standard'}
 
 Normal Template Structure & Sections:
 ${normalFindingsText}
+
+${primarySkill ? `\n--- \n## ⚡ PRIMARY CONSULTANT SKILL DIRECTIVES (${selectedTemplate.name}):\n${primarySkill}\n---` : ''}${crossSkillBlock}
 
 ---
 
