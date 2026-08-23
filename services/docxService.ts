@@ -534,22 +534,39 @@ export async function mergeFindingsIntoDocx(
               if (t.trim()) postImpressionSlots.push(allP[i]);
             }
 
+            const hasNativeBullet = (p: Element): boolean => {
+              const pPr = p.getElementsByTagName('w:pPr')[0];
+              if (!pPr) return false;
+              const numPr = pPr.getElementsByTagName('w:numPr')[0];
+              if (numPr) return true;
+              const pStyle = pPr.getElementsByTagName('w:pStyle')[0];
+              if (pStyle) {
+                const val = pStyle.getAttribute('w:val') || pStyle.getAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val') || '';
+                if (val.toLowerCase().includes('list') || val.toLowerCase().includes('bullet')) return true;
+              }
+              return false;
+            };
+
             for (let i = 0; i < impressionItems.length; i++) {
-              const bullet = impressionItems[i];
+              const cleanBullet = impressionItems[i].replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
               if (i < postImpressionSlots.length) {
                 const p = postImpressionSlots[i];
+                const isNative = hasNativeBullet(p);
+                const bulletText = isNative ? cleanBullet : `•  ${cleanBullet}`;
                 const tTags = p.getElementsByTagName('w:t');
                 if (tTags.length > 0) {
-                  tTags[0].textContent = `•  ${bullet}`;
+                  tTags[0].textContent = bulletText;
                   tTags[0].setAttribute('xml:space', 'preserve');
                   for (let k = 1; k < tTags.length; k++) tTags[k].textContent = '';
                 }
               } else {
                 const lastSlot = postImpressionSlots[postImpressionSlots.length - 1] || allP[impIdx];
                 const newP = lastSlot.cloneNode(true) as Element;
+                const isNative = hasNativeBullet(newP);
+                const bulletText = isNative ? cleanBullet : `•  ${cleanBullet}`;
                 const tTags = newP.getElementsByTagName('w:t');
                 if (tTags.length > 0) {
-                  tTags[0].textContent = `•  ${bullet}`;
+                  tTags[0].textContent = bulletText;
                   tTags[0].setAttribute('xml:space', 'preserve');
                   for (let k = 1; k < tTags.length; k++) tTags[k].textContent = '';
                 }
