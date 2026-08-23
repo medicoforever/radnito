@@ -327,6 +327,46 @@ export function generateDocxFromFindings(
   return createZip(entries);
 }
 
+const STOP_WORDS = new Set([
+  'the', 'is', 'are', 'and', 'in', 'of', 'with', 'to', 'for', 'no', 'not',
+  'seen', 'noted', 'shows', 'displays', 'show', 'well', 'from', 'both', 'each',
+  'study', 'sections', 'studied', 'serial', 'axial', 'normal', 'abnormality', 'significant',
+  'any', 'there', 'all', 'into', 'upon', 'been', 'which', 'than', 'more'
+]);
+
+function extractSignificantWords(text: string): Set<string> {
+  const words = text.toLowerCase().replace(/[^a-zA-Z0-9\s]/g, ' ').split(/\s+/);
+  const result = new Set<string>();
+  for (const w of words) {
+    if (w.length > 2 && !STOP_WORDS.has(w)) {
+      result.add(w);
+    }
+  }
+  return result;
+}
+
+function computeParagraphSimilarity(fWords: Set<string>, pWords: Set<string>, fText: string, pText: string): number {
+  // 1. Colon key match (highest priority, e.g. "L1-L2:", "Clinical Profile:", "Liver:")
+  const fParts = fText.split(':', 2);
+  const pParts = pText.split(':', 2);
+  if (fParts.length > 1 && pParts.length > 1 && fParts[0].trim().split(/\s+/).length <= 6 && pParts[0].trim().split(/\s+/).length <= 6) {
+    const fKey = fParts[0].replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const pKey = pParts[0].replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    if (fKey && pKey && fKey === pKey) {
+      return 100.0;
+    }
+  }
+
+  // 2. Jaccard word similarity on significant anatomical/clinical words
+  if (fWords.size === 0 || pWords.size === 0) return 0.0;
+  let overlap = 0;
+  for (const w of fWords) {
+    if (pWords.has(w)) overlap++;
+  }
+  const union = fWords.size + pWords.size - overlap;
+  return union > 0 ? overlap / union : 0.0;
+}
+
 export async function mergeFindingsIntoDocx(
   templateBase64?: string | null,
   findings?: string[] | null,
@@ -341,7 +381,7 @@ export async function mergeFindingsIntoDocx(
     return generateDocxFromFindings([], examTitle);
   }
 
-  // If a native template is uploaded/selected, preserve 100% of its native styles, fonts, margins, and headers
+  // If a native template DOCX exists, surgically replace matching paragraphs in-place preserving 100% of native styles
   if (templateBase64 && templateBase64.trim()) {
     try {
       const templateBytes = base64ToUint8Array(templateBase64);
@@ -365,7 +405,7 @@ export async function mergeFindingsIntoDocx(
             }
           }
 
-          // Separate body findings and impression items
+          // 1. Separate findings into Body Findings and Impression Items
           const bodyFindings: string[] = [];
           const impressionItems: string[] = [];
           let isInImpression = false;
@@ -400,7 +440,7 @@ export async function mergeFindingsIntoDocx(
             bodyFindings.push(trimmed);
           }
 
-          // Locate impression header index
+          // 2. Locate IMPRESSION Header in Template
           let impIdx = -1;
           for (let i = 0; i < allP.length; i++) {
             const tTags = allP[i].getElementsByTagName('w:t');
@@ -413,26 +453,47 @@ export async function mergeFindingsIntoDocx(
             }
           }
 
-          // Collect non-empty template paragraphs before impression
           const endLimit = impIdx !== -1 ? impIdx : allP.length;
-          const nonBlankSlots: Element[] = [];
+          const pTexts: string[] = [];
+          const pWordsList: Set<string>[] = [];
+
           for (let i = 0; i < endLimit; i++) {
             const tTags = allP[i].getElementsByTagName('w:t');
             let t = '';
             for (let j = 0; j < tTags.length; j++) t += tTags[j].textContent || '';
-            if (t.trim()) {
-              nonBlankSlots.push(allP[i]);
-            }
+            const cleanT = t.trim();
+            pTexts.push(cleanT);
+            pWordsList.push(extractSignificantWords(cleanT));
           }
 
-          // Map body findings 1-to-1 onto template non-blank slots, preserving styles
-          for (let i = 0; i < nonBlankSlots.length; i++) {
-            const p = nonBlankSlots[i];
-            const tTags = p.getElementsByTagName('w:t');
-            if (i < bodyFindings.length) {
-              const finding = bodyFindings[i];
-              const isBold = finding.startsWith('BOLD::');
-              const cleanVal = finding.replace(/^BOLD::\s*/, '').trim();
+          // 3. Match each Body Finding to its Best Matching Template Paragraph In-Place
+          const usedParagraphIndices = new Set<number>();
+
+          for (const finding of bodyFindings) {
+            const isBold = finding.startsWith('BOLD::');
+            const cleanVal = finding.replace(/^BOLD::\s*/, '').trim();
+            const fWords = extractSignificantWords(cleanVal);
+
+            let bestScore = 0.0;
+            let bestIdx = -1;
+
+            for (let i = 0; i < endLimit; i++) {
+              if (usedParagraphIndices.has(i)) continue;
+              const pt = pTexts[i];
+              if (!pt) continue;
+
+              const score = computeParagraphSimilarity(fWords, pWordsList[i], cleanVal, pt);
+              if (score > bestScore) {
+                bestScore = score;
+                bestIdx = i;
+              }
+            }
+
+            // If a high-confidence match is found (colon key match or high word overlap), update paragraph in-place
+            if (bestIdx !== -1 && bestScore >= 0.15) {
+              usedParagraphIndices.add(bestIdx);
+              const p = allP[bestIdx];
+              const tTags = p.getElementsByTagName('w:t');
 
               if (tTags.length > 0) {
                 tTags[0].textContent = cleanVal;
@@ -456,13 +517,10 @@ export async function mergeFindingsIntoDocx(
                   }
                 }
               }
-            } else {
-              // Clear extra leftover template slot if findings had fewer lines
-              for (let k = 0; k < tTags.length; k++) tTags[k].textContent = '';
             }
           }
 
-          // Update impression bullets
+          // 4. Update Impression Bullets
           if (impIdx !== -1 && impressionItems.length > 0) {
             const postImpressionSlots: Element[] = [];
             for (let i = impIdx + 1; i < allP.length; i++) {
@@ -503,7 +561,7 @@ export async function mergeFindingsIntoDocx(
             }
           }
 
-          // Serialize modified XML back into template ZIP
+          // 5. Serialize modified XML back into template ZIP
           const serializer = new XMLSerializer();
           const modifiedDocXml = serializer.serializeToString(xmlDoc);
 
@@ -521,7 +579,7 @@ export async function mergeFindingsIntoDocx(
         }
       }
     } catch (err) {
-      console.warn('mergeFindingsIntoDocx template styling preservation error, using fallback:', err);
+      console.warn('mergeFindingsIntoDocx universal matcher error, falling back:', err);
     }
   }
 
