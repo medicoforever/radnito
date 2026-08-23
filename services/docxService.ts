@@ -681,6 +681,11 @@ function oldSetParagraphContent(
 /**
  * High-Fidelity Universal Deterministic DOCX In-Place Merger
  */
+/**
+ * High-Fidelity Universal Deterministic DOCX In-Place Merger
+ * Table-aware: Filters out markdown table strings from body paragraph replacement,
+ * perfectly preserving native Word tables (<w:tbl>) and matching colon keys and narratives.
+ */
 export async function mergeFindingsIntoDocx(
   templateBase64?: string | null,
   findings?: string[] | null,
@@ -718,15 +723,23 @@ export async function mergeFindingsIntoDocx(
 
     const allBodyParagraphs = collectBodyParagraphs(bodyElem);
 
-    // 1. Separate Findings into Body Findings and Impression Items
+    // 1. Separate Findings into Body Findings, Impression Items, and Colon Map
+    // CRITICAL: Filter out raw markdown table lines (containing '|' or table delimiters)
     const bodyFindingLines: string[] = [];
+    const narrativeFindings: string[] = [];
     const impressionItems: string[] = [];
     const colonFindingsMap = new Map<string, string>();
+    let clinicalProfile: string | null = null;
     let isInImpression = false;
 
     for (const f of findings) {
       const trimmed = f.trim();
       if (!trimmed) continue;
+
+      // Skip markdown table lines from being splattered into body paragraphs
+      if (trimmed.includes('|') || trimmed.startsWith('+-') || trimmed.startsWith('|-')) {
+        continue;
+      }
 
       if (trimmed.toUpperCase() === 'IMPRESSION:' || trimmed.toUpperCase().startsWith('IMPRESSION:') || trimmed.toUpperCase() === 'CONCLUSION:' || trimmed.toUpperCase().startsWith('CONCLUSION:')) {
         isInImpression = true;
@@ -744,14 +757,24 @@ export async function mergeFindingsIntoDocx(
         const cleanP = trimmed.replace(/^[•\-\*\d\.\s\u2022\u25cf]+/, '').trim();
         if (cleanP) impressionItems.push(cleanP);
       } else {
+        const lower = trimmed.toLowerCase();
+        if (lower.startsWith('clinical profile:') || lower.startsWith('history:')) {
+          clinicalProfile = trimmed.includes(':') ? trimmed.split(':', 2)[1].trim() : trimmed;
+          continue;
+        }
+
         bodyFindingLines.push(trimmed);
         const cleanNoBold = trimmed.replace(/^BOLD::\s*/, '').trim();
-        if (cleanNoBold.includes(':') && cleanNoBold.split(':', 2)[0].split(/\s+/).length <= 6) {
+
+        // Check if colon-labeled line (e.g. "L1-L2: Normal", "RV diameter: --- cm")
+        if (cleanNoBold.includes(':') && cleanNoBold.split(':', 2)[0].split(/\s+/).length <= 6 && !cleanNoBold.toUpperCase().startsWith('FINDINGS') && !cleanNoBold.toUpperCase().startsWith('MEASUREMENTS') && !cleanNoBold.toUpperCase().startsWith('INDIRECT') && !cleanNoBold.toUpperCase().startsWith('CARDIAC') && !cleanNoBold.toUpperCase().startsWith('VENOUS') && !cleanNoBold.toUpperCase().startsWith('OBSERVATIONS')) {
           const prefix = cleanNoBold.split(':', 2)[0].trim();
           const key = normalizeKey(prefix);
           if (key && key.length >= 2) {
             colonFindingsMap.set(key, trimmed);
           }
+        } else {
+          narrativeFindings.push(trimmed);
         }
       }
     }
@@ -780,21 +803,33 @@ export async function mergeFindingsIntoDocx(
     }
 
     // 4. Update Body Paragraphs
+    // A. Update Clinical Profile if present
+    if (clinicalProfile) {
+      for (const { p, origText } of nonBlankBodyParagraphs) {
+        const lower = origText.toLowerCase();
+        if (lower.startsWith('clinical profile:') || lower.startsWith('history:')) {
+          updateParagraphPreservingStyle(xmlDoc, p, `Clinical Profile: ${clinicalProfile}`, false);
+          break;
+        }
+      }
+    }
+
+    // B. Check if exact 1-to-1 sequential match
     if (nonBlankBodyParagraphs.length === bodyFindingLines.length) {
-      // Exact 1-to-1 sequential alignment
       for (let i = 0; i < nonBlankBodyParagraphs.length; i++) {
         const { p, origText } = nonBlankBodyParagraphs[i];
         const finding = bodyFindingLines[i];
-        const isBold = finding.startsWith('BOLD::') || (finding !== origText && i >= 3);
+        const isBold = finding.startsWith('BOLD::') || (finding !== origText && i >= 3 && !origText.endsWith(':'));
         const cleanVal = finding.replace(/^BOLD::\s*/, '').trim();
         updateParagraphPreservingStyle(xmlDoc, p, cleanVal, isBold);
       }
     } else {
-      // Mixed alignment: First match colon-keys, then sequential fill
+      // Mixed / Table template alignment
       const usedFindings = new Set<string>();
 
+      // 1. Colon-key matching (e.g. L3-L4:, RV diameter:, Superior vena cava:)
       for (const { p, origText } of nonBlankBodyParagraphs) {
-        if (origText.includes(':')) {
+        if (origText.includes(':') && !origText.endsWith(':')) {
           const prefix = origText.split(':', 2)[0].trim();
           const key = normalizeKey(prefix);
           if (key && colonFindingsMap.has(key)) {
@@ -807,20 +842,15 @@ export async function mergeFindingsIntoDocx(
         }
       }
 
-      let bodyCursor = 0;
+      // 2. Narrative abnormal replacement
       for (const { p, origText } of nonBlankBodyParagraphs) {
         const currentText = getParagraphText(p).trim();
-        if (currentText === origText) {
-          while (bodyCursor < bodyFindingLines.length && usedFindings.has(bodyFindingLines[bodyCursor])) {
-            bodyCursor++;
-          }
-          if (bodyCursor < bodyFindingLines.length) {
-            const finding = bodyFindingLines[bodyCursor];
-            const isBold = finding.startsWith('BOLD::') || (finding !== origText);
-            const cleanVal = finding.replace(/^BOLD::\s*/, '').trim();
-            updateParagraphPreservingStyle(xmlDoc, p, cleanVal, isBold);
-            usedFindings.add(finding);
-            bodyCursor++;
+        if (currentText === origText && !origText.endsWith(':')) {
+          // If there is an abnormal narrative finding, replace the normal narrative
+          const abnormalFinding = narrativeFindings.find(nf => nf.startsWith('BOLD::') && !usedFindings.has(nf));
+          if (abnormalFinding) {
+            updateParagraphPreservingStyle(xmlDoc, p, abnormalFinding.replace(/^BOLD::\s*/, '').trim(), true);
+            usedFindings.add(abnormalFinding);
           }
         }
       }
