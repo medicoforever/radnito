@@ -888,12 +888,14 @@ ${findingsText}
 
 ---
 
-## STRICT AST MUTATION & CONSULTANT MIRROR RULES:
-1. **Node Identification & In-Place Replacement**:
-   - Identify the exact node_id for each finding (e.g. narrative organ node, inline field, table cell).
-   - Only include nodes in "updates" that NEED modifications. Do NOT return untouched normal nodes.
-   - **CRITICAL CONTRADICTION REMOVAL**: If an abnormal finding covers, supersedes, or contradicts an existing baseline normal node (e.g. ventricular atrophy finding supersedes normal ventricles node, or disc bulge finding supersedes 'no significant disc bulge' node), you MUST also include that superseded normal node in "updates" with "new_text": "" (empty string) to clear it cleanly from the Word document.
-   - For unaffected nodes, preserve baseline template text 100% intact.
+## STRICT AST SURGERY & 100% CLINICAL FIDELITY RULES:
+1. **100% Comprehensive Clinical Ingestion**:
+   - EVERY observation, measurement, pathology, and clinical history dictated by the radiologist MUST be completely included in the final report.
+2. **Surgical Node Updates, Mingled Sentence Splitting & Contradiction Removal**:
+   - Map each clinical finding to its most appropriate anatomical node_id.
+   - **Mingled Sentence Handling**: If a baseline template node combines multiple anatomical concepts (e.g. "The basal cisterns, cortical sulci and sylvian fissures are normal") and only one structure is abnormal (e.g. cortical sulcal prominence), rewrite that node so the normal structures are retained (e.g. "The basal cisterns are normal.") and the abnormal finding is accurately documented.
+   - **Automatic Contradiction Removal**: If an abnormal finding supersedes, covers, or contradicts an existing baseline normal node (e.g. ventricular atrophy finding supersedes normal ventricular system node, or disc bulge finding supersedes 'no significant disc bulge' node), you MUST include that superseded normal node in "updates" with "new_text": "" (empty string) so it is cleanly removed from the Word document with zero leftover contradictory text.
+   - For unaffected normal nodes, do NOT include them in "updates" (they remain 100% intact with their original template styles).
 2. **5-Layer Structural DNA & BOLD Protocol**:
    - Update Clinical Profile node if history/indication is dictated (wrapped as "*Clinical Profile: ...*").
    - In "display_findings", produce the full ordered report array: Capitalized Title -> "*Clinical Profile: ...*" (or "*Clinical Profile:*") -> Technique -> Findings (prefix modified lines with "BOLD::", preserve normal lines verbatim without "BOLD::") -> Synthesized Impression starting with "IMPRESSION:###".

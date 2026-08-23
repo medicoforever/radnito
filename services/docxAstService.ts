@@ -277,7 +277,7 @@ export async function applyAstMutationsToDocx(
     }
   };
 
-  // 1. Apply Paragraph and Table Cell mutations
+  // 1. Apply Paragraph and Table Cell mutations with clean DOM node removal for cleared paragraphs
   for (const mut of mutations) {
     const nid = mut.node_id;
     const cleanText = (mut.new_text || '').trim();
@@ -285,9 +285,13 @@ export async function applyAstMutationsToDocx(
     if (pMap.has(nid)) {
       const p = pMap.get(nid)!;
       if (!cleanText) {
-        // Clear paragraph text cleanly
-        const tTags = p.getElementsByTagName('w:t');
-        for (let k = 0; k < tTags.length; k++) tTags[k].textContent = '';
+        // Remove the superseded/contradicted paragraph element cleanly from DOM (no leftover empty blank lines)
+        if (p.parentNode) {
+          p.parentNode.removeChild(p);
+        } else {
+          const tTags = p.getElementsByTagName('w:t');
+          for (let k = 0; k < tTags.length; k++) tTags[k].textContent = '';
+        }
       } else {
         applyTextToParagraphRuns(p, cleanText, mut.bold);
       }
