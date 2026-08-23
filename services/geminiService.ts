@@ -288,6 +288,66 @@ export const getCachedAudioTranscript = (audioBlob: Blob): string | undefined =>
   return audioTranscriptCache.get(audioBlob);
 };
 
+export const processAudioWithDocx = async (
+  audioBlob: Blob, 
+  model: string, 
+  customPrompt?: string,
+  customImages?: Array<{ data: string; mimeType: string }> | null,
+  existingFindings?: string[],
+  batchName?: string,
+  selectedTemplate?: { id?: string; name: string; category?: string; modality?: string; lines?: string[]; docxBase64?: string; skillPrompt?: string } | null
+): Promise<{ findings: string[]; docxBlob?: Blob }> => {
+  const isReprocessing = existingFindings && existingFindings.length > 0;
+
+  // 2-STEP PIPELINE: When a template is selected for audio dictation
+  if (selectedTemplate && selectedTemplate.lines && selectedTemplate.lines.length > 0 && !isReprocessing) {
+    let transcribedText = audioTranscriptCache.get(audioBlob);
+    if (!transcribedText || !transcribedText.trim()) {
+      // Step 1: Transcribe audio to verbatim clinical text
+      transcribedText = await transcribeAudioForPrompt(audioBlob, model);
+      if (transcribedText) {
+        audioTranscriptCache.set(audioBlob, transcribedText);
+      }
+    }
+
+    if (!transcribedText || !transcribedText.trim()) {
+      return { findings: selectedTemplate.lines };
+    }
+
+    // Step 2: Merge transcribed findings directly using mergeFindingsWithAst (identical to Merge Only mode)
+    try {
+      const astResult = await mergeFindingsWithAst(
+        transcribedText,
+        selectedTemplate,
+        model,
+        customPrompt,
+        customImages,
+        true,
+        (selectedTemplate as any).skillPrompt
+      );
+      if (astResult && astResult.findings && astResult.findings.length > 0) {
+        return astResult;
+      }
+      const fallbackFindings = await mergeFindingsWithTemplate(transcribedText, selectedTemplate, model, customPrompt, customImages);
+      return { findings: fallbackFindings };
+    } catch (step2Error: any) {
+      console.warn('AST merge failed, trying mergeFindingsWithTemplate fallback:', step2Error);
+      try {
+        const fallbackFindings = await mergeFindingsWithTemplate(transcribedText, selectedTemplate, model, customPrompt, customImages);
+        return { findings: fallbackFindings };
+      } catch (fallbackErr) {
+        console.warn('Generating emergency local merged fallback:', fallbackErr);
+        return { findings: generateLocalMergedFallback(transcribedText, selectedTemplate) };
+      }
+    }
+  }
+
+  // Fallback direct audio pipeline
+  const directFindings = await processAudio(audioBlob, model, customPrompt, customImages, existingFindings, batchName, selectedTemplate);
+  return { findings: directFindings };
+};
+
+
 export const processAudio = async (
   audioBlob: Blob, 
   model: string, 

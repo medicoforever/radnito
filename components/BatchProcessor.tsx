@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
-import { processAudio, processTextFindings, createChat, blobToBase64, continueAudioDictation, base64ToBlob, modifyFindingWithAudio, modifyReportWithAudio, modifyReportWithText, identifyPotentialErrors, runComplexImpressionGeneration, transcribeAudioForPrompt } from '../services/geminiService';
+import { processAudio, processAudioWithDocx, processTextFindings, createChat, blobToBase64, continueAudioDictation, base64ToBlob, modifyFindingWithAudio, modifyReportWithAudio, modifyReportWithText, identifyPotentialErrors, runComplexImpressionGeneration, transcribeAudioForPrompt } from '../services/geminiService';
 import { isRAGStyleMatchingEnabled, getRelevantStyleTemplates } from '../services/reportStyleRAG';
 import { saveAudioBlob, getAudioBlob, clearUnusedAudioBlobs } from '../services/audioStorage';
 import Spinner from './ui/Spinner';
@@ -45,6 +45,7 @@ interface Batch {
     audioBlobs: Blob[];
     inputText?: string;
     findings: string[] | null;
+    docxBlob?: Blob | null;
     status: BatchStatus;
     selectedModel: string;
     customPrompt: string;
@@ -916,10 +917,13 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                 let chatSession: any = null;
 
                 const activeModel = selectedModel || batch.selectedModel;
+                let generatedDocxBlob: Blob | undefined;
                 if (batch.audioBlobs.length > 0) {
                     const mimeType = batch.audioBlobs[0].type;
                     const mergedBlob = new Blob(batch.audioBlobs, { type: mimeType });
-                    findings = await processAudio(mergedBlob, activeModel, batch.customPrompt, batch.customImages || [], undefined, batch.name, selectedTemplate);
+                    const audioRes = await processAudioWithDocx(mergedBlob, activeModel, batch.customPrompt, batch.customImages || [], undefined, batch.name, selectedTemplate);
+                    findings = audioRes.findings;
+                    generatedDocxBlob = audioRes.docxBlob;
                     if (isBatchCancelledRef.current) return;
                     chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || [], activeModel);
                 } else if (batch.inputText && batch.inputText.trim()) {
@@ -935,7 +939,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                 const initialChatHistory = [{ author: 'AI' as const, text: `${findings.join('\n\n')}\n\n${aiGreeting}` }];
 
                                 // Mark batch complete immediately
-                setBatches(prev => prev.map(b => b.id === batch.id ? { ...b, status: 'complete', findings, chat: chatSession, chatHistory: initialChatHistory, isChatting: false, matchedRAGTemplate: matchedRAG } : b));
+                setBatches(prev => prev.map(b => b.id === batch.id ? { ...b, status: 'complete', findings, docxBlob: generatedDocxBlob, chat: chatSession, chatHistory: initialChatHistory, isChatting: false, matchedRAGTemplate: matchedRAG } : b));
 
                 // Safe asynchronous DOCX auto-download (never throws or causes error status)
                 try {
@@ -943,7 +947,10 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                         const templateBase64 = selectedTemplate.docxBase64;
                         const title = selectedTemplate.name || batch.name || 'Radiology_Report';
                         const cleanName = `${(batch.name || title).replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().slice(0, 10)}.docx`;
-                        mergeFindingsIntoDocx(templateBase64, findings, title).then(blob => {
+                        const dlBlobPromise = generatedDocxBlob 
+                            ? Promise.resolve(generatedDocxBlob)
+                            : mergeFindingsIntoDocx(templateBase64, findings, title);
+                        dlBlobPromise.then(blob => {
                             downloadDocxBlob(blob, cleanName);
                         }).catch(docErr => {
                             console.warn('Auto DOCX download background error:', docErr);
@@ -984,10 +991,13 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
             let chatSession: any = null;
 
             const activeModel = selectedModel || batch.selectedModel;
+            let generatedDocxBlob: Blob | undefined;
             if (batch.audioBlobs.length > 0) {
                 const mimeType = batch.audioBlobs[0].type;
                 const mergedBlob = new Blob(batch.audioBlobs, { type: mimeType });
-                findings = await processAudio(mergedBlob, activeModel, batch.customPrompt, batch.customImages || [], undefined, batch.name, selectedTemplate);
+                const audioRes = await processAudioWithDocx(mergedBlob, activeModel, batch.customPrompt, batch.customImages || [], undefined, batch.name, selectedTemplate);
+                findings = audioRes.findings;
+                generatedDocxBlob = audioRes.docxBlob;
                 if (isBatchCancelledRef.current) return;
                 chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || [], activeModel);
             } else if (batch.inputText && batch.inputText.trim()) {
@@ -1002,7 +1012,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
             const aiGreeting = "I have reviewed the dictation and findings. How can I help you further?";
             const initialChatHistory = [{ author: 'AI' as const, text: `${findings.join('\n\n')}\n\n${aiGreeting}` }];
 
-            setBatches(prev => prev.map(b => b.id === batchId ? { ...b, status: 'complete', findings, chat: chatSession, chatHistory: initialChatHistory, isChatting: false, matchedRAGTemplate: matchedRAG } : b));
+            setBatches(prev => prev.map(b => b.id === batchId ? { ...b, status: 'complete', findings, docxBlob: generatedDocxBlob, chat: chatSession, chatHistory: initialChatHistory, isChatting: false, matchedRAGTemplate: matchedRAG } : b));
         } catch (err) {
             if (isBatchCancelledRef.current) return;
             const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
@@ -1451,7 +1461,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                 const templateBase64 = selectedTemplate?.docxBase64;
                 const title = selectedTemplate?.name || batch.name || 'Radiology_Report';
                 const cleanName = `${(batch.name || title).replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().slice(0, 10)}.docx`;
-                const blob = await mergeFindingsIntoDocx(templateBase64, batch.findings!, title);
+                const blob = batch.docxBlob || await mergeFindingsIntoDocx(templateBase64, batch.findings!, title);
                 downloadDocxBlob(blob, cleanName);
             }
             showNotification(`Downloaded ${batchesWithFindings.length} Word DOCX report${batchesWithFindings.length > 1 ? 's' : ''} (Times New Roman 12pt)!`);
