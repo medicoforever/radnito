@@ -292,7 +292,13 @@ const TemplateSelectorBanner: React.FC<TemplateSelectorBannerProps> = ({
             <textarea
               rows={8}
               value={customSkillPrompt}
-              onChange={e => setCustomSkillPrompt(e.target.value)}
+              onChange={e => {
+                const val = e.target.value;
+                setCustomSkillPrompt(val);
+                if (selectedTemplate?.id) {
+                  setTemplateCustomPrompt(selectedTemplate.id, val);
+                }
+              }}
               placeholder="Enter or modify consultant instructions, line replacements, and scoring rules for this template..."
               className="w-full p-3 text-xs font-mono border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none leading-relaxed"
             />

@@ -314,7 +314,9 @@ export const processAudioWithDocx = async (
   customImages?: Array<{ data: string; mimeType: string }> | null,
   existingFindings?: string[],
   batchName?: string,
-  selectedTemplate?: { id?: string; name: string; category?: string; modality?: string; lines?: string[]; docxBase64?: string; skillPrompt?: string } | null
+  selectedTemplate?: { id?: string; name: string; category?: string; modality?: string; lines?: string[]; docxBase64?: string; skillPrompt?: string } | null,
+  skillEnabled: boolean = true,
+  activeSkillPrompt?: string
 ): Promise<{ findings: string[]; docxBlob?: Blob }> => {
   const isReprocessing = existingFindings && existingFindings.length > 0;
 
@@ -341,8 +343,8 @@ export const processAudioWithDocx = async (
         model,
         customPrompt,
         customImages,
-        true,
-        (selectedTemplate as any).skillPrompt
+        skillEnabled,
+        activeSkillPrompt || (selectedTemplate as any).skillPrompt
       );
       if (astResult && astResult.findings && astResult.findings.length > 0) {
         return astResult;

@@ -918,16 +918,38 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
 
                 const activeModel = selectedModel || batch.selectedModel;
                 let generatedDocxBlob: Blob | undefined;
+                const isSkillActive = isTemplateSkillEnabled();
+                const customSkillPrompt = selectedTemplate?.id ? getTemplateCustomPrompt(selectedTemplate.id) : undefined;
+                const activeSkillPrompt = isSkillActive ? (customSkillPrompt || (selectedTemplate as any)?.skillPrompt) : undefined;
+
                 if (batch.audioBlobs.length > 0) {
                     const mimeType = batch.audioBlobs[0].type;
                     const mergedBlob = new Blob(batch.audioBlobs, { type: mimeType });
-                    const audioRes = await processAudioWithDocx(mergedBlob, activeModel, batch.customPrompt, batch.customImages || [], undefined, batch.name, selectedTemplate);
+                    const audioRes = await processAudioWithDocx(
+                        mergedBlob,
+                        activeModel,
+                        batch.customPrompt,
+                        batch.customImages || [],
+                        undefined,
+                        batch.name,
+                        selectedTemplate,
+                        isSkillActive,
+                        activeSkillPrompt
+                    );
                     findings = audioRes.findings;
                     generatedDocxBlob = audioRes.docxBlob;
                     if (isBatchCancelledRef.current) return;
                     chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || [], activeModel);
                 } else if (batch.inputText && batch.inputText.trim()) {
-                    const textRes = await processTextFindings(batch.inputText.trim(), activeModel, batch.customPrompt, batch.customImages || [], selectedTemplate as any);
+                    const textRes = await processTextFindings(
+                        batch.inputText.trim(),
+                        activeModel,
+                        batch.customPrompt,
+                        batch.customImages || [],
+                        selectedTemplate as any,
+                        isSkillActive,
+                        activeSkillPrompt
+                    );
                     findings = textRes.findings;
                     generatedDocxBlob = textRes.docxBlob;
                     if (isBatchCancelledRef.current) return;
@@ -994,16 +1016,38 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
 
             const activeModel = selectedModel || batch.selectedModel;
             let generatedDocxBlob: Blob | undefined;
+            const isSkillActive = isTemplateSkillEnabled();
+            const customSkillPrompt = selectedTemplate?.id ? getTemplateCustomPrompt(selectedTemplate.id) : undefined;
+            const activeSkillPrompt = isSkillActive ? (customSkillPrompt || (selectedTemplate as any)?.skillPrompt) : undefined;
+
             if (batch.audioBlobs.length > 0) {
                 const mimeType = batch.audioBlobs[0].type;
                 const mergedBlob = new Blob(batch.audioBlobs, { type: mimeType });
-                const audioRes = await processAudioWithDocx(mergedBlob, activeModel, batch.customPrompt, batch.customImages || [], undefined, batch.name, selectedTemplate);
+                const audioRes = await processAudioWithDocx(
+                    mergedBlob,
+                    activeModel,
+                    batch.customPrompt,
+                    batch.customImages || [],
+                    undefined,
+                    batch.name,
+                    selectedTemplate,
+                    isSkillActive,
+                    activeSkillPrompt
+                );
                 findings = audioRes.findings;
                 generatedDocxBlob = audioRes.docxBlob;
                 if (isBatchCancelledRef.current) return;
                 chatSession = await createChat(mergedBlob, findings, batch.customPrompt, batch.customImages || [], activeModel);
             } else if (batch.inputText && batch.inputText.trim()) {
-                const textRes = await processTextFindings(batch.inputText.trim(), activeModel, batch.customPrompt, batch.customImages || [], selectedTemplate as any);
+                const textRes = await processTextFindings(
+                    batch.inputText.trim(),
+                    activeModel,
+                    batch.customPrompt,
+                    batch.customImages || [],
+                    selectedTemplate as any,
+                    isSkillActive,
+                    activeSkillPrompt
+                );
                 findings = textRes.findings;
                 generatedDocxBlob = textRes.docxBlob;
                 if (isBatchCancelledRef.current) return;

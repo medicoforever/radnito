@@ -8,7 +8,7 @@ import {
   RADIOLOGY_TEMPLATES_CATALOG,
   RadiologyDocxTemplate,
 } from '../../services/templateCatalog';
-import { saveUserTemplate, UserTemplate } from '../../services/templateStorage';
+import { saveUserTemplate, UserTemplate, isTemplateSkillEnabled, setTemplateSkillEnabled } from '../../services/templateStorage';
 import { extractLinesFromDocxBlob } from '../../services/docxService';
 
 export interface SelectedTemplateData {
@@ -53,6 +53,7 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
   const [activeTab, setActiveTab] = useState<string>('ALL');
   const [previewTemplate, setPreviewTemplate] = useState<SelectedTemplateData | null>(null);
   const [previewPaneTab, setPreviewPaneTab] = useState<'LINES' | 'SKILL'>('LINES');
+  const [isSkillEnabled, setIsSkillEnabled] = useState<boolean>(() => isTemplateSkillEnabled());
 
   // Custom DOCX Upload state with optional skill prompt
   const [isUploading, setIsUploading] = useState(false);
@@ -616,10 +617,27 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
         </div>
 
         {/* Footer */}
-        <footer className="p-3 px-6 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 flex justify-between items-center flex-shrink-0 text-xs">
-          <span className="text-slate-500 dark:text-slate-400">
-            Selected: <strong className="text-slate-800 dark:text-slate-200">{previewTemplate?.name || 'None'}</strong>
-          </span>
+        <footer className="p-3 px-6 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row justify-between items-center gap-3 flex-shrink-0 text-xs">
+          <div className="flex items-center gap-3">
+            <span className="text-slate-500 dark:text-slate-400">
+              Selected: <strong className="text-slate-800 dark:text-slate-200">{previewTemplate?.name || 'None'}</strong>
+            </span>
+            <label className="flex items-center gap-2 cursor-pointer bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700">
+              <input
+                type="checkbox"
+                checked={isSkillEnabled}
+                onChange={e => {
+                  const val = e.target.checked;
+                  setIsSkillEnabled(val);
+                  setTemplateSkillEnabled(val);
+                }}
+                className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500"
+              />
+              <span className={`font-bold ${isSkillEnabled ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-500'}`}>
+                {isSkillEnabled ? '⚡ Consultant Skill Enabled' : 'Consultant Skill Disabled'}
+              </span>
+            </label>
+          </div>
           <div className="flex gap-2">
             <button
               type="button"
