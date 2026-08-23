@@ -678,6 +678,42 @@ function oldSetParagraphContent(
   p.appendChild(r);
 }
 
+// Semantic Signature Generator for Medical Reports & Templates
+function getSemanticSignature(text: string): string | null {
+  const t = text.toLowerCase().trim();
+  if (!t) return null;
+
+  // 1. Specific spinal / anatomical levels (e.g. L1-L2, L3-L4, C5-C6, D11-D12)
+  const levelMatch = t.match(/\b(c\d-c\d|d\d-d\d|t\d-t\d|l\d-l\d|l5-s1)\b/i);
+  if (levelMatch) {
+    return `level_${levelMatch[1].toLowerCase().replace('-', '')}`;
+  }
+
+  // 2. Specific anatomical headings and sections
+  if (t.includes('screening of cervical') || (t.includes('screening') && t.includes('cervical'))) return 'screening_cervical';
+  if (t.includes('screening of dorsal') || t.includes('screening of thoracic') || (t.includes('screening') && (t.includes('dorsal') || t.includes('thoracic')))) return 'screening_dorsal';
+  if (t.includes('screening of rest')) return 'screening_spine';
+  if (t.includes('conus') || t.includes('cauda')) return 'conus_cauda';
+  if (t.includes('prevertebral') || t.includes('paravertebral')) return 'paravertebral_soft_tissues';
+  if (t.includes('si joint') || t.includes('sacroiliac')) return 'si_joints';
+  if (t.includes('lordotic') || t.includes('curvature') || t.includes('vertebral column alignment')) return 'spinal_alignment';
+  if (t.includes('vertebrae') || (t.includes('vertebral') && (t.includes('heights') || t.includes('morphology') || t.includes('marrow')))) return 'vertebrae_morphology';
+  if (t.includes('intervertebral disc') || t.includes('disc desiccation') || (t.includes('disc') && (t.includes('heights') || t.includes('hydration') || t.includes('end-plates') || t.includes('endplates')))) return 'discs_baseline';
+  if (t.includes('no evidence of any significant disc') || t.includes('no significant disc bulge or prolapse elsewhere')) return 'discs_negative_baseline';
+  if (t.startsWith('technique:') || t.startsWith('scanning technique:')) return 'technique';
+  if (t.startsWith('clinical profile:') || t.startsWith('history:')) return 'clinical_profile';
+
+  // 3. Colon prefix fallback (e.g. "Brain Stem:", "Ventricles:", "Basal Ganglia:")
+  if (t.includes(':') && t.split(':', 2)[0].split(/\s+/).length <= 4) {
+    const prefix = t.split(':', 2)[0].replace(/[^a-z0-9]/g, '');
+    if (prefix.length >= 2) return `prefix_${prefix}`;
+  }
+
+  // 4. Word signature from distinctive anatomical words
+  const words = t.replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 3 && !['normal', 'shows', 'noted', 'there', 'with', 'both', 'each', 'appearance', 'intensities'].includes(w));
+  return words.length > 0 ? `kw_${words.slice(0, 3).join('_')}` : null;
+}
+
 export async function mergeFindingsIntoDocx(
   templateBase64?: string | null,
   findings?: string[] | null,
@@ -713,7 +749,7 @@ export async function mergeFindingsIntoDocx(
       });
     }
 
-    // Collect all paragraphs in the document (including inside tables) to build baseline text set
+    // Collect baseline paragraphs to prevent duplicates
     const allDocParagraphs = Array.from(xmlDoc.getElementsByTagName('w:p'));
     const templateBaselineTexts = new Set<string>();
     for (const p of allDocParagraphs) {
@@ -724,22 +760,19 @@ export async function mergeFindingsIntoDocx(
     const allBodyParagraphs = collectBodyParagraphs(bodyElem);
 
     // ============================================================
-    // STEP 1: Parse findings into body lines, impression items, and colon map
+    // 1. Separate Findings into: Body Lines & Impression Items
     // ============================================================
     const bodyFindingLines: string[] = [];
     const impressionItems: string[] = [];
-    const colonFindingsMap = new Map<string, string>();
+    const findingsBySignature = new Map<string, string>();
     let clinicalProfile: string | null = null;
     let isInImpression = false;
 
     for (const f of findings) {
       let trimmed = f.trim();
       if (!trimmed) continue;
-
-      // Skip markdown table lines
       if (trimmed.includes('|') || trimmed.startsWith('+-') || trimmed.startsWith('|-')) continue;
 
-      // Strip "Title:" prefix that audio dictation mode adds
       if (trimmed.toLowerCase().startsWith('title:')) {
         trimmed = trimmed.substring(trimmed.indexOf(':') + 1).trim();
         if (!trimmed) continue;
@@ -772,19 +805,14 @@ export async function mergeFindingsIntoDocx(
 
       bodyFindingLines.push(trimmed);
       const cleanNoBold = trimmed.replace(/^BOLD::\s*/, '').trim();
-
-      // Build colon map for keyed findings (e.g. "L1-L2: ...", "Screening of cervical spine: ...")
-      if (cleanNoBold.includes(':') && cleanNoBold.split(':', 2)[0].split(/\s+/).length <= 6 && !cleanNoBold.toUpperCase().startsWith('FINDINGS') && !cleanNoBold.toUpperCase().startsWith('MEASUREMENTS') && !cleanNoBold.toUpperCase().startsWith('INDIRECT') && !cleanNoBold.toUpperCase().startsWith('CARDIAC') && !cleanNoBold.toUpperCase().startsWith('VENOUS') && !cleanNoBold.toUpperCase().startsWith('OBSERVATIONS') && !cleanNoBold.toUpperCase().startsWith('INCIDENTAL') && !cleanNoBold.toUpperCase().startsWith('OTHER')) {
-        const prefix = cleanNoBold.split(':', 2)[0].trim();
-        const key = normalizeKey(prefix);
-        if (key && key.length >= 2) {
-          colonFindingsMap.set(key, trimmed);
-        }
+      const sig = getSemanticSignature(cleanNoBold);
+      if (sig) {
+        findingsBySignature.set(sig, trimmed);
       }
     }
 
     // ============================================================
-    // STEP 2: Locate IMPRESSION header in template
+    // 2. Locate IMPRESSION Header in Template
     // ============================================================
     let impressionHeaderIdx = -1;
     for (let idx = 0; idx < allBodyParagraphs.length; idx++) {
@@ -796,125 +824,54 @@ export async function mergeFindingsIntoDocx(
       }
     }
 
-    // ============================================================
-    // STEP 3: Collect ALL template paragraphs before IMPRESSION (including blank ones)
-    // ============================================================
     const endBodyIdx = impressionHeaderIdx !== -1 ? impressionHeaderIdx : allBodyParagraphs.length;
 
-    // Non-blank paragraphs for matching
-    const nonBlankBodyParagraphs: Array<{ p: Element; origText: string; idx: number }> = [];
-    for (let idx = 0; idx < endBodyIdx; idx++) {
-      const p = allBodyParagraphs[idx];
-      const pText = getParagraphText(p).trim();
-      if (pText) {
-        nonBlankBodyParagraphs.push({ p, origText: pText, idx });
-      }
-    }
-
     // ============================================================
-    // STEP 4: SEQUENTIAL REPLACEMENT (Primary Strategy)
-    // The AI output always mirrors the template structure in order.
-    // Walk through template paragraphs and finding lines simultaneously.
+    // 3. Robust Semantic In-Place Paragraph Replacement
     // ============================================================
     const usedFindings = new Set<string>();
-    const updatedParagraphs = new Set<number>(); // track which template paragraph indices were updated
+    const hasAbnormalDiscLevels = bodyFindingLines.some(f => f.startsWith('BOLD::') && f.toLowerCase().match(/\b(c\d-c\d|d\d-d\d|t\d-t\d|l\d-l\d|l5-s1)\b/i));
 
-    // A. Update Clinical Profile if present; otherwise mark it as "skip" so sequential cursor doesn't overwrite it
-    for (const { p, origText, idx } of nonBlankBodyParagraphs) {
+    for (let idx = 0; idx < endBodyIdx; idx++) {
+      const p = allBodyParagraphs[idx];
+      const origText = getParagraphText(p).trim();
+      if (!origText) continue;
+
       const lower = origText.toLowerCase();
+
+      // Clinical Profile
       if (lower.startsWith('clinical profile:') || lower.startsWith('history:')) {
         if (clinicalProfile) {
           updateParagraphPreservingStyle(xmlDoc, p, `Clinical Profile: ${clinicalProfile}`, false);
         }
-        // Always mark as updated so the sequential walk skips this paragraph
-        updatedParagraphs.add(idx);
-        break;
-      }
-    }
-
-    // B. Sequential walk: for each template paragraph, find the best matching finding
-    let findingCursor = 0;
-    for (const { p, origText, idx } of nonBlankBodyParagraphs) {
-      if (updatedParagraphs.has(idx)) continue;
-      if (findingCursor >= bodyFindingLines.length) break;
-
-      const templateLower = origText.toLowerCase().trim();
-      const templateKey = origText.includes(':') ? normalizeKey(origText.split(':', 2)[0].trim()) : '';
-
-      // Strategy B1: Direct colon-key match at current or nearby finding position
-      if (templateKey && colonFindingsMap.has(templateKey)) {
-        const finding = colonFindingsMap.get(templateKey)!;
-        const isBold = finding.startsWith('BOLD::') || (finding.replace(/^BOLD::\s*/, '').trim() !== origText);
-        const cleanVal = finding.replace(/^BOLD::\s*/, '').trim();
-        updateParagraphPreservingStyle(xmlDoc, p, cleanVal, isBold);
-        usedFindings.add(finding);
-        updatedParagraphs.add(idx);
-        // Advance finding cursor past this finding
-        const fIdx = bodyFindingLines.indexOf(finding);
-        if (fIdx >= 0 && fIdx >= findingCursor) findingCursor = fIdx + 1;
         continue;
       }
 
-      // Strategy B2: Sequential positional match — take the finding at the cursor
-      const currentFinding = bodyFindingLines[findingCursor];
-      if (currentFinding && !usedFindings.has(currentFinding)) {
-        const cleanFinding = currentFinding.replace(/^BOLD::\s*/, '').trim();
-        const findingLower = cleanFinding.toLowerCase();
+      const sig = getSemanticSignature(origText);
 
-        // Check if this finding is a colon-keyed line that should go to a different template paragraph
-        const findingKey = cleanFinding.includes(':') ? normalizeKey(cleanFinding.split(':', 2)[0].trim()) : '';
-        const findingBelongsElsewhere = findingKey && findingKey.length >= 2 && !templateKey;
-
-        if (!findingBelongsElsewhere) {
-          // Accept sequential match
-          const isBold = currentFinding.startsWith('BOLD::');
-          updateParagraphPreservingStyle(xmlDoc, p, cleanFinding, isBold);
-          usedFindings.add(currentFinding);
-          updatedParagraphs.add(idx);
-          findingCursor++;
-          continue;
+      // If this is the negative disc baseline ("There is no evidence of any significant disc bulge...")
+      // and specific levels have disc bulges, clear this paragraph to avoid contradiction
+      if (sig === 'discs_negative_baseline') {
+        if (hasAbnormalDiscLevels) {
+          // Clear paragraph text cleanly
+          const tTags = p.getElementsByTagName('w:t');
+          for (let k = 0; k < tTags.length; k++) tTags[k].textContent = '';
         }
+        continue;
       }
 
-      // Strategy B3: Skip this finding if it's a colon-keyed line meant for a later template paragraph
-      // Look ahead in findings for a non-keyed match
-      for (let scanIdx = findingCursor; scanIdx < bodyFindingLines.length; scanIdx++) {
-        const scanFinding = bodyFindingLines[scanIdx];
-        if (usedFindings.has(scanFinding)) continue;
-        const cleanScan = scanFinding.replace(/^BOLD::\s*/, '').trim();
-        const scanKey = cleanScan.includes(':') ? normalizeKey(cleanScan.split(':', 2)[0].trim()) : '';
-        if (!scanKey || scanKey === templateKey) {
-          const isBold = scanFinding.startsWith('BOLD::');
-          updateParagraphPreservingStyle(xmlDoc, p, cleanScan, isBold);
-          usedFindings.add(scanFinding);
-          updatedParagraphs.add(idx);
-          if (scanIdx === findingCursor) findingCursor++;
-          break;
-        }
-      }
-    }
-
-    // C. Second pass: any colon-keyed findings that weren't consumed, match by key
-    for (const { p, origText, idx } of nonBlankBodyParagraphs) {
-      if (updatedParagraphs.has(idx)) continue;
-      if (origText.includes(':')) {
-        const prefix = origText.split(':', 2)[0].trim();
-        const key = normalizeKey(prefix);
-        if (key && colonFindingsMap.has(key)) {
-          const finding = colonFindingsMap.get(key)!;
-          if (!usedFindings.has(finding)) {
-            const isBold = finding.startsWith('BOLD::') || (finding.replace(/^BOLD::\s*/, '').trim() !== origText);
-            const cleanVal = finding.replace(/^BOLD::\s*/, '').trim();
-            updateParagraphPreservingStyle(xmlDoc, p, cleanVal, isBold);
-            usedFindings.add(finding);
-            updatedParagraphs.add(idx);
-          }
-        }
+      if (sig && findingsBySignature.has(sig)) {
+        const finding = findingsBySignature.get(sig)!;
+        const cleanVal = finding.replace(/^BOLD::\s*/, '').trim();
+        const isBold = finding.startsWith('BOLD::') || (cleanVal !== origText && !origText.endsWith(':') && idx >= 4);
+        updateParagraphPreservingStyle(xmlDoc, p, cleanVal, isBold);
+        usedFindings.add(finding);
+        continue;
       }
     }
 
     // ============================================================
-    // STEP 5: Insert truly unconsumed findings before IMPRESSION
+    // 4. Strict Insertion of Truly Unconsumed Findings Before IMPRESSION
     // ============================================================
     const unconsumedFindings: string[] = [];
     for (const f of bodyFindingLines) {
@@ -923,7 +880,6 @@ export async function mergeFindingsIntoDocx(
       const upper = cleanF.toUpperCase();
       const lower = cleanF.toLowerCase();
 
-      // Skip if it matches existing baseline text
       if (templateBaselineTexts.has(lower)) continue;
 
       const isIncidental = upper.startsWith('INCIDENTAL FINDINGS') ||
@@ -961,7 +917,7 @@ export async function mergeFindingsIntoDocx(
     }
 
     // ============================================================
-    // STEP 6: Update Impression section
+    // 5. Update Impression Section with Single Bullet Logic
     // ============================================================
     if (impressionHeaderIdx !== -1 && impressionItems.length > 0) {
       const postImpressionParagraphs: Element[] = [];
@@ -1007,7 +963,6 @@ export async function mergeFindingsIntoDocx(
       }
     }
 
-    // Serialize modified DOM back to XML
     const serializer = new XMLSerializer();
     const modifiedDocXml = serializer.serializeToString(xmlDoc);
 
