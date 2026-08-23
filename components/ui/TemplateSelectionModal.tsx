@@ -20,7 +20,7 @@ export interface SelectedTemplateData {
   lines: string[];
   docxBase64?: string;
   isCustom?: boolean;
-  images?: Array<{ data: string; mimeType: string }>;
+  skillPrompt?: string;
 }
 
 interface TemplateSelectionModalProps {
@@ -52,10 +52,14 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<string>('ALL');
   const [previewTemplate, setPreviewTemplate] = useState<SelectedTemplateData | null>(null);
+  const [previewPaneTab, setPreviewPaneTab] = useState<'LINES' | 'SKILL'>('LINES');
 
+  // Custom DOCX Upload state with optional skill prompt
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
+  const [pendingDocx, setPendingDocx] = useState<{ name: string; lines: string[]; docxBase64: string } | null>(null);
+  const [customDocxSkillPrompt, setCustomDocxSkillPrompt] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -63,6 +67,8 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
       setSearchQuery('');
       setUploadError(null);
       setUploadSuccess(null);
+      setPendingDocx(null);
+      setCustomDocxSkillPrompt('');
     } else {
       if (selectedTemplateId) {
         const found = RADIOLOGY_TEMPLATES_CATALOG.find(t => t.id === selectedTemplateId);
@@ -87,21 +93,21 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
       lines: t.lines,
       docxBase64: t.docxBase64,
       isCustom: false,
+      skillPrompt: (t as any).skillPrompt || '',
     }));
 
     if (customTemplates && customTemplates.length > 0) {
       customTemplates.forEach(ct => {
         const textLines = ct.text ? ct.text.split('\n').filter(Boolean) : [];
-        const hasImages = Boolean(ct.images && ct.images.length > 0);
         list.unshift({
           id: ct.id,
           name: ct.name,
           category: 'My Uploaded Templates',
           modality: (ct as any).modality || 'Custom',
-          lines: textLines.length > 0 ? textLines : (hasImages ? [`[Attached Screenshots: ${ct.images.length} Image(s)]`] : []),
+          lines: textLines.length > 0 ? textLines : [],
           docxBase64: (ct as any).docxBase64 || RADIOLOGY_TEMPLATES_CATALOG[0]?.docxBase64,
-          images: ct.images || [],
           isCustom: true,
+          skillPrompt: ct.customRules || (ct as any).skillPrompt || '',
         });
       });
     }
@@ -133,8 +139,9 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
       const catStr = (t.category || '').toLowerCase();
       const modStr = (t.modality || '').toLowerCase();
       const linesStr = Array.isArray(t.lines) ? t.lines.join(' ').toLowerCase() : '';
+      const skillStr = (t.skillPrompt || '').toLowerCase();
 
-      const fullHaystack = `${nameStr} ${codeStr} ${catStr} ${modStr} ${linesStr}`;
+      const fullHaystack = `${nameStr} ${codeStr} ${catStr} ${modStr} ${linesStr} ${skillStr}`;
 
       return queryParts.some(part => fullHaystack.includes(part));
     });
@@ -150,7 +157,7 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
     }
   }, [filteredTemplates]);
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChosen = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -162,47 +169,64 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
       const fileName = file.name;
       const isDocx = fileName.toLowerCase().endsWith('.docx');
 
-      if (isDocx) {
-        const { lines, docxBase64 } = await extractLinesFromDocxBlob(file);
-        if (lines.length === 0) {
-          throw new Error('Could not extract text lines from this Word document.');
-        }
-
-        const templateName = fileName.replace(/\.[^/.]+$/, '').replace(/[_]+/g, ' ');
-        const newTemplate: UserTemplate = {
-          id: `custom_docx_${Date.now()}`,
-          name: templateName,
-          text: lines.join('\n'),
-          images: [],
-          createdAt: Date.now(),
-          ...({ docxBase64, modality: 'Custom' } as any),
-        };
-
-        await saveUserTemplate(newTemplate);
-        if (onRefreshCustomTemplates) onRefreshCustomTemplates();
-
-        const customSelected: SelectedTemplateData = {
-          id: newTemplate.id,
-          name: newTemplate.name,
-          category: 'My Uploaded Templates',
-          modality: 'Custom',
-          lines: lines,
-          docxBase64: docxBase64,
-          isCustom: true,
-        };
-
-        setPreviewTemplate(customSelected);
-        setActiveTab('Custom');
-        setUploadSuccess(`Successfully uploaded Word template: "${templateName}"!`);
-      } else {
-        throw new Error('Please upload a .docx Word document file.');
+      if (!isDocx) {
+        throw new Error('Please select a valid Word (.docx) file.');
       }
+
+      const { lines, docxBase64 } = await extractLinesFromDocxBlob(file);
+      if (lines.length === 0) {
+        throw new Error('Could not extract text sections from this Word document.');
+      }
+
+      const templateName = fileName.replace(/\.[^/.]+$/, '').replace(/[_]+/g, ' ');
+      setPendingDocx({
+        name: templateName,
+        lines,
+        docxBase64: docxBase64 || '',
+      });
+      setCustomDocxSkillPrompt('');
     } catch (err: any) {
       console.error('Template upload error:', err);
-      setUploadError(err.message || 'Failed to process template file.');
+      setUploadError(err.message || 'Failed to parse .docx file.');
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleSavePendingDocx = async () => {
+    if (!pendingDocx) return;
+    try {
+      const newTemplate: UserTemplate = {
+        id: `custom_docx_${Date.now()}`,
+        name: pendingDocx.name,
+        text: pendingDocx.lines.join('\n'),
+        images: [],
+        createdAt: Date.now(),
+        customRules: customDocxSkillPrompt.trim() || undefined,
+        ...({ docxBase64: pendingDocx.docxBase64, modality: 'Custom' } as any),
+      };
+
+      await saveUserTemplate(newTemplate);
+      if (onRefreshCustomTemplates) onRefreshCustomTemplates();
+
+      const customSelected: SelectedTemplateData = {
+        id: newTemplate.id,
+        name: newTemplate.name,
+        category: 'My Uploaded Templates',
+        modality: 'Custom',
+        lines: pendingDocx.lines,
+        docxBase64: pendingDocx.docxBase64,
+        isCustom: true,
+        skillPrompt: customDocxSkillPrompt.trim() || undefined,
+      };
+
+      setPreviewTemplate(customSelected);
+      setActiveTab('Custom');
+      setPendingDocx(null);
+      setUploadSuccess(`Successfully uploaded and configured Word template: "${pendingDocx.name}"!`);
+    } catch (err: any) {
+      setUploadError('Failed to save custom template.');
     }
   };
 
@@ -218,7 +242,7 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
       case 'CT':
         return 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 border-blue-200 dark:border-blue-800';
       default:
-        return 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700';
+        return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800';
     }
   };
 
@@ -248,7 +272,7 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
                 Select Radiology Report Template
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {allTemplatesList.length} Verified Standard Report Formats (CT & MRI)
+                {allTemplatesList.length} Verified Standard Report Formats (CT & MRI) with Consultant Skills
               </p>
             </div>
           </div>
@@ -256,7 +280,7 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
             <input
               type="file"
               ref={fileInputRef}
-              onChange={handleFileUpload}
+              onChange={handleFileChosen}
               accept=".docx"
               className="hidden"
             />
@@ -267,7 +291,7 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
             >
               <UploadIcon className="w-3.5 h-3.5" />
-              {isUploading ? 'Parsing...' : 'Upload DOCX Template'}
+              {isUploading ? 'Parsing DOCX...' : '+ Upload Custom DOCX'}
             </button>
             <button
               type="button"
@@ -278,6 +302,55 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
             </button>
           </div>
         </header>
+
+        {/* Modal-level Pending DOCX Configuration Drawer */}
+        {pendingDocx && (
+          <div className="p-4 px-6 bg-blue-50/90 dark:bg-blue-950/60 border-b border-blue-200 dark:border-blue-800 space-y-3 animate-fade-in flex-shrink-0">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-blue-950 dark:text-blue-200 flex items-center gap-2">
+                <span>📄 Configure Uploaded Word Template:</span>
+                <span className="bg-blue-200 dark:bg-blue-900 text-blue-900 dark:text-blue-100 px-2 py-0.5 rounded font-mono text-[11px]">
+                  {pendingDocx.name}.docx ({pendingDocx.lines.length} sections)
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setPendingDocx(null)}
+                className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+              >
+                ✕ Cancel
+              </button>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Optional: Add Specialized Consultant Skill / Reporting Rules for this DOCX:
+              </label>
+              <textarea
+                rows={3}
+                value={customDocxSkillPrompt}
+                onChange={e => setCustomDocxSkillPrompt(e.target.value)}
+                placeholder="Optional: Enter specific line replacement rules, terminology preferences, or scoring criteria for this template. (Leave blank to use default consultant mirror rules)..."
+                className="w-full p-2.5 text-xs font-mono border border-blue-300 dark:border-blue-700 rounded-xl bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingDocx(null)}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+              >
+                Discard
+              </button>
+              <button
+                type="button"
+                onClick={handleSavePendingDocx}
+                className="px-4 py-1.5 text-xs font-bold rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-sm transition-all"
+              >
+                Save DOCX Template to Library
+              </button>
+            </div>
+          </div>
+        )}
 
         {uploadSuccess && (
           <div className="p-2.5 px-6 bg-emerald-50 dark:bg-emerald-950/40 border-b border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-300 font-semibold flex justify-between items-center">
@@ -341,17 +414,17 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
               { id: 'CT', label: `CT (${allTemplatesList.filter(t => t.category === 'CT' || t.modality === 'CT').length})` },
               { id: 'MRI', label: `MRI (${allTemplatesList.filter(t => t.category === 'MRI' || t.modality === 'MRI').length})` },
               ...(allTemplatesList.some(t => t.isCustom)
-                ? [{ id: 'Custom', label: `My Custom (${allTemplatesList.filter(t => t.isCustom).length})` }]
+                ? [{ id: 'Custom', label: `My Custom DOCX (${allTemplatesList.filter(t => t.isCustom).length})` }]
                 : []),
             ].map(tab => (
               <button
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
-                className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${
+                className={`px-3 py-1.5 rounded-xl transition-all ${
                   activeTab === tab.id
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm'
+                    : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
                 }`}
               >
                 {tab.label}
@@ -360,91 +433,66 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
           </div>
         </div>
 
-        {/* Split View */}
-        <div className="flex-1 grid grid-cols-1 md:grid-cols-12 min-h-0 overflow-hidden">
-          {/* Left Column: Template List */}
-          <div className="md:col-span-6 lg:col-span-5 border-r border-slate-200 dark:border-slate-800 overflow-y-auto p-3 space-y-1.5 max-h-[55vh] md:max-h-[60vh]">
-            <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 px-2 py-0.5">
-              Showing {filteredTemplates.length} template{filteredTemplates.length === 1 ? '' : 's'}
-            </div>
-
-            {filteredTemplates.length > 0 ? (
-              filteredTemplates.map(template => {
-                const isSelected = selectedTemplateId === template.id;
-                const isPreviewing = previewTemplate?.id === template.id;
-
+        {/* Modal Split Content: Left List, Right Preview */}
+        <div className="flex-1 grid grid-cols-1 md:grid-cols-12 overflow-hidden min-h-[360px]">
+          {/* Templates List */}
+          <div className="md:col-span-5 border-r border-slate-200 dark:border-slate-800 overflow-y-auto p-2 space-y-1 bg-slate-50/50 dark:bg-slate-950/30">
+            {filteredTemplates.length === 0 ? (
+              <div className="p-8 text-center text-slate-400 text-xs">
+                No report templates found matching "{searchQuery}".
+              </div>
+            ) : (
+              filteredTemplates.map(tmpl => {
+                const isSelected = previewTemplate?.id === tmpl.id;
                 return (
                   <div
-                    key={template.id}
-                    onClick={() => setPreviewTemplate(template)}
-                    onDoubleClick={() => handleSelect(template)}
-                    className={`p-3 rounded-xl cursor-pointer transition-all border ${
-                      isPreviewing
-                        ? 'bg-blue-50/80 dark:bg-blue-950/40 border-blue-400 dark:border-blue-600 shadow-sm'
-                        : isSelected
-                        ? 'bg-green-50/60 dark:bg-green-950/30 border-green-300 dark:border-green-700'
-                        : 'bg-white dark:bg-slate-900 border-slate-150 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                    key={tmpl.id}
+                    onClick={() => setPreviewTemplate(tmpl)}
+                    className={`p-3 rounded-xl cursor-pointer border transition-all ${
+                      isSelected
+                        ? 'bg-blue-50 dark:bg-blue-900/40 border-blue-300 dark:border-blue-600 shadow-sm'
+                        : 'bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
                     }`}
                   >
-                    <div className="flex justify-between items-start gap-1">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span
-                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${getModalityBadgeColor(
-                            template.modality
-                          )}`}
-                        >
-                          {template.modality}
-                        </span>
-                        {template.code && (
-                          <span className="text-[10px] font-mono font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
-                            {template.code}
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                          <span
+                            className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded border ${getModalityBadgeColor(
+                              tmpl.modality
+                            )}`}
+                          >
+                            {tmpl.modality}
                           </span>
-                        )}
-                        {isSelected && (
-                          <span className="text-[10px] font-bold text-green-700 dark:text-green-300 bg-green-100 dark:bg-green-900/50 px-1.5 py-0.5 rounded">
-                            Active
+                          <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 truncate">
+                            {tmpl.category}
                           </span>
-                        )}
+                          {tmpl.skillPrompt && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300">
+                              ⚡ Skill
+                            </span>
+                          )}
+                        </div>
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                          {tmpl.name}
+                        </h4>
+                        <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-1">
+                          {tmpl.lines?.length || 0} normal sections • {tmpl.code || tmpl.id}
+                        </p>
                       </div>
-                      <span className="text-[10px] text-slate-400 dark:text-slate-500 truncate max-w-[120px]">
-                        {template.category}
-                      </span>
-                    </div>
-
-                    <h4 className="font-bold text-sm text-slate-900 dark:text-slate-100 mt-1.5 leading-snug">
-                      {template.name}
-                    </h4>
-
-                    <div className="flex justify-between items-center mt-2">
-                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                        {template.lines.length} sections / lines
-                      </span>
-                      <button
-                        type="button"
-                        onClick={e => {
-                          e.stopPropagation();
-                          handleSelect(template);
-                        }}
-                        className="text-xs font-bold px-2.5 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm"
-                      >
-                        Select
-                      </button>
                     </div>
                   </div>
                 );
               })
-            ) : (
-              <div className="text-center py-12 text-slate-400 dark:text-slate-500 text-sm">
-                No templates matched your search query.
-              </div>
             )}
           </div>
 
-          {/* Right Column: Template Preview Pane */}
-          <div className="md:col-span-6 lg:col-span-7 bg-slate-50/70 dark:bg-slate-950/50 p-4 flex flex-col justify-between overflow-hidden max-h-[55vh] md:max-h-[60vh]">
+          {/* Right Preview Pane */}
+          <div className="md:col-span-7 bg-white dark:bg-slate-900 p-4 overflow-hidden flex flex-col">
             {previewTemplate ? (
-              <div className="flex flex-col h-full overflow-hidden">
-                <div className="pb-3 border-b border-slate-200 dark:border-slate-800 flex-shrink-0 flex justify-between items-start gap-2">
+              <div className="flex-1 flex flex-col overflow-hidden">
+                {/* Header info */}
+                <div className="pb-3 border-b border-slate-200 dark:border-slate-800 flex justify-between items-start gap-2 flex-shrink-0">
                   <div>
                     <div className="flex items-center gap-2">
                       <span
@@ -457,6 +505,11 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
                       <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
                         {previewTemplate.category}
                       </span>
+                      {previewTemplate.skillPrompt && (
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                          ⚡ Consultant Skill Active
+                        </span>
+                      )}
                     </div>
                     <h3 className="font-bold text-base text-slate-900 dark:text-white mt-1">
                       {previewTemplate.name}
@@ -471,64 +524,87 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
                   </button>
                 </div>
 
+                {/* Switcher Tabs for Preview Pane: Baseline Lines vs Consultant Skill */}
+                <div className="flex gap-2 pt-2.5 pb-2 border-b border-slate-100 dark:border-slate-800 flex-shrink-0 text-xs font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewPaneTab('LINES')}
+                    className={`px-3 py-1.5 rounded-lg transition-all ${
+                      previewPaneTab === 'LINES'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                    }`}
+                  >
+                    📄 Baseline Report Lines ({previewTemplate.lines?.length || 0})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewPaneTab('SKILL')}
+                    className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                      previewPaneTab === 'SKILL'
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                    }`}
+                  >
+                    <span>⚡ Consultant Skill Directives</span>
+                  </button>
+                </div>
+
                 {/* Preview Body */}
                 <div className="flex-1 overflow-y-auto py-3 space-y-2 pr-1 font-sans text-xs">
-                  {previewTemplate?.images && previewTemplate.images.length > 0 && (
-                    <div className="p-3 bg-slate-100 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
-                      <p className="font-bold text-xs text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                        <span>🖼️ Attached Template Screenshots ({previewTemplate.images.length}):</span>
-                      </p>
-                      <div className="flex gap-2 overflow-x-auto pb-1">
-                        {previewTemplate.images.map((img, idx) => (
-                          <div key={idx} className="relative flex-shrink-0 w-24 h-24 rounded-lg overflow-hidden border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
-                            <img
-                              src={`data:${img.mimeType};base64,${img.data}`}
-                              alt={`Template screenshot ${idx + 1}`}
-                              className="w-full h-full object-contain"
-                            />
-                            <span className="absolute bottom-0.5 left-0.5 bg-black/70 text-white text-[8px] px-1 rounded font-mono">
-                              #{idx + 1}
-                            </span>
-                          </div>
-                        ))}
+                  {previewPaneTab === 'SKILL' ? (
+                    <div className="p-3.5 bg-slate-50 dark:bg-slate-950/80 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2 font-mono text-[11px] leading-relaxed text-slate-800 dark:text-slate-200 whitespace-pre-wrap">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+                        <span className="font-bold text-emerald-600 dark:text-emerald-400 font-sans text-xs">
+                          Authoritative Consultant Mirror Rules (From Archive):
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-sans">
+                          Zero-Filler • AST Replacement
+                        </span>
                       </div>
+                      {previewTemplate.skillPrompt ? (
+                        previewTemplate.skillPrompt
+                      ) : (
+                        <p className="font-sans italic text-slate-400">
+                          Standard baseline consultant merging directives will be applied.
+                        </p>
+                      )}
                     </div>
-                  )}
-
-                  {previewTemplate && Array.isArray(previewTemplate.lines) && previewTemplate.lines.length > 0 ? (
-                    previewTemplate.lines.map((line, idx) => {
-                      if (!line || typeof line !== 'string') return null;
-                      const upper = line.toUpperCase();
-                      const lower = line.toLowerCase();
-                      const isTitle = idx === 0 && (upper.includes('SCAN') || upper.includes('MRI') || upper.includes('C.T.') || upper.includes('REPORT'));
-                      const isImpression = upper.startsWith('IMPRESSION');
-                      const isHeading = line.endsWith(':') && line.length <= 40;
-
-                      return (
-                        <div
-                          key={idx}
-                          className={`p-2 rounded-lg ${
-                            isTitle
-                              ? 'bg-blue-100/60 dark:bg-blue-900/30 font-bold text-center text-blue-950 dark:text-blue-200 border border-blue-200 dark:border-blue-800'
-                              : isImpression
-                              ? 'bg-amber-50 dark:bg-amber-950/30 border-l-4 border-amber-500 font-bold text-amber-950 dark:text-amber-200 mt-2'
-                              : isHeading
-                              ? 'font-bold text-slate-900 dark:text-slate-100 bg-slate-100/80 dark:bg-slate-800/60 border-l-2 border-blue-500 px-2.5 py-1'
-                              : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border border-slate-100 dark:border-slate-800/80 leading-relaxed'
-                          }`}
-                        >
-                          {line}
-                        </div>
-                      );
-                    })
                   ) : (
-                    <p className="text-slate-400 italic">No text content available.</p>
+                    previewTemplate && Array.isArray(previewTemplate.lines) && previewTemplate.lines.length > 0 ? (
+                      previewTemplate.lines.map((line, idx) => {
+                        if (!line || typeof line !== 'string') return null;
+                        const upper = line.toUpperCase();
+                        const isTitle = idx === 0 && (upper.includes('SCAN') || upper.includes('MRI') || upper.includes('C.T.') || upper.includes('REPORT'));
+                        const isImpression = upper.startsWith('IMPRESSION');
+                        const isHeading = line.endsWith(':') && line.length <= 40;
+
+                        return (
+                          <div
+                            key={idx}
+                            className={`p-2 rounded-lg ${
+                              isTitle
+                                ? 'bg-blue-100/60 dark:bg-blue-900/30 font-bold text-center text-blue-950 dark:text-blue-200 border border-blue-200 dark:border-blue-800'
+                                : isImpression
+                                ? 'bg-amber-50 dark:bg-amber-950/30 border-l-4 border-amber-500 font-bold text-amber-950 dark:text-amber-200 mt-2'
+                                : isHeading
+                                ? 'font-bold text-slate-900 dark:text-slate-100 bg-slate-100/80 dark:bg-slate-800/60 border-l-2 border-blue-500 px-2.5 py-1'
+                                : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border border-slate-100 dark:border-slate-800/80 leading-relaxed'
+                            }`}
+                          >
+                            {line}
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <p className="text-slate-400 italic">No text content available.</p>
+                    )
                   )}
                 </div>
 
                 <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-between items-center text-[11px] text-slate-500 flex-shrink-0">
                   <span>📄 Native Word DOCX Format</span>
-                  <span>✨ Exact Spacing & Typography</span>
+                  <span>✨ Consultant Skill Integrated</span>
                 </div>
               </div>
             ) : (

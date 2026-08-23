@@ -13,7 +13,16 @@ import TemplateSelectionModal, { SelectedTemplateData } from './ui/TemplateSelec
 import { mergeFindingsWithTemplate, mergeFindingsWithAst, modifyReportWithText, modifyReportWithAudio } from '../services/geminiService';
 import { mergeFindingsIntoDocx, downloadDocxBlob } from '../services/docxService';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
-import { getUserTemplates, UserTemplate, isTemplateSkillEnabled, setTemplateSkillEnabled, getTemplateCustomPrompt, setTemplateCustomPrompt, resetTemplateCustomPrompt } from '../services/templateStorage';
+import {
+  getUserTemplates,
+  UserTemplate,
+  saveUserTemplate,
+  isTemplateSkillEnabled,
+  setTemplateSkillEnabled,
+  getTemplateCustomPrompt,
+  setTemplateCustomPrompt,
+  resetTemplateCustomPrompt,
+} from '../services/templateStorage';
 
 interface MergeTemplateProcessorProps {
   selectedModel: string;
@@ -40,16 +49,20 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
 
   const [findingsInput, setFindingsInput] = useState<string>('');
   const [customNotes, setCustomNotes] = useState<string>('');
-  const [isSkillEnabled, setIsSkillEnabled] = useState<boolean>(() => isTemplateSkillEnabled());
-  const [isSkillDrawerOpen, setIsSkillDrawerOpen] = useState<boolean>(false);
-  const [customSkillPrompt, setCustomSkillPrompt] = useState<string>('');
-  const [skillSavedNotice, setSkillSavedNotice] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [mergedFindings, setMergedFindings] = useState<string[] | null>(null);
   const [autoDownloadDocx, setAutoDownloadDocx] = useState<boolean>(true);
   const [isCopied, setIsCopied] = useState<boolean>(false);
   const [downloadSuccess, setDownloadSuccess] = useState<string | null>(null);
+
+  // Skill System States
+  const [isSkillEnabled, setIsSkillEnabled] = useState<boolean>(() => isTemplateSkillEnabled());
+  const [isSkillExpanded, setIsSkillExpanded] = useState<boolean>(true);
+  const [customSkillPrompt, setCustomSkillPrompt] = useState<string>('');
+  const [skillNotice, setSkillNotice] = useState<string | null>(null);
+  const [isSavingCustomModalOpen, setIsSavingCustomModalOpen] = useState<boolean>(false);
+  const [customTemplateSaveName, setCustomTemplateSaveName] = useState<string>('');
 
   // Sync prop changes
   useEffect(() => {
@@ -60,10 +73,12 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
     }
   }, [selectedTemplateProp, initialTemplate]);
 
+  // Sync active template skill prompt
   useEffect(() => {
     if (activeTemplate?.id) {
-      const custom = getTemplateCustomPrompt(activeTemplate.id);
-      setCustomSkillPrompt(custom || activeTemplate.skillPrompt || '');
+      const storedOverride = getTemplateCustomPrompt(activeTemplate.id);
+      setCustomSkillPrompt(storedOverride || activeTemplate.skillPrompt || '');
+      setCustomTemplateSaveName(`${activeTemplate.name} (Custom Skill)`);
     } else {
       setCustomSkillPrompt('');
     }
@@ -95,6 +110,56 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
     }
     setIsTemplateModalOpen(false);
     setError(null);
+  };
+
+  const handleToggleSkill = (enabled: boolean) => {
+    setIsSkillEnabled(enabled);
+    setTemplateSkillEnabled(enabled);
+  };
+
+  const handleResetSkillToDefault = () => {
+    if (!activeTemplate?.id) return;
+    resetTemplateCustomPrompt(activeTemplate.id);
+    setCustomSkillPrompt(activeTemplate.skillPrompt || '');
+    setSkillNotice('Reset to archive default consultant directives.');
+    setTimeout(() => setSkillNotice(null), 3000);
+  };
+
+  const handleSaveAsCustomTemplate = async () => {
+    if (!activeTemplate) return;
+    const saveName = customTemplateSaveName.trim() || `${activeTemplate.name} (Custom)`;
+    try {
+      const newCustom: UserTemplate = {
+        id: `custom_skill_${Date.now()}`,
+        name: saveName,
+        text: activeTemplate.lines?.join('\n') || activeTemplate.name,
+        images: [],
+        createdAt: Date.now(),
+        customRules: customSkillPrompt.trim() || undefined,
+        ...({ docxBase64: activeTemplate.docxBase64, modality: activeTemplate.modality || activeTemplate.category } as any),
+      };
+
+      await saveUserTemplate(newCustom);
+      await refreshCustomTemplates();
+
+      const newActive: SelectedTemplateData = {
+        id: newCustom.id,
+        name: newCustom.name,
+        category: 'My Uploaded Templates',
+        modality: (newCustom as any).modality || activeTemplate.modality,
+        lines: activeTemplate.lines || [],
+        docxBase64: activeTemplate.docxBase64,
+        isCustom: true,
+        skillPrompt: customSkillPrompt.trim() || undefined,
+      };
+
+      setActiveTemplate(newActive);
+      setIsSavingCustomModalOpen(false);
+      setSkillNotice(`✓ Saved as custom template "${saveName}" in your library!`);
+      setTimeout(() => setSkillNotice(null), 4000);
+    } catch (err: any) {
+      setSkillNotice(`Failed to save template: ${err.message || err}`);
+    }
   };
 
   // Edit / Refine state
@@ -203,7 +268,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
       setModificationText('');
       setModificationState('idle');
     } catch (err: any) {
-      setModificationError(err?.message || 'Failed to apply change.');
+      setModificationError(err?.message || 'Failed to apply text change.');
       setModificationState('idle');
     }
   };
@@ -240,27 +305,6 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
     }
   };
 
-
-  const handleToggleSkill = (enabled: boolean) => {
-    setIsSkillEnabled(enabled);
-    setTemplateSkillEnabled(enabled);
-  };
-
-  const handleSaveSkillPrompt = () => {
-    if (!activeTemplate?.id) return;
-    setTemplateCustomPrompt(activeTemplate.id, customSkillPrompt);
-    setSkillSavedNotice('Skill prompt saved for this template!');
-    setTimeout(() => setSkillSavedNotice(null), 3000);
-  };
-
-  const handleResetSkillPrompt = () => {
-    if (!activeTemplate?.id) return;
-    resetTemplateCustomPrompt(activeTemplate.id);
-    setCustomSkillPrompt(activeTemplate.skillPrompt || '');
-    setSkillSavedNotice('Reset to archive default skill prompt.');
-    setTimeout(() => setSkillSavedNotice(null), 3000);
-  };
-
   const handleSaveEdit = (idx: number) => {
     if (!mergedFindings) return;
     const updated = [...mergedFindings];
@@ -286,6 +330,48 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
         onRefreshCustomTemplates={refreshCustomTemplates}
       />
 
+      {/* Save as Custom Template Sub-Modal */}
+      {isSavingCustomModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-md w-full border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4">
+            <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <span>💾 Save Modified Skill as New Custom Template</span>
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              This will save this template structure (.docx) along with your customized consultant skill prompt permanently to your personal template library.
+            </p>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Custom Template Name:
+              </label>
+              <input
+                type="text"
+                value={customTemplateSaveName}
+                onChange={e => setCustomTemplateSaveName(e.target.value)}
+                placeholder="e.g. Brain CT - Institutional Format"
+                className="w-full p-2.5 text-xs font-semibold border border-slate-300 dark:border-slate-600 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsSavingCustomModalOpen(false)}
+                className="px-3.5 py-2 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveAsCustomTemplate}
+                className="px-4 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-all"
+              >
+                Save to My Templates
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-800 text-white p-6 rounded-2xl shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="space-y-1">
@@ -293,13 +379,13 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
             <span className="bg-white/20 text-white text-[11px] font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
               Direct Merge Mode
             </span>
-            <span className="text-xs text-blue-200">72 Curated CT & MRI Formats</span>
+            <span className="text-xs text-blue-200">72 Curated CT & MRI Formats with Consultant Skills</span>
           </div>
           <h2 className="text-xl sm:text-2xl font-black tracking-tight">
             Merge Findings into Report Template
           </h2>
           <p className="text-xs sm:text-sm text-blue-100 max-w-xl">
-            Have your findings as text? Select your preferred CT or MRI template and let AI seamlessly slot findings into the standard report structure with automatic Word (.docx) export.
+            Select any standard CT/MRI template or your custom DOCX. The AI applies specialized consultant directives, translates vague dictation, and generates your Word report.
           </p>
         </div>
 
@@ -328,14 +414,19 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
                 {activeTemplate.category || activeTemplate.modality}
               </span>
             )}
+            {activeTemplate?.skillPrompt && (
+              <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                ⚡ Consultant Skill Attached
+              </span>
+            )}
           </div>
           <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
             {activeTemplate ? activeTemplate.name : 'No Template Selected (Click to Choose)'}
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             {activeTemplate
-              ? `${activeTemplate.lines?.length || 0} standard normal sections • Times New Roman 12pt format`
-              : 'Please choose a CT, MRI, or custom template to merge your findings.'}
+              ? `${activeTemplate.lines?.length || 0} standard normal sections • Native DOCX format`
+              : 'Please choose a CT, MRI, or custom DOCX template to merge your findings.'}
           </p>
         </div>
 
@@ -352,16 +443,9 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
         </button>
       </div>
 
-      {downloadSuccess && (
-        <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 rounded-xl text-xs text-emerald-800 dark:text-emerald-200 font-bold flex items-center gap-2 animate-fade-in">
-          <span>✓</span>
-          <span>{downloadSuccess}</span>
-        </div>
-      )}
-
-            {/* Consultant Skill Toggle & Customizer Banner */}
+      {/* DEDICATED CONSULTANT SKILL VIEWER & INLINE CUSTOMIZER */}
       {activeTemplate && (
-        <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm transition-all space-y-3">
+        <div className="bg-white dark:bg-slate-800 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-3">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <label className="relative inline-flex items-center cursor-pointer">
@@ -383,69 +467,78 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
                     {isSkillEnabled ? '⚡ Consultant Skill Active' : 'Consultant Skill Disabled'}
                   </span>
                   <span className="text-[11px] text-slate-400 dark:text-slate-500">
-                    {isSkillEnabled ? '100% Archive-Derived Directives' : 'Standard Template Baseline'}
+                    {isSkillEnabled ? 'Zero-Filler • AST Replacement • Archive-Derived' : 'Standard Baseline'}
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   {isSkillEnabled
-                    ? 'AI enforces zero-filler consultant reporting, AST line replacement, and RADS scoring.'
-                    : 'Standard template replacement without specialized consultant skill prompt.'}
+                    ? 'Applies specialized consultant directives, vague dictation translation, and RADS scoring for this template.'
+                    : 'Standard template merge without specialized consultant skill prompt.'}
                 </p>
               </div>
             </div>
 
             <button
               type="button"
-              onClick={() => setIsSkillDrawerOpen(!isSkillDrawerOpen)}
+              onClick={() => setIsSkillExpanded(!isSkillExpanded)}
               className="text-xs font-bold px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors flex items-center gap-1.5 whitespace-nowrap"
             >
-              <span>{isSkillDrawerOpen ? '▲ Hide Prompt' : '⚙️ View / Edit Skill Prompt'}</span>
+              <span>{isSkillExpanded ? '▲ Hide Skill Prompt' : '⚙️ View / Edit Skill Prompt'}</span>
             </button>
           </div>
 
-          {/* Collapsible Skill Prompt Drawer */}
-          {isSkillDrawerOpen && (
-            <div className="pt-3 border-t border-slate-100 dark:border-slate-700 space-y-3 animate-fade-in">
+          {/* In-Line Skill Prompt Editor */}
+          {isSkillExpanded && (
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-700 space-y-2.5 animate-fade-in">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                  Specialized Prompt for <span className="text-blue-600 dark:text-blue-400">{activeTemplate.name}</span>:
+                  Active Consultant Directives for <span className="text-blue-600 dark:text-blue-400">{activeTemplate.name}</span>:
                 </span>
-                {skillSavedNotice && (
+                {skillNotice && (
                   <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 animate-pulse">
-                    ✓ {skillSavedNotice}
+                    {skillNotice}
                   </span>
                 )}
               </div>
+
               <textarea
-                rows={6}
+                rows={7}
                 value={customSkillPrompt}
                 onChange={e => setCustomSkillPrompt(e.target.value)}
-                placeholder="Enter or modify consultant instructions for this specific template..."
+                placeholder="Enter or modify consultant instructions, line replacements, and scoring rules for this template..."
                 className="w-full p-3 text-xs font-mono border border-slate-300 dark:border-slate-600 rounded-xl bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none leading-relaxed"
               />
-              <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
-                <span className="text-[11px] text-slate-400">
-                  Edits are saved locally for this template and persist across sessions.
+
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs pt-1">
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  💡 <em>Changes here apply immediately to your current dictation session.</em>
                 </span>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <button
                     type="button"
-                    onClick={handleResetSkillPrompt}
+                    onClick={handleResetSkillToDefault}
                     className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 font-semibold"
                   >
-                    Reset to Default
+                    ↺ Reset to Default
                   </button>
                   <button
                     type="button"
-                    onClick={handleSaveSkillPrompt}
-                    className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-sm"
+                    onClick={() => setIsSavingCustomModalOpen(true)}
+                    className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-sm transition-all flex items-center gap-1"
                   >
-                    Save Custom Prompt
+                    <span>💾 Save as Custom Template</span>
                   </button>
                 </div>
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {downloadSuccess && (
+        <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 rounded-xl text-xs text-emerald-800 dark:text-emerald-200 font-bold flex items-center gap-2 animate-fade-in">
+          <span>✓</span>
+          <span>{downloadSuccess}</span>
         </div>
       )}
 
@@ -538,16 +631,6 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
-                <select
-                  value={selectedModel}
-                  onChange={e => setSelectedModel(e.target.value)}
-                  className="text-xs py-1 px-2 rounded-lg border border-red-300 dark:border-red-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-white focus:outline-none"
-                >
-                  <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                  <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
-                  <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
-                </select>
                 <button
                   type="button"
                   onClick={handleMerge}
@@ -579,106 +662,62 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
           </button>
         </div>
       ) : (
-        /* Results Screen */
-        <div className="bg-white dark:bg-slate-800 p-5 sm:p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xl space-y-5">
-          {/* Top Actions */}
-          <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-200 dark:border-slate-700">
+        /* Results Section */
+        <div className="bg-white dark:bg-slate-800 p-5 sm:p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-5">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-4 border-b border-slate-100 dark:border-slate-700">
             <div>
-              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 rounded-full border border-emerald-200 dark:border-emerald-800">
-                ✓ Report Successfully Merged & Standardized
+              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
+                ✓ Report Generated Successfully
               </span>
-              <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white mt-1">
-                {activeTemplate?.name || 'Standardized Radiology Report'}
+              <h3 className="text-lg font-black text-slate-900 dark:text-white">
+                {activeTemplate?.name || 'Radiology Report'}
               </h3>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <button
+                type="button"
                 onClick={handleCopyAll}
-                className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold text-xs transition-all flex items-center gap-1.5 shadow-sm"
+                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
               >
                 <CopyIcon className="w-4 h-4" />
-                <span>{isCopied ? '✓ Copied!' : 'Copy All'}</span>
+                <span>{isCopied ? 'Copied!' : 'Copy Report'}</span>
               </button>
-
               <button
+                type="button"
                 onClick={handleDownloadDocx}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5"
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-md"
               >
                 <DownloadIcon className="w-4 h-4" />
                 <span>Download Word (.docx)</span>
               </button>
-
               <button
-                onClick={() => {
-                  setMergedFindings(null);
-                  setFindingsInput('');
-                }}
-                className="px-3 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 font-bold text-xs transition-all"
-                title="Start another merge"
+                type="button"
+                onClick={() => setMergedFindings(null)}
+                className="px-3.5 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-all"
               >
-                New Merge
+                New Dictation
               </button>
             </div>
           </div>
 
-          {/* Findings Display List */}
-          <div className="space-y-2 font-sans text-xs sm:text-sm">
-            {mergedFindings.map((finding, idx) => {
-              const clean = finding.replace(/^BOLD::/g, '').trim();
-              const isBold = finding.startsWith('BOLD::');
-              const isTitle = idx === 0 && (clean.toUpperCase().includes('SCAN') || clean.toUpperCase().includes('MRI') || clean.toUpperCase().includes('C.T.') || clean.toUpperCase().includes('REPORT'));
+          {/* Render Findings */}
+          <div className="space-y-2 bg-slate-50 dark:bg-slate-900/60 p-4 rounded-xl border border-slate-200 dark:border-slate-700 font-sans text-xs sm:text-sm">
+            {mergedFindings.map((line, idx) => {
+              const isBold = line.startsWith('BOLD::');
+              const clean = line.replace('BOLD::', '');
               const isImpression = clean.startsWith('IMPRESSION:');
-              const isProfile = clean.startsWith('*Clinical Profile:') || clean.startsWith('*') && clean.endsWith('*');
-
-              if (editingIndex === idx) {
-                return (
-                  <div key={idx} className="p-3 bg-blue-50 dark:bg-slate-900 border border-blue-400 rounded-xl space-y-2">
-                    <textarea
-                      value={editingText}
-                      onChange={e => setEditingText(e.target.value)}
-                      rows={3}
-                      className="w-full p-2 text-xs border rounded-lg dark:bg-slate-800 dark:text-white"
-                    />
-                    <div className="flex justify-end gap-2">
-                      <button
-                        onClick={() => setEditingIndex(null)}
-                        className="px-3 py-1 text-xs font-semibold rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={() => handleSaveEdit(idx)}
-                        className="px-3 py-1 text-xs font-bold rounded bg-blue-600 text-white"
-                      >
-                        Save
-                      </button>
-                    </div>
-                  </div>
-                );
-              }
 
               if (isImpression) {
                 const parts = clean.split('###').map(p => p.trim()).filter(Boolean);
                 return (
-                  <div key={idx} className="group relative p-3 bg-amber-50 dark:bg-amber-950/30 border-l-4 border-amber-500 rounded-r-xl space-y-1">
-                    <h4 className="font-black text-amber-950 dark:text-amber-200 underline uppercase tracking-wide">
-                      {parts[0]}
-                    </h4>
-                    <ul className="list-disc list-inside space-y-0.5 text-amber-900 dark:text-amber-300 font-bold pl-2">
-                      {parts.slice(1).map((pt, pIdx) => (
-                        <li key={pIdx}>{pt}</li>
+                  <div key={idx} className="p-3 bg-amber-50 dark:bg-amber-950/40 border-l-4 border-amber-500 rounded-r-lg font-bold text-amber-950 dark:text-amber-200 mt-4 space-y-1">
+                    <div className="text-xs uppercase tracking-wider">{parts[0]}</div>
+                    <ul className="list-disc list-inside space-y-0.5 text-xs font-normal">
+                      {parts.slice(1).map((p, pIdx) => (
+                        <li key={pIdx} className="font-semibold">{p}</li>
                       ))}
                     </ul>
-                    <div className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
-                      <button
-                        onClick={() => { setEditingIndex(idx); setEditingText(finding); }}
-                        className="p-1 rounded hover:bg-amber-200 dark:hover:bg-amber-900 text-amber-800 dark:text-amber-300"
-                        title="Edit impression"
-                      >
-                        <PencilIcon className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
                   </div>
                 );
               }
@@ -686,29 +725,47 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
               return (
                 <div
                   key={idx}
-                  className={`group relative p-2.5 rounded-xl border transition-all ${
-                    isTitle
-                      ? 'bg-blue-100/60 dark:bg-blue-900/30 border-blue-300 dark:border-blue-800 font-black text-center text-blue-950 dark:text-blue-200'
-                      : isProfile
-                      ? 'bg-purple-50 dark:bg-purple-950/30 border-purple-200 dark:border-purple-800 italic text-purple-900 dark:text-purple-300'
-                      : isBold
-                      ? 'bg-blue-50/70 dark:bg-blue-950/40 border-l-4 border-blue-600 dark:border-blue-500 font-bold text-slate-900 dark:text-white'
-                      : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 text-slate-800 dark:text-slate-200'
+                  className={`p-2 rounded-lg transition-all flex justify-between items-start gap-2 ${
+                    isBold
+                      ? 'bg-blue-50 dark:bg-blue-950/50 border-l-4 border-blue-600 font-bold text-slate-900 dark:text-white'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-100 dark:border-slate-700/60'
                   }`}
                 >
-                  <p className="leading-relaxed pr-12">{clean}</p>
-                  <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                  {editingIndex === idx ? (
+                    <div className="flex-1 flex gap-2">
+                      <input
+                        type="text"
+                        value={editingText}
+                        onChange={e => setEditingText(e.target.value)}
+                        className="flex-1 p-1 text-xs border border-blue-400 rounded bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                        autoFocus
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleSaveEdit(idx)}
+                        className="px-2 py-1 bg-emerald-600 text-white rounded text-xs font-bold"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="flex-1 leading-relaxed">{clean}</span>
+                  )}
+                  <div className="flex items-center gap-1 opacity-60 hover:opacity-100 transition-opacity">
                     <button
-                      onClick={() => { setEditingIndex(idx); setEditingText(finding); }}
-                      className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400"
-                      title="Edit this line"
+                      type="button"
+                      onClick={() => {
+                        setEditingIndex(idx);
+                        setEditingText(clean);
+                      }}
+                      className="p-1 text-slate-400 hover:text-blue-600"
                     >
                       <PencilIcon className="w-3.5 h-3.5" />
                     </button>
                     <button
+                      type="button"
                       onClick={() => handleDeleteRow(idx)}
-                      className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-950/40 text-red-600 dark:text-red-400"
-                      title="Delete this line"
+                      className="p-1 text-slate-400 hover:text-red-600"
                     >
                       <TrashIcon className="w-3.5 h-3.5" />
                     </button>
@@ -718,74 +775,41 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
             })}
           </div>
 
-          {/* Dictate / Type Report Changes in Results */}
-          <div className="p-4 border rounded-xl bg-slate-50 dark:bg-slate-800/80 dark:border-slate-700 shadow-sm space-y-3">
-            <div className="flex items-start sm:items-center gap-3 flex-col sm:flex-row">
-              <MicScribbleIcon className="w-7 h-7 text-blue-600 dark:text-blue-400 flex-shrink-0" />
-              <div className="flex-grow">
-                <h4 className="font-bold text-slate-800 dark:text-slate-100 text-sm">
-                  Refine Merged Report (Voice or Typed Changes)
-                </h4>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Dictate or type any modifications to update this report instantly.
-                </p>
-              </div>
-              <div className="sm:ml-4 flex-shrink-0">
-                {modificationState === 'idle' && (
-                  <button
-                    onClick={handleStartVoiceModification}
-                    className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-sm flex items-center gap-1"
-                  >
-                    <MicIcon className="w-3.5 h-3.5" />
-                    <span>Dictate Changes</span>
-                  </button>
-                )}
-                {modificationState === 'recording' && (
-                  <div className="flex items-center gap-2 bg-red-100 dark:bg-red-900/30 px-3 py-1 rounded-xl">
-                    <span className="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
-                    <span className="text-xs font-bold text-red-700 dark:text-red-300">Listening...</span>
-                    <button
-                      onClick={handleStopVoiceModification}
-                      className="px-2 py-0.5 bg-red-600 text-white rounded font-bold text-xs"
-                    >
-                      Stop
-                    </button>
-                  </div>
-                )}
-                {modificationState === 'processing' && (
-                  <div className="flex items-center gap-1.5 text-xs text-blue-600 font-bold">
-                    <Spinner className="w-3.5 h-3.5" />
-                    <span>Applying...</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex items-center gap-2">
+          {/* Modification by voice or text */}
+          <div className="pt-4 border-t border-slate-100 dark:border-slate-700 space-y-2">
+            <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+              Refine or Correct this Report (Voice or Text):
+            </label>
+            <div className="flex gap-2">
               <input
                 type="text"
                 value={modificationText}
                 onChange={e => setModificationText(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && modificationText.trim() && modificationState !== 'processing') {
-                    e.preventDefault();
-                    handleApplyTextModification();
-                  }
-                }}
-                placeholder="Or type changes here (e.g. 'remove measurements', 'add follow-up in 3 months')..."
-                className="flex-1 p-2 text-xs border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                placeholder="e.g. 'Change right MCA to left MCA' or 'Add mild sinus disease'..."
+                className="flex-1 p-2.5 text-xs border border-slate-300 dark:border-slate-600 rounded-xl bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               <button
+                type="button"
                 onClick={handleApplyTextModification}
-                disabled={!modificationText.trim() || modificationState === 'processing'}
-                className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold disabled:opacity-40 flex items-center gap-1"
+                disabled={modificationState === 'processing' || !modificationText.trim()}
+                className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl font-bold text-xs shadow transition-all flex items-center gap-1"
               >
-                <SendIcon className="w-3.5 h-3.5" />
-                <span>Send</span>
+                {modificationState === 'processing' ? <Spinner className="w-4 h-4" /> : <SendIcon className="w-4 h-4" />}
+                <span>Apply</span>
+              </button>
+              <button
+                type="button"
+                onClick={modificationState === 'recording' ? handleStopVoiceModification : handleStartVoiceModification}
+                className={`p-2.5 rounded-xl text-white font-bold transition-all shadow ${
+                  modificationState === 'recording' ? 'bg-red-600 animate-pulse' : 'bg-slate-700 hover:bg-slate-800'
+                }`}
+                title={modificationState === 'recording' ? 'Stop Recording' : 'Voice Modification'}
+              >
+                {modificationState === 'recording' ? <StopIcon className="w-4 h-4" /> : <MicIcon className="w-4 h-4" />}
               </button>
             </div>
             {modificationError && (
-              <p className="text-red-500 text-xs font-semibold">{modificationError}</p>
+              <p className="text-xs text-red-500 font-semibold">{modificationError}</p>
             )}
           </div>
         </div>

@@ -8,6 +8,7 @@ export interface RadiologyDocxTemplate {
   code?: string;
   lines: string[];
   docxBase64: string;
+  skillPrompt?: string;
   source?: string;
   sourceType?: 'mri_proto' | 'ris' | 'procedure' | 'custom' | 'doppler';
   fileName?: string;
