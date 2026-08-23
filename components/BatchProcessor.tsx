@@ -62,6 +62,7 @@ interface BatchProcessorProps {
     selectedModel: string;
     isErrorCheckEnabled: boolean;
     selectedTemplate?: SelectedTemplateData | null;
+    autoDownloadDocx?: boolean;
 }
 
 const BATCH_MODE_STORAGE_KEY = 'radiologyDictationBatchMode';
@@ -107,7 +108,7 @@ const getCleanMimeType = (blob: Blob): string => {
     return mimeType.split(';')[0];
 };
 
-const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, isErrorCheckEnabled, selectedTemplate = null }) => {
+const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, isErrorCheckEnabled, selectedTemplate = null, autoDownloadDocx = true }) => {
     const [batches, setBatches] = useState<Batch[]>([]);
     const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
     const {
