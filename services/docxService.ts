@@ -934,16 +934,28 @@ export async function mergeFindingsIntoDocx(
         }
       }
 
+      const hasNativeBullet = (p: Element): boolean => {
+        const pPr = p.getElementsByTagName('w:pPr')[0];
+        if (!pPr) return false;
+        return pPr.getElementsByTagName('w:numPr').length > 0;
+      };
+
       for (let i = 0; i < impressionItems.length; i++) {
-        const cleanBullet = `• ${impressionItems[i]}`;
+        const rawBullet = impressionItems[i];
+        const cleanBulletText = rawBullet.replace(/^[•\-\*\d\.\s\u2022\u25cf]+/, '').trim();
+        
         if (i < postImpressionParagraphs.length) {
           const p = postImpressionParagraphs[i];
-          updateParagraphSurgical(xmlDoc, p, cleanBullet, true);
+          const isNative = hasNativeBullet(p);
+          const textToInsert = isNative ? cleanBulletText : `•  ${cleanBulletText}`;
+          updateParagraphSurgical(xmlDoc, p, textToInsert, true);
         } else {
           // Insert new bullet paragraph
           const lastSlot = postImpressionParagraphs[postImpressionParagraphs.length - 1] || directBodyParagraphs[impressionHeaderIdx];
           const newP = lastSlot.cloneNode(true) as Element;
-          updateParagraphSurgical(xmlDoc, newP, cleanBullet, true);
+          const isNative = hasNativeBullet(newP);
+          const textToInsert = isNative ? cleanBulletText : `•  ${cleanBulletText}`;
+          updateParagraphSurgical(xmlDoc, newP, textToInsert, true);
           lastSlot.parentNode?.insertBefore(newP, lastSlot.nextSibling);
           postImpressionParagraphs.push(newP);
         }
@@ -985,16 +997,23 @@ export async function mergeFindingsIntoDocx(
  * Helper to download Blob as file in browser
  */
 export function downloadDocxBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename.endsWith('.docx') ? filename : `${filename}.docx`;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => {
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, 100);
+  try {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = filename.endsWith('.docx') ? filename : `${filename}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      if (a.parentNode) {
+        a.parentNode.removeChild(a);
+      }
+      URL.revokeObjectURL(url);
+    }, 2500);
+  } catch (err) {
+    console.error('downloadDocxBlob failed:', err);
+  }
 }
 
 /**
