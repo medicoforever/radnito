@@ -181,18 +181,6 @@ export async function buildDocumentAstFromDocx(docxBase64: string): Promise<{
   };
 }
 
-export interface AstMutation {
-  node_id: string;
-  new_text: string;
-  bold?: boolean;
-}
-
-export interface AstInsertion {
-  insert_after_node_id?: string;
-  text: string;
-  bold?: boolean;
-}
-
 /**
  * Applies targeted AST mutations surgically in-place to the XML DOM without altering any style properties.
  */
@@ -204,8 +192,7 @@ export async function applyAstMutationsToDocx(
   mutations: AstMutation[],
   impressionItems?: string[],
   impressionSlotIds: string[] = [],
-  impressionHeaderId?: string,
-  insertedFindings?: (string | AstInsertion)[]
+  impressionHeaderId?: string
 ): Promise<Blob> {
   const ensureBoldOnRun = (run: Element, makeBold: boolean) => {
     let rPr = run.getElementsByTagName('w:rPr')[0];
@@ -337,68 +324,6 @@ export async function applyAstMutationsToDocx(
     }
   }
 
-  // 1.5. Insert brand-new / incidental findings at their exact anchor positions or before IMPRESSION:
-  if (insertedFindings && insertedFindings.length > 0) {
-    let headerEl: Element | null = null;
-    if (impressionHeaderId && pMap.has(impressionHeaderId)) {
-      headerEl = pMap.get(impressionHeaderId)!;
-    }
-    if (!headerEl) {
-      pMap.forEach((el) => {
-        if (!headerEl) {
-          const t = getElementText(el).trim().toUpperCase();
-          if (t === 'IMPRESSION:' || t.startsWith('IMPRESSION:') || t === 'CONCLUSION:' || t.startsWith('CONCLUSION:')) {
-            headerEl = el;
-          }
-        }
-      });
-    }
-
-    for (const item of insertedFindings) {
-      let rawText = '';
-      let isBold = false;
-      let anchorNodeId: string | undefined;
-
-      if (typeof item === 'string') {
-        isBold = item.startsWith('BOLD::') || item.includes('BOLD::');
-        rawText = item.replace(/^BOLD::\s*/, '').trim();
-      } else if (item && typeof item === 'object') {
-        rawText = (item.text || '').replace(/^BOLD::\s*/, '').trim();
-        isBold = !!(item.bold || (item.text && item.text.startsWith('BOLD::')));
-        anchorNodeId = item.insert_after_node_id;
-      }
-
-      if (!rawText) continue;
-
-      let anchorEl: Element | null = null;
-      if (anchorNodeId && pMap.has(anchorNodeId)) {
-        anchorEl = pMap.get(anchorNodeId)!;
-      }
-
-      const cloneSource = anchorEl || headerEl;
-      if (!cloneSource) continue;
-
-      const newP = cloneSource.cloneNode(true) as Element;
-      const rPrTags = newP.getElementsByTagName('w:rPr');
-      for (let r_i = 0; r_i < rPrTags.length; r_i++) {
-        const u = rPrTags[r_i].getElementsByTagName('w:u')[0];
-        if (u) rPrTags[r_i].removeChild(u);
-        if (!isBold) {
-          const b = rPrTags[r_i].getElementsByTagName('w:b')[0];
-          if (b) rPrTags[r_i].removeChild(b);
-        }
-      }
-
-      applyTextToParagraphRuns(newP, rawText, isBold);
-
-      if (anchorEl && anchorEl.parentNode) {
-        anchorEl.parentNode.insertBefore(newP, anchorEl.nextSibling);
-      } else if (headerEl && headerEl.parentNode) {
-        headerEl.parentNode.insertBefore(newP, headerEl);
-      }
-    }
-  }
-
   // 2. Apply Impression Bullets
   if (impressionItems && impressionItems.length > 0) {
     let headerEl: Element | null = null;
@@ -500,10 +425,7 @@ export async function applyAstMutationsToDocx(
       let lastInserted = lastSlot;
 
       for (let i = 0; i < impressionItems.length; i++) {
-        const cleanBullet = impressionItems[i]
-          .replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '')
-          .replace(/[\s\|]+$/g, '')
-          .trim();
+        const cleanBullet = impressionItems[i].replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
         if (i < slotElements.length) {
           const p = slotElements[i];
           formatBulletParagraph(p, cleanBullet);
@@ -530,10 +452,7 @@ export async function applyAstMutationsToDocx(
       // Template has IMPRESSION: header but 0 pre-existing slot paragraphs
       let lastInserted: Element = headerEl;
       for (let i = 0; i < impressionItems.length; i++) {
-        const cleanBullet = impressionItems[i]
-          .replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '')
-          .replace(/[\s\|]+$/g, '')
-          .trim();
+        const cleanBullet = impressionItems[i].replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
         const newP = (headerEl as Element).cloneNode(true) as Element;
         
         // Remove bold tag or underline from bullet runs if header was bold/underlined
@@ -718,8 +637,6 @@ export async function mergeFindingsIntoDocxWithAstEngine(
 
   // B. Process Paragraph Findings against paragraph nodes (NEVER table cells)
   const paragraphNodes = ast.filter(n => n.type !== 'table_cell' && n.type !== 'impression_header' && n.type !== 'impression_item' && n.type !== 'title');
-  let lastMatchedNodeId: string | undefined;
-  const insertions: AstInsertion[] = [];
 
   // Pass 1: Exact / Colon-Key / Word Overlap Matching
   for (const finding of paragraphFindings) {
@@ -777,18 +694,36 @@ export async function mergeFindingsIntoDocxWithAstEngine(
 
     if (bestNodeId) {
       usedNodeIds.add(bestNodeId);
-      lastMatchedNodeId = bestNodeId;
       mutations.push({
         node_id: bestNodeId,
         new_text: finding,
         bold: isBold
       });
-    } else {
-      insertions.push({
-        insert_after_node_id: lastMatchedNodeId,
-        text: finding,
-        bold: isBold
-      });
+    }
+  }
+
+  // Pass 2: Positional sequential alignment for unmatched paragraph findings
+  const unmatchedFindings = paragraphFindings.filter((_, idx) => {
+    return !mutations.some(m => m.new_text === paragraphFindings[idx]);
+  });
+
+  for (const item of unmatchedFindings) {
+    const isHeading = item.replace(/^BOLD::\s*/, '').trim().endsWith(':');
+    for (const node of paragraphNodes) {
+      if (!usedNodeIds.has(node.id)) {
+        const isNodeHeading = node.type === 'section_heading' || node.current_text.trim().endsWith(':');
+        // Do not place narrative findings into section headings in sequential alignment
+        if (!isHeading && isNodeHeading) continue;
+        if (isHeading && !isNodeHeading) continue;
+
+        usedNodeIds.add(node.id);
+        mutations.push({
+          node_id: node.id,
+          new_text: item,
+          bold: item.startsWith('BOLD::') || item.includes('BOLD::')
+        });
+        break;
+      }
     }
   }
 
@@ -800,7 +735,6 @@ export async function mergeFindingsIntoDocxWithAstEngine(
     mutations,
     impressionItems,
     impressionSlotIds,
-    impressionHeaderId,
-    insertions
+    impressionHeaderId
   );
 }
