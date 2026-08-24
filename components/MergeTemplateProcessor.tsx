@@ -53,7 +53,6 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [mergedFindings, setMergedFindings] = useState<string[] | null>(null);
-  const [cachedDocxBlob, setCachedDocxBlob] = useState<Blob | null>(null);
   const [autoDownloadDocx, setAutoDownloadDocx] = useState<boolean>(true);
   const [isCopied, setIsCopied] = useState<boolean>(false);
   const [downloadSuccess, setDownloadSuccess] = useState<string | null>(null);
@@ -198,9 +197,6 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
       );
 
       setMergedFindings(result);
-      if (docxBlob) {
-        setCachedDocxBlob(docxBlob);
-      }
 
       if (autoDownloadDocx && result.length > 0) {
         try {
@@ -227,12 +223,10 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
     try {
       const title = activeTemplate?.name || mergedFindings[0] || 'Radiology_Report';
       const cleanFileName = `${title.replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().slice(0, 10)}.docx`;
-      const blob = cachedDocxBlob || (activeTemplate?.docxBase64 ? await mergeFindingsIntoDocx(activeTemplate.docxBase64, mergedFindings, title) : null);
-      if (blob) {
-        downloadDocxBlob(blob, cleanFileName);
-        setDownloadSuccess(`Downloaded "${cleanFileName}"`);
-        setTimeout(() => setDownloadSuccess(null), 4000);
-      }
+      const blob = await mergeFindingsIntoDocx(activeTemplate?.docxBase64, mergedFindings, title);
+      downloadDocxBlob(blob, cleanFileName);
+      setDownloadSuccess(`Downloaded "${cleanFileName}"`);
+      setTimeout(() => setDownloadSuccess(null), 4000);
     } catch (err: any) {
       setError('Failed to download Word document.');
     }
