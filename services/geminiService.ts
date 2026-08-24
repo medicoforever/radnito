@@ -872,6 +872,9 @@ export const mergeFindingsWithAst = async (
     let crossSkillBlock = '';
       crossSkillBlock = `\n\n### ⚡ CROSS-MODALITY & INCIDENTAL PATHOLOGY CONSULTANT DIRECTIVES (Auto-Detected Secondary Skills):\nThe radiologist's dictation includes clinical findings related to adjacent or incidental organ systems. You MUST cross-reference the following specialized consultant directives for those findings:\n` + secondarySkills.map(s => `[CROSS-MODALITY SKILL: ${s.name} (${s.category || 'Specialized'})]:\n${s.skillPrompt}`).join('\n\n') + `\n*Directive for Cross-Modality Findings*: Use the exact consultant grading, AST pathological translation, and diagnostic criteria from the matching secondary skill above.`;
 
+    const titleNode = ast.find(n => n.type === 'title');
+    const docTitle = titleNode?.current_text?.trim() || selectedTemplate.lines?.[0] || selectedTemplate.name;
+
     const astPrompt = `You are an expert radiology report integration engine.
 Your task is to merge the radiologist's findings into the target document's exact Abstract Syntax Tree (AST) nodes.
 
@@ -898,20 +901,23 @@ ${findingsText}
    - **Mingled Sentence Handling**: If a baseline template node combines multiple anatomical concepts (e.g. "The basal cisterns, cortical sulci and sylvian fissures are normal") and only one structure is abnormal (e.g. cortical sulcal prominence), rewrite that node so the normal structures are retained (e.g. "The basal cisterns are normal.") and the abnormal finding is accurately documented.
    - **Automatic Contradiction Removal**: If an abnormal finding supersedes, covers, or contradicts an existing baseline normal node (e.g. ventricular atrophy finding supersedes normal ventricular system node, or disc bulge finding supersedes 'no significant disc bulge' node), you MUST include that superseded normal node in "updates" with "new_text": "" (empty string) so it is cleanly removed from the Word document with zero leftover contradictory text.
    - For unaffected normal nodes, do NOT include them in "updates" (they remain 100% intact with their original template styles).
-2. **5-Layer Structural DNA & BOLD Protocol**:
+3. **5-Layer Structural DNA & BOLD Protocol**:
    - Update Clinical Profile node if history/indication is dictated (written as "Clinical Profile: ...").
-   - In "display_findings", produce the full ordered report array: Capitalized Title -> "Clinical Profile: ..." (or "Clinical Profile:") -> Technique -> Findings (prefix modified lines with "BOLD::", preserve normal lines verbatim without "BOLD::") -> Synthesized Impression starting with "IMPRESSION:###".
-3. **Vague Dictation Translation**:
+   - In "display_findings", produce the full ordered report array:
+     Layer 1: Exact Template Title: "${docTitle}" (MUST preserve the exact template document title verbatim without changing, shortening, or removing any words like MRI/CT) -> "Clinical Profile: ..." (or "Clinical Profile:") -> Technique -> Findings (prefix modified lines with "BOLD::", preserve normal lines verbatim without "BOLD::") -> Synthesized Impression starting with "IMPRESSION:###".
+4. **Vague Dictation Translation**:
    - Translate colloquial phrases into formal consultant terminology: "fuzzy liver thing" -> "Ill-defined focal lesion in segment VI...", "whited out left base" -> "Homogeneous dense opacification of the left hemithorax base...", "dirty fat around appendix" -> "Blind-ending thickened appendix with surrounding fat stranding...", "bright spot on dwi" -> "Focal area of acute restricted diffusion on DWI...", "torn meniscus" -> "Linear high signal intensity... consistent with meniscal tear", "broken hip ball" -> "Displaced subcapital fracture of femoral neck".
-4. **RADS Scoring Standards**:
+5. **RADS Scoring Standards**:
    - BI-RADS (0-6), PI-RADS v2.1 (PZ vs TZ sequence dominance, categories 1-5), TI-RADS (TR1-TR5), LI-RADS (LR-1 to LR-5), Lung-RADS v2022 (Categories 1-4X), CAD-RADS 2.0 (0-5 with modifiers).
-5. **Cross-Template Contamination Isolation**:
+6. **Cross-Template Contamination Isolation**:
    - Restrict findings strictly to the active template's anatomical domain. Do NOT merge mismatched organ findings into unrelated template nodes.
-6. **Non-Verb Impression Synthesis**:
+7. **Non-Verb Impression Synthesis**:
    - Synthesize concise, non-verb bullet points under "impression": ["Point 1", "Point 2"].
    - In "display_findings", format impression as: "IMPRESSION:###Point 1###Point 2".
    - If all findings normal: "IMPRESSION:###Normal study.###No significant abnormality detected."
-7. Return JSON schema:
+8. **TITLE IMMUTABILITY MANDATE**:
+   - The document title belongs strictly to the template document and MUST NOT be altered, shortened, or replaced by outside UI names or abbreviations. Do NOT include any title node in "updates".
+9. Return JSON schema:
 {
   "updates": [
     { "node_id": "node_...", "new_text": "...", "bold": true }
@@ -978,13 +984,24 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
         }
       }
 
+      // Filter out any mutation targeting the title node so template's native title is 100% untouched
+      const safeUpdates = updates.filter(u => {
+        const targetNode = ast.find(n => n.id === u.node_id);
+        return targetNode?.type !== 'title';
+      });
+
+      // Ensure displayFindings[0] uses the exact template document title verbatim
+      if (displayFindings.length > 0 && docTitle) {
+        displayFindings[0] = docTitle;
+      }
+
       // Apply exact AST mutations to the DOCX DOM
       const docxBlob = await applyAstMutationsToDocx(
         xmlDoc,
         zipEntries,
         pMap,
         cellMap,
-        updates,
+        safeUpdates,
         impression,
         impressionSlotIds,
         impressionHeaderId
@@ -1015,6 +1032,10 @@ export const mergeFindingsWithTemplate = async (
     ? selectedTemplate.lines.map((l, i) => `${i + 1}. ${l}`).join('\n')
     : selectedTemplate.name;
 
+  const templateDocTitle = selectedTemplate.lines && selectedTemplate.lines.length > 0
+    ? selectedTemplate.lines[0]
+    : selectedTemplate.name;
+
     const consultantSkill = (skillEnabled !== false && (activeSkillPrompt || selectedTemplate.skillPrompt)) 
     ? (activeSkillPrompt || selectedTemplate.skillPrompt)
     : '';
@@ -1026,7 +1047,7 @@ Your task is to merge the radiologist's findings directly into the target standa
 Do NOT include any conversational preamble, pleasantries, commentary, or sign-offs. Produce ONLY pure clinical report strings within the JSON array.
 
 ## TARGET REPORT TEMPLATE:
-Title: ${selectedTemplate.name}
+Title: ${templateDocTitle}
 Modality: ${selectedTemplate.modality || selectedTemplate.category || 'Radiology'}
 Category: ${selectedTemplate.category || 'Standard'}
 
@@ -1046,7 +1067,7 @@ ${findingsText}
 
 ## STRICT 5-LAYER MERGING AND INTEGRATION RULES:
 1. **5-Layer Structural Hierarchy**:
-   - Layer 1: Title: ${selectedTemplate.name}
+   - Layer 1: Title: ${templateDocTitle} (Use the EXACT title from the template document verbatim. NEVER alter, truncate, or replace with outside text)
    - Layer 2: Clinical Profile: format as "*Clinical Profile: C/o [complaint] with H/o [history].*" or "*Clinical Profile:*" if none provided.
    - Layer 3: Scanning Technique: preserve the template's technique line.
    - Layer 4: Anatomical Findings: organized by anatomical subsystem.
