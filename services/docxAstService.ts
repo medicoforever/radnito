@@ -323,6 +323,8 @@ export async function applyAstMutationsToDocx(
         }
       }
     }
+  }
+
   // 1.5. Insert brand-new / incidental findings before the IMPRESSION: header
   if (insertedFindings && insertedFindings.length > 0) {
     let headerEl: Element | null = null;
