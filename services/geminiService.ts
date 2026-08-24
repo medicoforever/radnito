@@ -1011,15 +1011,23 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
         if (df.includes('|')) continue;
 
         const cleanDf = df.replace(/^BOLD::\s*/, '').trim();
+        const normDf = cleanDf.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (!normDf) continue;
+
         let wasUpdated = false;
         for (const ut of updatedFindingTexts) {
-          if (ut === cleanDf || ut.includes(cleanDf) || cleanDf.includes(ut)) {
+          const normUt = ut.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (normUt && normDf && normUt === normDf) {
             wasUpdated = true;
             break;
           }
         }
         if (!wasUpdated) {
-          const existsInAst = ast.some(n => n.type !== 'table_cell' && n.current_text && n.current_text.trim() === cleanDf);
+          const existsInAst = ast.some(n => {
+            if (n.type === 'table_cell') return false;
+            const normAst = (n.current_text || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            return normAst && normDf && normAst === normDf;
+          });
           if (!existsInAst) {
             extraFindings.push(df);
           }
