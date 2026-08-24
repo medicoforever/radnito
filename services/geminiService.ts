@@ -896,15 +896,17 @@ ${findingsText}
 ## STRICT AST SURGERY & 100% CLINICAL FIDELITY RULES:
 1. **100% Comprehensive Clinical Ingestion**:
    - EVERY observation, measurement, pathology, and clinical history dictated by the radiologist MUST be completely included in the final report.
-2. **Surgical Node Updates, Mingled Sentence Splitting & Contradiction Removal**:
+2. **Surgical Node Updates, Clinical Profile Placement & Contradiction Removal**:
    - Map each clinical finding to its most appropriate anatomical node_id.
+   - **Clinical Profile / History Placement**: Always map the clinical history / patient complaint to the "Clinical profile:" or "Indication:" node at the top of the report (written as "Clinical profile: ..."). NEVER insert Clinical Profile at the bottom.
+   - **Baseline Normal Sentence Overwrite**: When an anatomical structure is dictated with an abnormal finding (e.g. SI joint degenerative changes, facet arthropathy, disc bulge), you MUST target the baseline normal template node for that structure (e.g. "SI joints and pubic symphysis appears normal" or "No disc bulge or protrusion is seen") in "updates" to overwrite it with the abnormal finding. NEVER leave the baseline normal sentence untouched or duplicated alongside the abnormal finding.
    - **Mingled Sentence Handling**: If a baseline template node combines multiple anatomical concepts (e.g. "The basal cisterns, cortical sulci and sylvian fissures are normal") and only one structure is abnormal (e.g. cortical sulcal prominence), rewrite that node so the normal structures are retained (e.g. "The basal cisterns are normal.") and the abnormal finding is accurately documented.
    - **Automatic Contradiction Removal**: If an abnormal finding supersedes, covers, or contradicts an existing baseline normal node (e.g. ventricular atrophy finding supersedes normal ventricular system node, or disc bulge finding supersedes 'no significant disc bulge' node), you MUST include that superseded normal node in "updates" with "new_text": "" (empty string) so it is cleanly removed from the Word document with zero leftover contradictory text.
    - For unaffected normal nodes, do NOT include them in "updates" (they remain 100% intact with their original template styles).
 3. **5-Layer Structural DNA & BOLD Protocol**:
-   - Update Clinical Profile node if history/indication is dictated (written as "Clinical Profile: ...").
+   - Update Clinical Profile node if history/indication is dictated (written as "Clinical profile: ...").
    - In "display_findings", produce the full ordered report array:
-     Layer 1: Exact Template Title: "${docTitle}" (MUST preserve the exact template document title verbatim without changing, shortening, or removing any words like MRI/CT) -> "Clinical Profile: ..." (or "Clinical Profile:") -> Technique -> Findings (prefix modified lines with "BOLD::", preserve normal lines verbatim without "BOLD::") -> Synthesized Impression starting with "IMPRESSION:###".
+     Layer 1: Exact Template Title: "${docTitle}" (MUST preserve the exact template document title verbatim without changing, shortening, or removing any words like MRI/CT) -> "Clinical profile: ..." (or "Clinical profile:") -> Technique -> Findings (prefix modified lines with "BOLD::", preserve normal lines verbatim without "BOLD::") -> Synthesized Impression starting with "IMPRESSION:###".
 4. **Vague Dictation Translation**:
    - Translate colloquial phrases into formal consultant terminology: "fuzzy liver thing" -> "Ill-defined focal lesion in segment VI...", "whited out left base" -> "Homogeneous dense opacification of the left hemithorax base...", "dirty fat around appendix" -> "Blind-ending thickened appendix with surrounding fat stranding...", "bright spot on dwi" -> "Focal area of acute restricted diffusion on DWI...", "torn meniscus" -> "Linear high signal intensity... consistent with meniscal tear", "broken hip ball" -> "Displaced subcapital fracture of femoral neck".
 5. **RADS Scoring Standards**:
