@@ -415,8 +415,31 @@ export async function applyAstMutationsToDocx(
       }
 
       if (anchorEl && anchorEl.parentNode) {
-        anchorEl.parentNode.insertBefore(newP, anchorEl.nextSibling);
+        // Check if anchorEl is followed by an empty spacer paragraph in the template
+        let next = anchorEl.nextSibling;
+        while (next && next.nodeType !== 1) next = next.nextSibling;
+        const nextIsBlank = next && ((next as Element).localName === 'p' || (next as Element).nodeName === 'w:p') && !getElementText(next as Element).trim();
+
+        // Create a matching spacer paragraph
+        const spacerP = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:p');
+        const spacerPPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pPr');
+        const spacerSpacing = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:spacing');
+        spacerSpacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '0');
+        spacerPPr.appendChild(spacerSpacing);
+        spacerP.appendChild(spacerPPr);
+
+        if (nextIsBlank && next) {
+          // Insert after the existing blank spacer, and append a trailing blank spacer
+          anchorEl.parentNode.insertBefore(newP, (next as Element).nextSibling);
+          anchorEl.parentNode.insertBefore(spacerP, newP.nextSibling);
+        } else {
+          // Insert spacer before newP
+          anchorEl.parentNode.insertBefore(spacerP, anchorEl.nextSibling);
+          anchorEl.parentNode.insertBefore(newP, spacerP.nextSibling);
+        }
       } else if (headerEl && headerEl.parentNode) {
+        const spacerP = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:p');
+        headerEl.parentNode.insertBefore(spacerP, headerEl);
         headerEl.parentNode.insertBefore(newP, headerEl);
       }
     }
