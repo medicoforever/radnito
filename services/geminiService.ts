@@ -995,6 +995,37 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
         displayFindings[0] = docTitle;
       }
 
+      // Collect any extra/incidental findings from displayFindings that were not assigned to an AST node in safeUpdates
+      const updatedFindingTexts = new Set(safeUpdates.map(u => (u.new_text || '').replace(/^BOLD::\s*/, '').trim()));
+      const extraFindings: string[] = [];
+      let inImpSection = false;
+      for (let i = 0; i < displayFindings.length; i++) {
+        const df = displayFindings[i].trim();
+        if (!df) continue;
+        if (i === 0 && docTitle && df.toLowerCase().replace(/[^a-z0-9]/g, '') === docTitle.toLowerCase().replace(/[^a-z0-9]/g, '')) continue;
+        if (df.toUpperCase().startsWith('IMPRESSION:') || df.toUpperCase().startsWith('CONCLUSION:')) {
+          inImpSection = true;
+          continue;
+        }
+        if (inImpSection) continue;
+        if (df.includes('|')) continue;
+
+        const cleanDf = df.replace(/^BOLD::\s*/, '').trim();
+        let wasUpdated = false;
+        for (const ut of updatedFindingTexts) {
+          if (ut === cleanDf || ut.includes(cleanDf) || cleanDf.includes(ut)) {
+            wasUpdated = true;
+            break;
+          }
+        }
+        if (!wasUpdated) {
+          const existsInAst = ast.some(n => n.type !== 'table_cell' && n.current_text && n.current_text.trim() === cleanDf);
+          if (!existsInAst) {
+            extraFindings.push(df);
+          }
+        }
+      }
+
       // Apply exact AST mutations to the DOCX DOM
       const docxBlob = await applyAstMutationsToDocx(
         xmlDoc,
@@ -1004,7 +1035,8 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
         safeUpdates,
         impression,
         impressionSlotIds,
-        impressionHeaderId
+        impressionHeaderId,
+        extraFindings
       );
 
       const finalFindings = displayFindings.length > 0 ? displayFindings : (selectedTemplate.lines || [selectedTemplate.name]);
