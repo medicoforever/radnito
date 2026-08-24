@@ -950,10 +950,33 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
       const result = JSON.parse(cleaned);
 
       const updates: AstMutation[] = Array.isArray(result.updates) ? result.updates : [];
-      const impression: string[] = Array.isArray(result.impression) ? result.impression : [];
+      let impression: string[] = Array.isArray(result.impression) ? result.impression : [];
       const displayFindings: string[] = Array.isArray(result.display_findings) && result.display_findings.length > 0
         ? result.display_findings
         : [];
+
+      // Fallback: If result.impression is empty, extract bullet points directly from displayFindings
+      if (impression.length === 0 && displayFindings.length > 0) {
+        let inImp = false;
+        for (const line of displayFindings) {
+          const u = line.trim().toUpperCase();
+          if (u === 'IMPRESSION:' || u.startsWith('IMPRESSION:') || u === 'CONCLUSION:' || u.startsWith('CONCLUSION:')) {
+            inImp = true;
+            if (line.includes('###')) {
+              const parts = line.split('###').slice(1);
+              for (const p of parts) {
+                const cleanP = p.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
+                if (cleanP) impression.push(cleanP);
+              }
+            }
+            continue;
+          }
+          if (inImp) {
+            const cleanP = line.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
+            if (cleanP) impression.push(cleanP);
+          }
+        }
+      }
 
       // Apply exact AST mutations to the DOCX DOM
       const docxBlob = await applyAstMutationsToDocx(
@@ -963,7 +986,8 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
         cellMap,
         updates,
         impression,
-        impressionSlotIds
+        impressionSlotIds,
+        impressionHeaderId
       );
 
       const finalFindings = displayFindings.length > 0 ? displayFindings : (selectedTemplate.lines || [selectedTemplate.name]);
