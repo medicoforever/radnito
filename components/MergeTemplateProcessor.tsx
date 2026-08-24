@@ -53,6 +53,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [mergedFindings, setMergedFindings] = useState<string[] | null>(null);
+  const [mergedDocxBlob, setMergedDocxBlob] = useState<Blob | null>(null);
   const [autoDownloadDocx, setAutoDownloadDocx] = useState<boolean>(true);
   const [isCopied, setIsCopied] = useState<boolean>(false);
   const [downloadSuccess, setDownloadSuccess] = useState<string | null>(null);
@@ -197,6 +198,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
       );
 
       setMergedFindings(result);
+      setMergedDocxBlob(docxBlob || null);
 
       if (autoDownloadDocx && result.length > 0) {
         try {
@@ -223,7 +225,27 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
     try {
       const title = activeTemplate?.name || mergedFindings[0] || 'Radiology_Report';
       const cleanFileName = `${title.replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().slice(0, 10)}.docx`;
-      const blob = await mergeFindingsIntoDocx(activeTemplate?.docxBase64, mergedFindings, title);
+      let blob: Blob | null = (mergedDocxBlob instanceof Blob && mergedDocxBlob.size > 0) ? mergedDocxBlob : null;
+      if (!blob && activeTemplate?.docxBase64) {
+        try {
+          const astRes = await mergeFindingsWithAst(
+            mergedFindings.join('\n'),
+            activeTemplate,
+            selectedModel,
+            customNotes.trim() || undefined,
+            null,
+            isSkillEnabled,
+            customSkillPrompt.trim() || undefined
+          );
+          blob = astRes.docxBlob || null;
+          if (blob) setMergedDocxBlob(blob);
+        } catch (e) {
+          console.warn('AST docx generation fallback error:', e);
+        }
+      }
+      if (!blob) {
+        blob = await mergeFindingsIntoDocx(activeTemplate?.docxBase64, mergedFindings, title);
+      }
       downloadDocxBlob(blob, cleanFileName);
       setDownloadSuccess(`Downloaded "${cleanFileName}"`);
       setTimeout(() => setDownloadSuccess(null), 4000);
@@ -266,6 +288,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
         customNotes
       );
       setMergedFindings(updated);
+      setMergedDocxBlob(null);
       setModificationText('');
       setModificationState('idle');
     } catch (err: any) {
@@ -296,6 +319,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
           customNotes
         );
         setMergedFindings(updated);
+        setMergedDocxBlob(null);
         setModificationState('idle');
       } catch (err: any) {
         setModificationError(err?.message || 'Failed to apply audio change.');
@@ -311,12 +335,14 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
     const updated = [...mergedFindings];
     updated[idx] = editingText;
     setMergedFindings(updated);
+    setMergedDocxBlob(null);
     setEditingIndex(null);
   };
 
   const handleDeleteRow = (idx: number) => {
     if (!mergedFindings) return;
     setMergedFindings(mergedFindings.filter((_, i) => i !== idx));
+    setMergedDocxBlob(null);
   };
 
   return (
@@ -684,7 +710,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setMergedFindings(null)}
+                onClick={() => { setMergedFindings(null); setMergedDocxBlob(null); }}
                 className="px-3.5 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-all"
               >
                 New Dictation
