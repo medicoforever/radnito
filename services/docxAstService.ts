@@ -341,12 +341,23 @@ export async function applyAstMutationsToDocx(
     }
 
     if (headerEl && headerEl.parentNode) {
+      // Find preceding paragraph or clone headerEl
+      let prevP: Element | null = null;
+      let sib = headerEl.previousSibling;
+      while (sib) {
+        if (sib.nodeType === 1 && (sib.nodeName === 'w:p' || (sib as Element).localName === 'p')) {
+          prevP = sib as Element;
+          break;
+        }
+        sib = sib.previousSibling;
+      }
+
       for (const item of insertedFindings) {
         const isBold = item.startsWith('BOLD::') || item.includes('BOLD::');
         const cleanText = item.replace(/^BOLD::\s*/, '').trim();
         if (!cleanText) continue;
 
-        const newP = (headerEl.previousElementSibling || headerEl).cloneNode(true) as Element;
+        const newP = (prevP || headerEl).cloneNode(true) as Element;
         const rPrTags = newP.getElementsByTagName('w:rPr');
         for (let r_i = 0; r_i < rPrTags.length; r_i++) {
           const u = rPrTags[r_i].getElementsByTagName('w:u')[0];
