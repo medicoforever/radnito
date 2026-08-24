@@ -219,6 +219,11 @@ export async function applyAstMutationsToDocx(
     // Option B: If the table cell or paragraph is completely empty (0 runs), auto-create run inheriting parent styles!
     if (allRuns.length === 0) {
       const newRun = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:r');
+      const pPr = p.getElementsByTagName('w:pPr')[0];
+      const pRPr = pPr?.getElementsByTagName('w:rPr')[0];
+      if (pRPr) {
+        newRun.appendChild(pRPr.cloneNode(true));
+      }
       const newT = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:t');
       newRun.appendChild(newT);
       p.appendChild(newRun);
@@ -606,28 +611,26 @@ export async function mergeFindingsIntoDocxWithAstEngine(
     const rowKey = cols[0].toLowerCase().replace(/[^a-z0-9]/g, '');
     if (!rowKey) continue;
 
-    // Find table cell in col 0 that matches rowKey
+    // Match table cells whose row_label matches rowKey
     for (const cell of tableCellNodes) {
-      const cellText = (cell.current_text || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (cellText === rowKey && cell.id.includes('_')) {
-        const parts = cell.id.split('_'); // ['cell', tblIdx, rIdx, cIdx]
-        if (parts.length === 4) {
-          const tblIdx = parts[1];
-          const rIdx = parts[2];
-          for (let c = 1; c < cols.length; c++) {
-            const targetCellId = `cell_${tblIdx}_${rIdx}_${c}`;
-            const targetVal = cols[c];
-            if (targetVal) {
-              usedNodeIds.add(targetCellId);
+      const cellRowLabel = (cell.row_label || cell.current_text || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (cellRowLabel === rowKey) {
+        // e.g. cell.id is 'tbl_0_r_1_c_1' -> get column index from cell.id
+        const cMatch = cell.id.match(/_c_(\d+)$/);
+        if (cMatch) {
+          const colIdx = parseInt(cMatch[1], 10);
+          if (colIdx >= 1 && colIdx < cols.length) {
+            const targetVal = cols[colIdx];
+            if (targetVal !== undefined && targetVal !== '') {
+              usedNodeIds.add(cell.id);
               mutations.push({
-                node_id: targetCellId,
+                node_id: cell.id,
                 new_text: targetVal,
                 bold: rowStr.includes('BOLD::')
               });
             }
           }
         }
-        break;
       }
     }
   }
