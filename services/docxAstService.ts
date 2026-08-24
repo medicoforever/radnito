@@ -18,6 +18,12 @@ export interface AstMutation {
   bold?: boolean;
 }
 
+export interface AstInsertion {
+  after_node_id?: string;
+  text: string;
+  bold?: boolean;
+}
+
 function getElementText(el: Element): string {
   const tTags = el.getElementsByTagName('w:t');
   let txt = '';
@@ -192,7 +198,8 @@ export async function applyAstMutationsToDocx(
   mutations: AstMutation[],
   impressionItems?: string[],
   impressionSlotIds: string[] = [],
-  impressionHeaderId?: string
+  impressionHeaderId?: string,
+  insertedFindings?: (string | AstInsertion)[]
 ): Promise<Blob> {
   const ensureBoldOnRun = (run: Element, makeBold: boolean) => {
     let rPr = run.getElementsByTagName('w:rPr')[0];
@@ -320,6 +327,97 @@ export async function applyAstMutationsToDocx(
         } else {
           applyTextToParagraphRuns(p, cleanText, mut.bold);
         }
+      }
+    }
+  }
+
+  // 1.5. Clean-Run Paragraph Insertion for Incidental / Non-Template Findings
+  if (insertedFindings && insertedFindings.length > 0) {
+    let headerEl: Element | null = null;
+    if (impressionHeaderId && pMap.has(impressionHeaderId)) {
+      headerEl = pMap.get(impressionHeaderId)!;
+    }
+    if (!headerEl) {
+      pMap.forEach((el) => {
+        if (!headerEl) {
+          const t = getElementText(el).trim().toUpperCase();
+          if (t === 'IMPRESSION:' || t.startsWith('IMPRESSION:') || t === 'CONCLUSION:' || t.startsWith('CONCLUSION:')) {
+            headerEl = el;
+          }
+        }
+      });
+    }
+
+    const createCleanBodyParagraph = (rawText: string, isBold: boolean): Element => {
+      const p = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:p');
+      const pPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pPr');
+      const spacing = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:spacing');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '0');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:line', '240');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:lineRule', 'auto');
+      pPr.appendChild(spacing);
+
+      const rPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rPr');
+      const rFonts = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rFonts');
+      rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:ascii', 'Times New Roman');
+      rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:hAnsi', 'Times New Roman');
+      rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:cs', 'Times New Roman');
+      rPr.appendChild(rFonts);
+
+      const sz = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:sz');
+      sz.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', '24');
+      rPr.appendChild(sz);
+      const szCs = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:szCs');
+      szCs.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', '24');
+      rPr.appendChild(szCs);
+
+      if (isBold) {
+        const b = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:b');
+        rPr.appendChild(b);
+        const bCs = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:bCs');
+        rPr.appendChild(bCs);
+      }
+      pPr.appendChild(rPr);
+      p.appendChild(pPr);
+
+      const r = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:r');
+      r.appendChild(rPr.cloneNode(true));
+      const t = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:t');
+      t.textContent = rawText;
+      t.setAttribute('xml:space', 'preserve');
+      r.appendChild(t);
+      p.appendChild(r);
+
+      return p;
+    };
+
+    for (const item of insertedFindings) {
+      let rawText = '';
+      let isBold = false;
+      let afterNodeId: string | undefined;
+
+      if (typeof item === 'string') {
+        isBold = item.startsWith('BOLD::') || item.includes('BOLD::');
+        rawText = item.replace(/^BOLD::\s*/, '').trim();
+      } else if (item && typeof item === 'object') {
+        rawText = (item.text || '').replace(/^BOLD::\s*/, '').trim();
+        isBold = !!(item.bold || (item.text && item.text.startsWith('BOLD::')));
+        afterNodeId = item.after_node_id;
+      }
+
+      if (!rawText) continue;
+
+      const newP = createCleanBodyParagraph(rawText, isBold);
+
+      let anchorEl: Element | null = null;
+      if (afterNodeId && pMap.has(afterNodeId)) {
+        anchorEl = pMap.get(afterNodeId)!;
+      }
+
+      if (anchorEl && anchorEl.parentNode) {
+        anchorEl.parentNode.insertBefore(newP, anchorEl.nextSibling);
+      } else if (headerEl && headerEl.parentNode) {
+        headerEl.parentNode.insertBefore(newP, headerEl);
       }
     }
   }
@@ -637,6 +735,8 @@ export async function mergeFindingsIntoDocxWithAstEngine(
 
   // B. Process Paragraph Findings against paragraph nodes (NEVER table cells)
   const paragraphNodes = ast.filter(n => n.type !== 'table_cell' && n.type !== 'impression_header' && n.type !== 'impression_item' && n.type !== 'title');
+  let lastMatchedNodeId: string | undefined;
+  const insertions: AstInsertion[] = [];
 
   // Pass 1: Exact / Colon-Key / Word Overlap Matching
   for (const finding of paragraphFindings) {
@@ -679,14 +779,14 @@ export async function mergeFindingsIntoDocxWithAstEngine(
         break;
       }
 
-      // 3. Word overlap similarity
+      // 3. Word overlap similarity (strict threshold to avoid cross-concept collisions)
       const nWords = new Set(nText.toLowerCase().replace(/[^a-zA-Z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2));
       let overlap = 0;
       fWords.forEach(w => { if (nWords.has(w)) overlap++; });
       const union = fWords.size + nWords.size - overlap;
       const score = union > 0 ? overlap / union : 0;
 
-      if (score > bestScore && score >= 0.25) {
+      if (score > bestScore && score >= 0.40) {
         bestScore = score;
         bestNodeId = node.id;
       }
@@ -694,36 +794,19 @@ export async function mergeFindingsIntoDocxWithAstEngine(
 
     if (bestNodeId) {
       usedNodeIds.add(bestNodeId);
+      lastMatchedNodeId = bestNodeId;
       mutations.push({
         node_id: bestNodeId,
         new_text: finding,
         bold: isBold
       });
-    }
-  }
-
-  // Pass 2: Positional sequential alignment for unmatched paragraph findings
-  const unmatchedFindings = paragraphFindings.filter((_, idx) => {
-    return !mutations.some(m => m.new_text === paragraphFindings[idx]);
-  });
-
-  for (const item of unmatchedFindings) {
-    const isHeading = item.replace(/^BOLD::\s*/, '').trim().endsWith(':');
-    for (const node of paragraphNodes) {
-      if (!usedNodeIds.has(node.id)) {
-        const isNodeHeading = node.type === 'section_heading' || node.current_text.trim().endsWith(':');
-        // Do not place narrative findings into section headings in sequential alignment
-        if (!isHeading && isNodeHeading) continue;
-        if (isHeading && !isNodeHeading) continue;
-
-        usedNodeIds.add(node.id);
-        mutations.push({
-          node_id: node.id,
-          new_text: item,
-          bold: item.startsWith('BOLD::') || item.includes('BOLD::')
-        });
-        break;
-      }
+    } else {
+      // Clean incidental finding insertion at its exact sequential position in report
+      insertions.push({
+        after_node_id: lastMatchedNodeId,
+        text: finding,
+        bold: isBold
+      });
     }
   }
 
@@ -735,6 +818,7 @@ export async function mergeFindingsIntoDocxWithAstEngine(
     mutations,
     impressionItems,
     impressionSlotIds,
-    impressionHeaderId
+    impressionHeaderId,
+    insertions
   );
 }
