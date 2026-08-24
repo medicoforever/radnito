@@ -215,7 +215,14 @@ export async function applyAstMutationsToDocx(
         allRuns.push(p.childNodes[i] as Element);
       }
     }
-    if (allRuns.length === 0) return;
+    // Option B: If the table cell or paragraph is completely empty (0 runs), auto-create run inheriting parent styles!
+    if (allRuns.length === 0) {
+      const newRun = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:r');
+      const newT = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:t');
+      newRun.appendChild(newT);
+      p.appendChild(newRun);
+      allRuns.push(newRun);
+    }
 
     const firstRun = allRuns[0];
     if (rawText.includes('BOLD::')) {

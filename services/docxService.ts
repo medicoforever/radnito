@@ -470,7 +470,14 @@ export async function mergeFindingsIntoDocx(
           }
 
           const applyTextToParagraph = (p: Element, text: string, isBold: boolean) => {
-            const tTags = p.getElementsByTagName('w:t');
+            let tTags = p.getElementsByTagName('w:t');
+            if (tTags.length === 0) {
+              const newRun = xmlDoc.createElementNS(W_NS, 'w:r');
+              const newT = xmlDoc.createElementNS(W_NS, 'w:t');
+              newRun.appendChild(newT);
+              p.appendChild(newRun);
+              tTags = p.getElementsByTagName('w:t');
+            }
             if (tTags.length > 0) {
               tTags[0].textContent = text;
               tTags[0].setAttribute('xml:space', 'preserve');
