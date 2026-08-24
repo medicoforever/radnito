@@ -225,27 +225,10 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
     try {
       const title = activeTemplate?.name || mergedFindings[0] || 'Radiology_Report';
       const cleanFileName = `${title.replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().slice(0, 10)}.docx`;
-      let blob: Blob | null = (mergedDocxBlob instanceof Blob && mergedDocxBlob.size > 0) ? mergedDocxBlob : null;
-      if (!blob && activeTemplate?.docxBase64) {
-        try {
-          const astRes = await mergeFindingsWithAst(
-            mergedFindings.join('\n'),
-            activeTemplate,
-            selectedModel,
-            customNotes.trim() || undefined,
-            null,
-            isSkillEnabled,
-            customSkillPrompt.trim() || undefined
-          );
-          blob = astRes.docxBlob || null;
-          if (blob) setMergedDocxBlob(blob);
-        } catch (e) {
-          console.warn('AST docx generation fallback error:', e);
-        }
-      }
-      if (!blob) {
-        blob = await mergeFindingsIntoDocx(activeTemplate?.docxBase64, mergedFindings, title);
-      }
+      const blob = (mergedDocxBlob instanceof Blob && mergedDocxBlob.size > 0)
+        ? mergedDocxBlob
+        : await mergeFindingsIntoDocx(activeTemplate?.docxBase64, mergedFindings, title);
+
       downloadDocxBlob(blob, cleanFileName);
       setDownloadSuccess(`Downloaded "${cleanFileName}"`);
       setTimeout(() => setDownloadSuccess(null), 4000);
