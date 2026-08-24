@@ -1,3 +1,5 @@
+import { mergeFindingsIntoDocxWithAstEngine } from './docxAstService';
+
 export interface ZipEntry {
   name: string;
   data: Uint8Array;
@@ -384,7 +386,16 @@ export async function mergeFindingsIntoDocx(
     return generateDocxFromFindings([], examTitle);
   }
 
-  // If a native template DOCX exists, surgically replace matching paragraphs in-place preserving 100% of native styles
+  // 1. Primary High-Fidelity AST-DOM Engine (100% identical styling/font/spacing to AST auto-download)
+  if (templateBase64 && templateBase64.trim()) {
+    try {
+      return await mergeFindingsIntoDocxWithAstEngine(templateBase64, findings);
+    } catch (astErr) {
+      console.warn('mergeFindingsIntoDocx AST engine fallback:', astErr);
+    }
+  }
+
+  // 2. Secondary Universal In-Place Matcher Fallback
   if (templateBase64 && templateBase64.trim()) {
     try {
       const templateBytes = base64ToUint8Array(templateBase64);
