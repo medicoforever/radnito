@@ -767,12 +767,32 @@ export async function mergeFindingsIntoDocxWithAstEngine(
   let lastMatchedNodeId: string | undefined;
   const insertions: AstInsertion[] = [];
 
+function extractMedicalKeywords(text: string): Set<string> {
+  const stopWords = new Set(['and', 'the', 'for', 'with', 'are', 'is', 'not', 'any', 'been', 'seen', 'from', 'both', 'show', 'shows', 'appear', 'appears', 'within', 'limits', 'rest', 'other']);
+  let t = text.toLowerCase();
+  t = t.replace(/\bsacroiliac\b/g, 'si');
+  t = t.replace(/\bsacro-iliac\b/g, 'si');
+  t = t.replace(/\blumbosacral\b/g, 'lumbar');
+  t = t.replace(/\bventricles\b/g, 'ventricular');
+  t = t.replace(/\bhydrocephalus\b/g, 'ventricular');
+  t = t.replace(/\binfarction\b/g, 'infarct');
+  t = t.replace(/\bischemia\b/g, 'infarct');
+  t = t.replace(/\bjoints\b/g, 'joint');
+  t = t.replace(/\bbones\b/g, 'bone');
+  t = t.replace(/\bmuscles\b/g, 'muscle');
+  t = t.replace(/\btendons\b/g, 'tendon');
+  t = t.replace(/\borgans\b/g, 'organ');
+
+  const rawWords = t.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length >= 2 && !stopWords.has(w));
+  return new Set(rawWords);
+}
+
   // Pass 1: Exact / Colon-Key / Word Overlap Matching
   for (const finding of paragraphFindings) {
     const isBold = finding.startsWith('BOLD::') || finding.includes('BOLD::');
     const cleanFinding = finding.replace(/^BOLD::\s*/, '').trim();
     const isHeading = cleanFinding.endsWith(':');
-    const fWords = new Set(cleanFinding.toLowerCase().replace(/[^a-zA-Z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2));
+    const fWords = extractMedicalKeywords(cleanFinding);
 
     let bestScore = 0.0;
     let bestNodeId: string | null = null;
@@ -808,13 +828,13 @@ export async function mergeFindingsIntoDocxWithAstEngine(
         break;
       }
 
-      // 3. Containment / Coverage match (e.g. "Both SI joints show mild degenerative changes" vs "SI joints and pubic symphysis appears normal")
-      const nWords = new Set(nText.toLowerCase().replace(/[^a-zA-Z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2));
+      // 3. Medical Keyword Coverage match (e.g. "Right SI joint sclerosis", "Sacroiliac narrowing" vs "SI joints and pubic symphysis appears normal")
+      const nWords = extractMedicalKeywords(nText);
       let overlap = 0;
       fWords.forEach(w => { if (nWords.has(w)) overlap++; });
       if (nWords.size > 0) {
         const coverage = overlap / nWords.size;
-        if (coverage >= 0.60 && coverage > bestScore) {
+        if ((coverage >= 0.35 || overlap >= 2) && coverage > bestScore) {
           bestScore = coverage;
           bestNodeId = node.id;
         }
@@ -824,7 +844,7 @@ export async function mergeFindingsIntoDocxWithAstEngine(
       const union = fWords.size + nWords.size - overlap;
       const score = union > 0 ? overlap / union : 0;
 
-      if (score > bestScore && score >= 0.35) {
+      if (score > bestScore && score >= 0.30) {
         bestScore = score;
         bestNodeId = node.id;
       }
