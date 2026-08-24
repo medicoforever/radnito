@@ -917,10 +917,17 @@ ${findingsText}
    - If all findings normal: "IMPRESSION:###Normal study.###No significant abnormality detected."
 8. **TITLE IMMUTABILITY MANDATE**:
    - The document title belongs strictly to the template document and MUST NOT be altered, shortened, or replaced by outside UI names or abbreviations. Do NOT include any title node in "updates".
-9. Return JSON schema:
+9. **BRAND-NEW / INCIDENTAL FINDINGS MANDATE ("inserted_findings")**:
+   - If the radiologist dictates a pathology, measurement, or incidental finding that does NOT have a corresponding baseline node in the template AST (e.g. pleural effusion, atelectasis, lymphadenopathy, incidental cysts, fractures), you MUST include it in "inserted_findings" specifying:
+     { "insert_after_node_id": "<id of the preceding paragraph or paragraph immediately before IMPRESSION>", "text": "Exact clinical finding text", "bold": false }
+   - Also ensure it is present in "display_findings" at that exact same sequential position.
+10. Return JSON schema:
 {
   "updates": [
     { "node_id": "node_...", "new_text": "...", "bold": true }
+  ],
+  "inserted_findings": [
+    { "insert_after_node_id": "node_...", "text": "...", "bold": false }
   ],
   "impression": ["..."],
   "display_findings": ["..."]
@@ -956,6 +963,7 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
       const result = JSON.parse(cleaned);
 
       const updates: AstMutation[] = Array.isArray(result.updates) ? result.updates : [];
+      const rawInsertedFindings: any[] = Array.isArray(result.inserted_findings) ? result.inserted_findings : [];
       let impression: string[] = Array.isArray(result.impression) ? result.impression : [];
       const displayFindings: string[] = Array.isArray(result.display_findings) && result.display_findings.length > 0
         ? result.display_findings
@@ -1034,6 +1042,20 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
         }
       }
 
+      // Combine AI explicit inserted_findings with extra findings
+      const allInsertions: any[] = [...rawInsertedFindings];
+      const insertedTexts = new Set(allInsertions.map(i => ((typeof i === 'string' ? i : i.text) || '').toLowerCase().replace(/[^a-z0-9]/g, '')));
+      for (const ef of extraFindings) {
+        const normEf = ef.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (!insertedTexts.has(normEf)) {
+          allInsertions.push({
+            text: ef,
+            bold: ef.startsWith('BOLD::')
+          });
+          insertedTexts.add(normEf);
+        }
+      }
+
       // Apply exact AST mutations to the DOCX DOM
       const docxBlob = await applyAstMutationsToDocx(
         xmlDoc,
@@ -1044,7 +1066,7 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
         impression,
         impressionSlotIds,
         impressionHeaderId,
-        extraFindings
+        allInsertions
       );
 
       const finalFindings = displayFindings.length > 0 ? displayFindings : (selectedTemplate.lines || [selectedTemplate.name]);
