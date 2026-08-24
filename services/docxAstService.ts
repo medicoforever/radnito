@@ -192,7 +192,8 @@ export async function applyAstMutationsToDocx(
   mutations: AstMutation[],
   impressionItems?: string[],
   impressionSlotIds: string[] = [],
-  impressionHeaderId?: string
+  impressionHeaderId?: string,
+  insertedFindings?: string[]
 ): Promise<Blob> {
   const ensureBoldOnRun = (run: Element, makeBold: boolean) => {
     let rPr = run.getElementsByTagName('w:rPr')[0];
@@ -320,6 +321,44 @@ export async function applyAstMutationsToDocx(
         } else {
           applyTextToParagraphRuns(p, cleanText, mut.bold);
         }
+      }
+    }
+  // 1.5. Insert brand-new / incidental findings before the IMPRESSION: header
+  if (insertedFindings && insertedFindings.length > 0) {
+    let headerEl: Element | null = null;
+    if (impressionHeaderId && pMap.has(impressionHeaderId)) {
+      headerEl = pMap.get(impressionHeaderId)!;
+    }
+    if (!headerEl) {
+      pMap.forEach((el) => {
+        if (!headerEl) {
+          const t = getElementText(el).trim().toUpperCase();
+          if (t === 'IMPRESSION:' || t.startsWith('IMPRESSION:') || t === 'CONCLUSION:' || t.startsWith('CONCLUSION:')) {
+            headerEl = el;
+          }
+        }
+      });
+    }
+
+    if (headerEl && headerEl.parentNode) {
+      for (const item of insertedFindings) {
+        const isBold = item.startsWith('BOLD::') || item.includes('BOLD::');
+        const cleanText = item.replace(/^BOLD::\s*/, '').trim();
+        if (!cleanText) continue;
+
+        const newP = (headerEl.previousElementSibling || headerEl).cloneNode(true) as Element;
+        const rPrTags = newP.getElementsByTagName('w:rPr');
+        for (let r_i = 0; r_i < rPrTags.length; r_i++) {
+          const u = rPrTags[r_i].getElementsByTagName('w:u')[0];
+          if (u) rPrTags[r_i].removeChild(u);
+          if (!isBold) {
+            const b = rPrTags[r_i].getElementsByTagName('w:b')[0];
+            if (b) rPrTags[r_i].removeChild(b);
+          }
+        }
+
+        applyTextToParagraphRuns(newP, cleanText, isBold);
+        headerEl.parentNode.insertBefore(newP, headerEl);
       }
     }
   }
@@ -707,8 +746,11 @@ export async function mergeFindingsIntoDocxWithAstEngine(
     return !mutations.some(m => m.new_text === paragraphFindings[idx]);
   });
 
+  const insertedFindings: string[] = [];
+
   for (const item of unmatchedFindings) {
     const isHeading = item.replace(/^BOLD::\s*/, '').trim().endsWith(':');
+    let matched = false;
     for (const node of paragraphNodes) {
       if (!usedNodeIds.has(node.id)) {
         const isNodeHeading = node.type === 'section_heading' || node.current_text.trim().endsWith(':');
@@ -722,8 +764,12 @@ export async function mergeFindingsIntoDocxWithAstEngine(
           new_text: item,
           bold: item.startsWith('BOLD::') || item.includes('BOLD::')
         });
+        matched = true;
         break;
       }
+    }
+    if (!matched) {
+      insertedFindings.push(item);
     }
   }
 
@@ -735,6 +781,7 @@ export async function mergeFindingsIntoDocxWithAstEngine(
     mutations,
     impressionItems,
     impressionSlotIds,
-    impressionHeaderId
+    impressionHeaderId,
+    insertedFindings
   );
 }
