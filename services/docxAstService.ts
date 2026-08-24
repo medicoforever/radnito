@@ -339,20 +339,83 @@ export async function applyAstMutationsToDocx(
 
     const slotElements = impressionSlotIds.map(id => pMap.get(id)).filter(Boolean) as Element[];
 
-    const hasNativeBullet = (p: Element): boolean => {
+    // 1. Detect if any template slot has native bullet list formatting (numPr / ListParagraph)
+    let masterNumPr: Element | null = null;
+    let masterPStyle: Element | null = null;
+    for (const p of slotElements) {
       const pPr = p.getElementsByTagName('w:pPr')[0];
-      if (!pPr) return false;
-      const numPr = pPr.getElementsByTagName('w:numPr')[0];
-      if (numPr) return true;
-      const pStyle = pPr.getElementsByTagName('w:pStyle')[0];
-      if (pStyle) {
-        const val = pStyle.getAttribute('w:val') || pStyle.getAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val') || '';
-        if (val.toLowerCase().includes('list') || val.toLowerCase().includes('bullet')) return true;
+      if (pPr) {
+        const numPr = pPr.getElementsByTagName('w:numPr')[0];
+        if (numPr && !masterNumPr) {
+          masterNumPr = numPr;
+        }
+        const pStyle = pPr.getElementsByTagName('w:pStyle')[0];
+        if (pStyle && !masterPStyle) {
+          const val = pStyle.getAttribute('w:val') || pStyle.getAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val') || '';
+          if (val.toLowerCase().includes('list') || val.toLowerCase().includes('bullet')) {
+            masterPStyle = pStyle;
+          }
+        }
       }
-      return false;
+    }
+
+    const formatBulletParagraph = (p: Element, cleanBullet: string) => {
+      let pPr = p.getElementsByTagName('w:pPr')[0];
+      if (!pPr) {
+        pPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pPr');
+        p.insertBefore(pPr, p.firstChild);
+      }
+
+      if (masterNumPr || masterPStyle) {
+        // Uniform Native Word List formatting across all bullet paragraphs
+        let pStyle = pPr.getElementsByTagName('w:pStyle')[0];
+        if (!pStyle && masterPStyle) {
+          pPr.insertBefore(masterPStyle.cloneNode(true), pPr.firstChild);
+        } else if (!pStyle) {
+          pStyle = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pStyle');
+          pStyle.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', 'ListParagraph');
+          pPr.insertBefore(pStyle, pPr.firstChild);
+        }
+
+        let numPr = pPr.getElementsByTagName('w:numPr')[0];
+        if (!numPr && masterNumPr) {
+          pPr.appendChild(masterNumPr.cloneNode(true));
+        }
+
+        // Native list renders bullet point natively; write pure text without bullet glyph
+        const tTags = p.getElementsByTagName('w:t');
+        if (tTags.length > 0) {
+          tTags[0].textContent = cleanBullet;
+          tTags[0].setAttribute('xml:space', 'preserve');
+          for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
+        }
+      } else {
+        // Uniform Manual Bullet with clean Hanging Indent (Left: 720 / Hanging: 360)
+        const oldNumPr = pPr.getElementsByTagName('w:numPr')[0];
+        if (oldNumPr) pPr.removeChild(oldNumPr);
+
+        let ind = pPr.getElementsByTagName('w:ind')[0];
+        if (!ind) {
+          ind = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:ind');
+          ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:left', '720');
+          ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:hanging', '360');
+          pPr.appendChild(ind);
+        } else {
+          ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:left', '720');
+          ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:hanging', '360');
+        }
+
+        const tTags = p.getElementsByTagName('w:t');
+        if (tTags.length > 0) {
+          tTags[0].textContent = `•  ${cleanBullet}`;
+          tTags[0].setAttribute('xml:space', 'preserve');
+          for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
+        }
+      }
     };
 
     if (slotElements.length > 0) {
+      const primarySlot = (masterNumPr ? slotElements.find(p => p.getElementsByTagName('w:numPr').length > 0) : slotElements[0]) || slotElements[0];
       const lastSlot = slotElements[slotElements.length - 1];
       let lastInserted = lastSlot;
 
@@ -360,24 +423,10 @@ export async function applyAstMutationsToDocx(
         const cleanBullet = impressionItems[i].replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
         if (i < slotElements.length) {
           const p = slotElements[i];
-          const isNative = hasNativeBullet(p);
-          const bulletText = isNative ? cleanBullet : `•  ${cleanBullet}`;
-          const tTags = p.getElementsByTagName('w:t');
-          if (tTags.length > 0) {
-            tTags[0].textContent = bulletText;
-            tTags[0].setAttribute('xml:space', 'preserve');
-            for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
-          }
+          formatBulletParagraph(p, cleanBullet);
         } else {
-          const newP = lastSlot.cloneNode(true) as Element;
-          const isNative = hasNativeBullet(newP);
-          const bulletText = isNative ? cleanBullet : `•  ${cleanBullet}`;
-          const tTags = newP.getElementsByTagName('w:t');
-          if (tTags.length > 0) {
-            tTags[0].textContent = bulletText;
-            tTags[0].setAttribute('xml:space', 'preserve');
-            for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
-          }
+          const newP = primarySlot.cloneNode(true) as Element;
+          formatBulletParagraph(newP, cleanBullet);
           lastInserted.parentNode?.insertBefore(newP, lastInserted.nextSibling);
           lastInserted = newP;
         }
@@ -410,14 +459,7 @@ export async function applyAstMutationsToDocx(
           if (u) rPrTags[r_i].removeChild(u);
         }
 
-        const bulletText = `•  ${cleanBullet}`;
-        const tTags = newP.getElementsByTagName('w:t');
-        if (tTags.length > 0) {
-          tTags[0].textContent = bulletText;
-          tTags[0].setAttribute('xml:space', 'preserve');
-          for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
-        }
-
+        formatBulletParagraph(newP, cleanBullet);
         lastInserted.parentNode?.insertBefore(newP, lastInserted.nextSibling);
         lastInserted = newP;
       }
@@ -453,10 +495,12 @@ export async function applyAstMutationsToDocx(
           const p = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:p');
           const r = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:r');
           const t = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:t');
-          t.textContent = `•  ${cleanBullet}`;
+          t.textContent = cleanBullet;
           t.setAttribute('xml:space', 'preserve');
           r.appendChild(t);
           p.appendChild(r);
+
+          formatBulletParagraph(p, cleanBullet);
 
           if (sectPr) {
             body.insertBefore(p, sectPr);
