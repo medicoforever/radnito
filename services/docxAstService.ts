@@ -146,23 +146,9 @@ export async function buildDocumentAstFromDocx(docxBase64: string): Promise<{
         }
       }
 
-      // If table is a single-row/single-cell score box (e.g. Qanadli 0%), find the preceding section heading
-      let tableContextLabel = '';
-      if (rows.length === 1 && ast.length > 0) {
-        for (let k = ast.length - 1; k >= 0; k--) {
-          if (ast[k].type === 'section_heading' || ast[k].type === 'narrative') {
-            tableContextLabel = ast[k].current_text;
-            break;
-          }
-        }
-      }
-
       for (let r_i = 0; r_i < rows.length; r_i++) {
         const cells = getDirectChildren(rows[r_i], 'tc');
-        let rowLabel = cells.length > 0 ? getElementText(cells[0]).trim() : `Row_${r_i}`;
-        if (rows.length === 1 && tableContextLabel) {
-          rowLabel = tableContextLabel;
-        }
+        const rowLabel = cells.length > 0 ? getElementText(cells[0]).trim() : `Row_${r_i}`;
 
         for (let c_i = 0; c_i < cells.length; c_i++) {
           const cellId = `tbl_${tblIndex}_r_${r_i}_c_${c_i}`;
@@ -174,7 +160,7 @@ export async function buildDocumentAstFromDocx(docxBase64: string): Promise<{
               id: cellId,
               type: 'table_cell',
               row_label: rowLabel,
-              col_label: headerLabels[c_i] || (rows.length === 1 ? 'Score' : ''),
+              col_label: headerLabels[c_i] || '',
               current_text: cellText,
               current_val: cellText,
             });
@@ -205,8 +191,7 @@ export async function applyAstMutationsToDocx(
   cellMap: Map<string, Element>,
   mutations: AstMutation[],
   impressionItems?: string[],
-  impressionSlotIds: string[] = [],
-  displayFindings?: string[]
+  impressionSlotIds: string[] = []
 ): Promise<Blob> {
   const ensureBoldOnRun = (run: Element, makeBold: boolean) => {
     let rPr = run.getElementsByTagName('w:rPr')[0];
@@ -400,30 +385,9 @@ export async function applyAstMutationsToDocx(
       if (t) updatedTexts.add(t);
     });
 
-    // Check both explicit mutations and display findings
-    const itemsToCheck = [...mutations.map(m => ({ text: m.new_text, bold: m.bold }))];
-    if (displayFindings && displayFindings.length > 0) {
-      displayFindings.forEach(df => {
-        if (!df.toUpperCase().startsWith('IMPRESSION:')) {
-          itemsToCheck.push({ text: df, bold: df.startsWith('BOLD::') });
-        }
-      });
-    }
-
-    for (const item of itemsToCheck) {
-      const clean = (item.text || '').replace(/^BOLD::\s*/, '').trim();
+    for (const mut of mutations) {
+      const clean = (mut.new_text || '').replace(/^BOLD::\s*/, '').trim();
       if (!clean) continue;
-
-      // Direct Table Percentage Score Guard (e.g. "15 %" replacing "0 %" in single-box tables)
-      if (clean.includes('%') && (clean.length <= 8 || clean.toLowerCase().includes('score'))) {
-        cellMap.forEach((tc) => {
-          const cText = getElementText(tc).trim();
-          if (cText.includes('%')) {
-            const p = tc.getElementsByTagName('w:p')[0] || tc;
-            applyTextToParagraphRuns(p, clean, true);
-          }
-        });
-      }
 
       let found = false;
       for (const ut of updatedTexts) {
@@ -433,6 +397,7 @@ export async function applyAstMutationsToDocx(
         }
       }
 
+      // If a dictated finding is missing from DOM, find the best matching baseline node and update it
       if (!found) {
         let bestTarget: Element | null = null;
         let bestScore = 0;
@@ -440,6 +405,7 @@ export async function applyAstMutationsToDocx(
           if (key.startsWith('node_') || key.startsWith('p_')) {
             const currentT = getElementText(el).trim();
             if (currentT && !currentT.toUpperCase().startsWith('IMPRESSION:')) {
+              // Word overlap score
               const cWords = new Set(clean.toLowerCase().split(/\W+/).filter(w => w.length > 2));
               const tWords = new Set(currentT.toLowerCase().split(/\W+/).filter(w => w.length > 2));
               let overlap = 0;
@@ -453,7 +419,7 @@ export async function applyAstMutationsToDocx(
         });
 
         if (bestTarget) {
-          applyTextToParagraphRuns(bestTarget, clean, item.bold);
+          applyTextToParagraphRuns(bestTarget, clean, mut.bold);
         }
       }
     }
