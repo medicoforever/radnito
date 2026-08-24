@@ -3,6 +3,7 @@ import { parseZip, createZip, base64ToUint8Array, ZipEntry } from './docxService
 export interface DocumentAstNode {
   id: string;
   type: 'title' | 'clinical_profile' | 'technique' | 'section_heading' | 'inline_field' | 'narrative' | 'impression_header' | 'impression_item' | 'table_cell';
+  section?: string;
   label?: string;
   current_text: string;
   current_val?: string;
@@ -86,6 +87,7 @@ export async function buildDocumentAstFromDocx(docxBase64: string): Promise<{
 
   let nodeIndex = 0;
   let inImpressionSection = false;
+  let currentSection = 'header';
 
   for (let i = 0; i < body.childNodes.length; i++) {
     const node = body.childNodes[i];
@@ -111,6 +113,7 @@ export async function buildDocumentAstFromDocx(docxBase64: string): Promise<{
         pType = 'impression_header';
         impressionHeaderId = nodeId;
         inImpressionSection = true;
+        currentSection = 'impression';
       } else if (inImpressionSection) {
         pType = 'impression_item';
         if (txt && !txt.includes('MD') && !txt.includes('RADIOLOGIST') && !txt.includes('Page ')) {
@@ -123,6 +126,7 @@ export async function buildDocumentAstFromDocx(docxBase64: string): Promise<{
       } else if (txt.endsWith(':') || (txt.includes(':') && txt.split(':')[0].split(/\s+/).length <= 4 && !txt.split(':')[1].trim())) {
         pType = 'section_heading';
         label = txt.split(':')[0].trim();
+        currentSection = label.toLowerCase().replace(/[^a-z0-9]/g, '');
       } else if (txt.includes(':') && !upper.startsWith('FINDINGS') && !upper.startsWith('OBSERVATIONS') && !upper.startsWith('C.T.') && !upper.startsWith('MRI')) {
         pType = 'inline_field';
         const parts = txt.split(':', 2);
@@ -135,6 +139,7 @@ export async function buildDocumentAstFromDocx(docxBase64: string): Promise<{
       ast.push({
         id: nodeId,
         type: pType,
+        section: currentSection,
         label,
         current_text: txt,
         current_val: val,
@@ -797,7 +802,12 @@ export async function mergeFindingsIntoDocxWithAstEngine(
   const insertions: AstInsertion[] = [];
 
 function extractMedicalKeywords(text: string): Set<string> {
-  const stopWords = new Set(['and', 'the', 'for', 'with', 'are', 'is', 'not', 'any', 'been', 'seen', 'from', 'both', 'show', 'shows', 'appear', 'appears', 'within', 'limits', 'rest', 'other']);
+  const stopWords = new Set([
+    'and', 'the', 'for', 'with', 'are', 'is', 'not', 'any', 'been', 'seen',
+    'from', 'both', 'show', 'shows', 'appear', 'appears', 'within', 'limits',
+    'rest', 'other', 'normal', 'abnormality', 'signal', 'intensity', 'characteristics',
+    'features', 'study', 'noted', 'no', 'of', 'in', 'at'
+  ]);
   let t = text.toLowerCase();
   t = t.replace(/\bsacroiliac\b/g, 'si');
   t = t.replace(/\bsacro-iliac\b/g, 'si');
@@ -816,11 +826,16 @@ function extractMedicalKeywords(text: string): Set<string> {
   return new Set(rawWords);
 }
 
+  let activeReportSection = 'header';
+
   // Pass 1: Exact / Colon-Key / Word Overlap Matching
   for (const finding of paragraphFindings) {
     const isBold = finding.startsWith('BOLD::') || finding.includes('BOLD::');
     const cleanFinding = finding.replace(/^BOLD::\s*/, '').trim();
     const isHeading = cleanFinding.endsWith(':');
+    if (isHeading) {
+      activeReportSection = cleanFinding.toLowerCase().replace(/[^a-z0-9]/g, '');
+    }
     const fWords = extractMedicalKeywords(cleanFinding);
 
     let bestScore = 0.0;
@@ -834,6 +849,11 @@ function extractMedicalKeywords(text: string): Set<string> {
       const nText = node.current_text.trim();
       if (!nText) continue;
       const isNodeHeading = node.type === 'section_heading' || nText.endsWith(':');
+
+      // Section Isolation: Narrative findings inside a section cannot match nodes in previous/other sections
+      if (activeReportSection !== 'header' && node.section && node.section !== 'header' && node.section !== activeReportSection) {
+        continue;
+      }
 
       // 1. Colon match (e.g. "L1-L2:", "Ventricular System:", "Clinical Profile:")
       if (fColon && nText.includes(':')) {
@@ -861,9 +881,9 @@ function extractMedicalKeywords(text: string): Set<string> {
       const nWords = extractMedicalKeywords(nText);
       let overlap = 0;
       fWords.forEach(w => { if (nWords.has(w)) overlap++; });
-      if (nWords.size > 0) {
+      if (nWords.size > 0 && overlap > 0) {
         const coverage = overlap / nWords.size;
-        if ((coverage >= 0.35 || overlap >= 2) && coverage > bestScore) {
+        if ((coverage >= 0.40 || overlap >= 2) && coverage > bestScore) {
           bestScore = coverage;
           bestNodeId = node.id;
         }
@@ -871,9 +891,9 @@ function extractMedicalKeywords(text: string): Set<string> {
 
       // 4. Word overlap similarity (strict threshold to avoid cross-concept collisions)
       const union = fWords.size + nWords.size - overlap;
-      const score = union > 0 ? overlap / union : 0;
+      const score = union > 0 && overlap > 0 ? overlap / union : 0;
 
-      if (score > bestScore && score >= 0.30) {
+      if (score > bestScore && score >= 0.35) {
         bestScore = score;
         bestNodeId = node.id;
       }
