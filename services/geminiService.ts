@@ -919,12 +919,12 @@ ${findingsText}
 ## STRICT AST SURGERY & CLINICAL FIDELITY RULES:
 1. **100% Comprehensive Clinical Ingestion**:
    - EVERY observation, measurement, pathology, and clinical history dictated by the radiologist MUST be completely included in the final report.
-2. **Surgical Node Updates, Clinical Profile Placement & Contradiction Removal**:
+2. **Surgical Node Updates, Baseline Normal Overwrite & Contradiction Elimination**:
    - Map each clinical finding to its most appropriate anatomical node_id.
    - **Clinical Profile / History Placement**: Always map the clinical history / patient complaint to the "Clinical profile:" or "Indication:" node at the top of the report (written as "Clinical profile: ..."). NEVER insert Clinical Profile at the bottom.
-   - **Baseline Normal Sentence Overwrite**: When an anatomical structure is dictated with an abnormal finding (e.g. SI joint degenerative changes, facet arthropathy, disc bulge), you MUST target the baseline normal template node for that structure (e.g. "SI joints and pubic symphysis appears normal" or "No disc bulge or protrusion is seen") in "updates" to overwrite it with the abnormal finding. NEVER leave the baseline normal sentence untouched or duplicated alongside the abnormal finding.
+   - **Mandatory Baseline Normal Overwrite**: When an abnormal finding or pathology is dictated for an anatomical region, compartment, or structure (e.g. mediastinum, hilar regions, lymphadenopathy, lung parenchyma, pleura, effusion, vessels, spine, joints, brain), you MUST target the baseline normal template node for that anatomical region (e.g. "The anatomical configuration of the structures in the mediastinum and both hilar regions are normal", "There is no evidence of pleural effusion seen", "SI joints and pubic symphysis appears normal", "No disc bulge or protrusion is seen") in "updates" to OVERWRITE it with the finding. NEVER leave the baseline normal sentence intact or duplicated alongside the abnormal finding. A normal baseline statement and an abnormal finding for the same anatomical compartment MUST NEVER coexist in the report.
    - **Mingled Sentence Handling**: If a baseline template node combines multiple anatomical concepts (e.g. "The basal cisterns, cortical sulci and sylvian fissures are normal") and only one structure is abnormal (e.g. cortical sulcal prominence), rewrite that node so the normal structures are retained (e.g. "The basal cisterns are normal.") and the abnormal finding is accurately documented.
-   - **Automatic Contradiction Removal**: If an abnormal finding supersedes, covers, or contradicts an existing baseline normal node (e.g. ventricular atrophy finding supersedes normal ventricular system node, or disc bulge finding supersedes 'no significant disc bulge' node), you MUST include that superseded normal node in "updates" with "new_text": "" (empty string) so it is cleanly removed from the Word document with zero leftover contradictory text.
+   - **Automatic Contradiction Removal**: If an abnormal finding supersedes, covers, or contradicts an existing baseline normal node (e.g. mediastinal/hilar lymphadenopathy supersedes normal mediastinum/hilar node, ventricular prominence supersedes normal ventricles node, disc bulge supersedes 'no significant disc bulge' node), you MUST either overwrite that baseline node with the finding in "updates" or set that baseline node to "new_text": "" (empty string) so it is cleanly removed from the Word document with zero leftover contradictory text.
    - For unaffected normal nodes, do NOT include them in "updates" (they remain 100% intact with their original template styles).
 3. **5-Layer Structural DNA & BOLD Protocol**:
    - Update Clinical Profile node if history/indication is dictated (written as "Clinical profile: ...").
@@ -936,9 +936,9 @@ ${crossSkillBlock}
    - Restrict findings strictly to the active template's anatomical domain. Do NOT merge mismatched organ findings into unrelated template nodes.
 8. **TITLE IMMUTABILITY MANDATE**:
    - The document title belongs strictly to the template document and MUST NOT be altered, shortened, or replaced by outside UI names or abbreviations. Do NOT include any title node in "updates".
-9. **BRAND-NEW / INCIDENTAL FINDINGS MANDATE ("insertions")**:
-   - If the radiologist dictates a pathology, measurement, or incidental finding that does NOT have a corresponding baseline node in the template AST (e.g. pleural effusion, atelectasis, lymphadenopathy, incidental cysts, fractures), you MUST include it in "insertions" specifying:
-     { "after_node_id": "<id of the preceding paragraph or paragraph immediately before IMPRESSION>", "text": "Exact clinical finding text", "bold": false }
+9. **INCIDENTAL / UNMATCHED FINDINGS MANDATE ("insertions")**:
+   - Use "insertions" ONLY for brand-new incidental findings that do NOT belong to any anatomical organ or compartment present in the baseline template AST. If the template already contains a baseline node for that organ/compartment (e.g. mediastinum, hila, pleura, lung), you MUST update that baseline node in "updates" instead of using "insertions".
+   - Specify: { "after_node_id": "<id of the preceding paragraph or paragraph immediately before IMPRESSION>", "text": "Exact clinical finding text", "bold": false }
    - Also ensure it is present in "display_findings" at that exact same sequential position.
 10. Return JSON schema:
 {
