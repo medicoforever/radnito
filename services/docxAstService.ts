@@ -517,53 +517,59 @@ export async function applyAstMutationsToDocx(
       }
     };
 
-    if (slotElements.length > 0) {
-      const primarySlot = (masterNumPr ? slotElements.find(p => p.getElementsByTagName('w:numPr').length > 0) : slotElements[0]) || slotElements[0];
-      const lastSlot = slotElements[slotElements.length - 1];
-      let lastInserted = lastSlot;
-
-      for (let i = 0; i < impressionItems.length; i++) {
-        const cleanBullet = impressionItems[i].replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
-        if (i < slotElements.length) {
-          const p = slotElements[i];
-          formatBulletParagraph(p, cleanBullet);
-        } else {
-          const newP = primarySlot.cloneNode(true) as Element;
-          formatBulletParagraph(newP, cleanBullet);
-          lastInserted.parentNode?.insertBefore(newP, lastInserted.nextSibling);
-          lastInserted = newP;
-        }
-      }
-
-      for (let i = impressionItems.length; i < slotElements.length; i++) {
-        const p = slotElements[i];
-        if (p.parentNode) {
-          p.parentNode.removeChild(p);
-        } else {
-          const tTags = p.getElementsByTagName('w:t');
-          for (let j = 0; j < tTags.length; j++) {
-            tTags[j].textContent = '';
+    // Clean up old slot elements and intermediate empty spacer paragraphs after headerEl
+    if (headerEl && headerEl.parentNode) {
+      const parent = headerEl.parentNode;
+      const toRemove: Element[] = [];
+      let sib = headerEl.nextSibling;
+      while (sib) {
+        if (sib.nodeType === 1) {
+          const el = sib as Element;
+          if (el.localName === 'p' || el.nodeName === 'w:p') {
+            const txt = getElementText(el).trim();
+            // Remove if it is in slotElements or an empty spacer paragraph after header
+            if (slotElements.includes(el) || !txt) {
+              toRemove.push(el);
+            }
           }
         }
+        sib = sib.nextSibling;
       }
-    } else if (headerEl) {
-      // Template has IMPRESSION: header but 0 pre-existing slot paragraphs
+      for (const el of toRemove) {
+        if (el.parentNode) {
+          el.parentNode.removeChild(el);
+        }
+      }
+
       let lastInserted: Element = headerEl;
       for (let i = 0; i < impressionItems.length; i++) {
         const cleanBullet = impressionItems[i].replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
-        const newP = (headerEl as Element).cloneNode(true) as Element;
+        if (!cleanBullet) continue;
+
+        const newP = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:p');
+        const newR = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:r');
+        const newRPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rPr');
         
-        // Remove bold tag or underline from bullet runs if header was bold/underlined
-        const rPrTags = newP.getElementsByTagName('w:rPr');
-        for (let r_i = 0; r_i < rPrTags.length; r_i++) {
-          const b = rPrTags[r_i].getElementsByTagName('w:b')[0];
-          if (b) rPrTags[r_i].removeChild(b);
-          const u = rPrTags[r_i].getElementsByTagName('w:u')[0];
-          if (u) rPrTags[r_i].removeChild(u);
-        }
+        const rFonts = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rFonts');
+        rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:ascii', 'Times New Roman');
+        rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:hAnsi', 'Times New Roman');
+        rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:cs', 'Times New Roman');
+        newRPr.appendChild(rFonts);
+
+        const sz = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:sz');
+        sz.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', '24');
+        newRPr.appendChild(sz);
+        const szCs = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:szCs');
+        szCs.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', '24');
+        newRPr.appendChild(szCs);
+
+        newR.appendChild(newRPr);
+        const newT = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:t');
+        newR.appendChild(newT);
+        newP.appendChild(newR);
 
         formatBulletParagraph(newP, cleanBullet);
-        lastInserted.parentNode?.insertBefore(newP, lastInserted.nextSibling);
+        parent.insertBefore(newP, lastInserted.nextSibling);
         lastInserted = newP;
       }
     } else {
@@ -757,11 +763,6 @@ export async function mergeFindingsIntoDocxWithAstEngine(
       if (!nText) continue;
       const isNodeHeading = node.type === 'section_heading' || nText.endsWith(':');
 
-      // Do not match narrative findings onto section headings via word overlap
-      if (!isHeading && isNodeHeading) continue;
-      // Do not match section headings onto narrative nodes
-      if (isHeading && !isNodeHeading) continue;
-
       // 1. Colon match (e.g. "L1-L2:", "Ventricular System:", "Clinical Profile:")
       if (fColon && nText.includes(':')) {
         const nColon = nText.split(':', 2)[0].trim().toLowerCase().replace(/[^a-zA-Z0-9]/g, '');
@@ -772,6 +773,11 @@ export async function mergeFindingsIntoDocxWithAstEngine(
         }
       }
 
+      // Do not match narrative findings onto section headings via word overlap
+      if (!isHeading && isNodeHeading) continue;
+      // Do not match section headings onto narrative nodes
+      if (isHeading && !isNodeHeading) continue;
+
       // 2. Exact match
       if (cleanFinding.toLowerCase() === nText.toLowerCase()) {
         bestScore = 90.0;
@@ -779,14 +785,23 @@ export async function mergeFindingsIntoDocxWithAstEngine(
         break;
       }
 
-      // 3. Word overlap similarity (strict threshold to avoid cross-concept collisions)
+      // 3. Containment / Coverage match (e.g. "Both SI joints show mild degenerative changes" vs "SI joints and pubic symphysis appears normal")
       const nWords = new Set(nText.toLowerCase().replace(/[^a-zA-Z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2));
       let overlap = 0;
       fWords.forEach(w => { if (nWords.has(w)) overlap++; });
+      if (nWords.size > 0) {
+        const coverage = overlap / nWords.size;
+        if (coverage >= 0.60 && coverage > bestScore) {
+          bestScore = coverage;
+          bestNodeId = node.id;
+        }
+      }
+
+      // 4. Word overlap similarity (strict threshold to avoid cross-concept collisions)
       const union = fWords.size + nWords.size - overlap;
       const score = union > 0 ? overlap / union : 0;
 
-      if (score > bestScore && score >= 0.40) {
+      if (score > bestScore && score >= 0.35) {
         bestScore = score;
         bestNodeId = node.id;
       }
