@@ -191,7 +191,8 @@ export async function applyAstMutationsToDocx(
   cellMap: Map<string, Element>,
   mutations: AstMutation[],
   impressionItems?: string[],
-  impressionSlotIds: string[] = []
+  impressionSlotIds: string[] = [],
+  impressionHeaderId?: string
 ): Promise<Blob> {
   const ensureBoldOnRun = (run: Element, makeBold: boolean) => {
     let rPr = run.getElementsByTagName('w:rPr')[0];
@@ -319,31 +320,48 @@ export async function applyAstMutationsToDocx(
   }
 
   // 2. Apply Impression Bullets
-  if (impressionItems && impressionItems.length > 0 && impressionSlotIds.length > 0) {
+  if (impressionItems && impressionItems.length > 0) {
+    let headerEl: Element | null = null;
+    if (impressionHeaderId && pMap.has(impressionHeaderId)) {
+      headerEl = pMap.get(impressionHeaderId)!;
+    }
+    if (!headerEl) {
+      // Find IMPRESSION: or CONCLUSION: paragraph in DOM
+      pMap.forEach((el) => {
+        if (!headerEl) {
+          const t = getElementText(el).trim().toUpperCase();
+          if (t === 'IMPRESSION:' || t.startsWith('IMPRESSION:') || t === 'CONCLUSION:' || t.startsWith('CONCLUSION:')) {
+            headerEl = el;
+          }
+        }
+      });
+    }
+
     const slotElements = impressionSlotIds.map(id => pMap.get(id)).filter(Boolean) as Element[];
+
+    const hasNativeBullet = (p: Element): boolean => {
+      const pPr = p.getElementsByTagName('w:pPr')[0];
+      if (!pPr) return false;
+      const numPr = pPr.getElementsByTagName('w:numPr')[0];
+      if (numPr) return true;
+      const pStyle = pPr.getElementsByTagName('w:pStyle')[0];
+      if (pStyle) {
+        const val = pStyle.getAttribute('w:val') || pStyle.getAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val') || '';
+        if (val.toLowerCase().includes('list') || val.toLowerCase().includes('bullet')) return true;
+      }
+      return false;
+    };
+
     if (slotElements.length > 0) {
       const lastSlot = slotElements[slotElements.length - 1];
       let lastInserted = lastSlot;
-
-      const hasNativeBullet = (p: Element): boolean => {
-        const pPr = p.getElementsByTagName('w:pPr')[0];
-        if (!pPr) return false;
-        const numPr = pPr.getElementsByTagName('w:numPr')[0];
-        if (numPr) return true;
-        const pStyle = pPr.getElementsByTagName('w:pStyle')[0];
-        if (pStyle) {
-          const val = pStyle.getAttribute('w:val') || pStyle.getAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val') || '';
-          if (val.toLowerCase().includes('list') || val.toLowerCase().includes('bullet')) return true;
-        }
-        return false;
-      };
 
       for (let i = 0; i < impressionItems.length; i++) {
         const cleanBullet = impressionItems[i].replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
         if (i < slotElements.length) {
           const p = slotElements[i];
           const isNative = hasNativeBullet(p);
-          const bulletText = isNative ? cleanBullet : `• ${cleanBullet}`;
+          const bulletText = isNative ? cleanBullet : `•  ${cleanBullet}`;
           const tTags = p.getElementsByTagName('w:t');
           if (tTags.length > 0) {
             tTags[0].textContent = bulletText;
@@ -353,7 +371,7 @@ export async function applyAstMutationsToDocx(
         } else {
           const newP = lastSlot.cloneNode(true) as Element;
           const isNative = hasNativeBullet(newP);
-          const bulletText = isNative ? cleanBullet : `• ${cleanBullet}`;
+          const bulletText = isNative ? cleanBullet : `•  ${cleanBullet}`;
           const tTags = newP.getElementsByTagName('w:t');
           if (tTags.length > 0) {
             tTags[0].textContent = bulletText;
@@ -367,9 +385,85 @@ export async function applyAstMutationsToDocx(
 
       for (let i = impressionItems.length; i < slotElements.length; i++) {
         const p = slotElements[i];
-        const tTags = p.getElementsByTagName('w:t');
-        for (let j = 0; j < tTags.length; j++) {
-          tTags[j].textContent = '';
+        if (p.parentNode) {
+          p.parentNode.removeChild(p);
+        } else {
+          const tTags = p.getElementsByTagName('w:t');
+          for (let j = 0; j < tTags.length; j++) {
+            tTags[j].textContent = '';
+          }
+        }
+      }
+    } else if (headerEl) {
+      // Template has IMPRESSION: header but 0 pre-existing slot paragraphs
+      let lastInserted: Element = headerEl;
+      for (let i = 0; i < impressionItems.length; i++) {
+        const cleanBullet = impressionItems[i].replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
+        const newP = (headerEl as Element).cloneNode(true) as Element;
+        
+        // Remove bold tag or underline from bullet runs if header was bold/underlined
+        const rPrTags = newP.getElementsByTagName('w:rPr');
+        for (let r_i = 0; r_i < rPrTags.length; r_i++) {
+          const b = rPrTags[r_i].getElementsByTagName('w:b')[0];
+          if (b) rPrTags[r_i].removeChild(b);
+          const u = rPrTags[r_i].getElementsByTagName('w:u')[0];
+          if (u) rPrTags[r_i].removeChild(u);
+        }
+
+        const bulletText = `•  ${cleanBullet}`;
+        const tTags = newP.getElementsByTagName('w:t');
+        if (tTags.length > 0) {
+          tTags[0].textContent = bulletText;
+          tTags[0].setAttribute('xml:space', 'preserve');
+          for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
+        }
+
+        lastInserted.parentNode?.insertBefore(newP, lastInserted.nextSibling);
+        lastInserted = newP;
+      }
+    } else {
+      // If neither slot nor header exists, append IMPRESSION: header and bullets to w:body
+      const body = xmlDoc.getElementsByTagName('w:body')[0];
+      if (body) {
+        const sectPr = body.getElementsByTagName('w:sectPr')[0];
+        
+        const headP = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:p');
+        const headR = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:r');
+        const headRPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rPr');
+        const headB = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:b');
+        const headU = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:u');
+        headU.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', 'single');
+        headRPr.appendChild(headB);
+        headRPr.appendChild(headU);
+        headR.appendChild(headRPr);
+        const headT = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:t');
+        headT.textContent = 'IMPRESSION:';
+        headR.appendChild(headT);
+        headP.appendChild(headR);
+
+        if (sectPr) {
+          body.insertBefore(headP, sectPr);
+        } else {
+          body.appendChild(headP);
+        }
+
+        let lastInserted: Element = headP;
+        for (let i = 0; i < impressionItems.length; i++) {
+          const cleanBullet = impressionItems[i].replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
+          const p = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:p');
+          const r = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:r');
+          const t = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:t');
+          t.textContent = `•  ${cleanBullet}`;
+          t.setAttribute('xml:space', 'preserve');
+          r.appendChild(t);
+          p.appendChild(r);
+
+          if (sectPr) {
+            body.insertBefore(p, sectPr);
+          } else {
+            body.appendChild(p);
+          }
+          lastInserted = p;
         }
       }
     }
@@ -450,7 +544,7 @@ export async function mergeFindingsIntoDocxWithAstEngine(
   templateBase64: string,
   findings: string[]
 ): Promise<Blob> {
-  const { ast, xmlDoc, zipEntries, pMap, cellMap, impressionSlotIds } = await buildDocumentAstFromDocx(templateBase64);
+  const { ast, xmlDoc, zipEntries, pMap, cellMap, impressionHeaderId, impressionSlotIds } = await buildDocumentAstFromDocx(templateBase64);
 
   // 1. Separate findings into Body Findings and Impression Items
   const bodyFindings: string[] = [];
@@ -576,6 +670,7 @@ export async function mergeFindingsIntoDocxWithAstEngine(
     cellMap,
     mutations,
     impressionItems,
-    impressionSlotIds
+    impressionSlotIds,
+    impressionHeaderId
   );
 }
