@@ -542,7 +542,8 @@ export async function applyAstMutationsToDocx(
         pMap.forEach((el, key) => {
           if (key.startsWith('node_') || key.startsWith('p_')) {
             const currentT = getElementText(el).trim();
-            if (currentT && !currentT.toUpperCase().startsWith('IMPRESSION:')) {
+            const isHead = currentT.endsWith(':');
+            if (currentT && key !== 'node_0' && key !== 'p_0' && !currentT.toUpperCase().startsWith('IMPRESSION:') && (!isHead || clean.endsWith(':'))) {
               // Word overlap score
               const cWords = new Set(clean.toLowerCase().split(/\W+/).filter(w => w.length > 2));
               const tWords = new Set(currentT.toLowerCase().split(/\W+/).filter(w => w.length > 2));
@@ -595,13 +596,29 @@ export async function mergeFindingsIntoDocxWithAstEngine(
   const impressionItems: string[] = [];
   let isInImpression = false;
 
-  for (const f of findings) {
+  const titleNode = ast.find(n => n.type === 'title');
+  const templateTitleNormalized = (titleNode?.current_text || ast[0]?.current_text || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+
+  for (let fIdx = 0; fIdx < findings.length; fIdx++) {
+    const f = findings[fIdx];
     let trimmed = (f || '').trim();
     if (!trimmed) continue;
     if (trimmed.includes('|') || trimmed.startsWith('+-') || trimmed.startsWith('|-')) continue;
     if (trimmed.toLowerCase().startsWith('title:')) {
-      trimmed = trimmed.substring(trimmed.indexOf(':') + 1).trim();
-      if (!trimmed) continue;
+      continue;
+    }
+
+    const normalizedF = trimmed.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    // Skip the document Title line from body findings
+    if (fIdx === 0 && (!trimmed.includes(':') || (templateTitleNormalized && normalizedF === templateTitleNormalized))) {
+      continue;
+    }
+    if (templateTitleNormalized && normalizedF === templateTitleNormalized) {
+      continue;
     }
 
     if (trimmed.toUpperCase() === 'IMPRESSION:' || trimmed.toUpperCase().startsWith('IMPRESSION:') || trimmed.toUpperCase() === 'CONCLUSION:' || trimmed.toUpperCase().startsWith('CONCLUSION:')) {
@@ -635,6 +652,7 @@ export async function mergeFindingsIntoDocxWithAstEngine(
   for (const finding of bodyFindings) {
     const isBold = finding.startsWith('BOLD::') || finding.includes('BOLD::');
     const cleanFinding = finding.replace(/^BOLD::\s*/, '').trim();
+    const isHeading = cleanFinding.endsWith(':');
     const fWords = new Set(cleanFinding.toLowerCase().replace(/[^a-zA-Z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2));
 
     let bestScore = 0.0;
@@ -647,6 +665,10 @@ export async function mergeFindingsIntoDocxWithAstEngine(
 
       const nText = node.current_text.trim();
       if (!nText) continue;
+      const isNodeHeading = node.type === 'section_heading' || nText.endsWith(':');
+
+      // Do not match narrative findings onto section headings via word overlap
+      if (!isHeading && isNodeHeading) continue;
 
       // 1. Colon match (e.g. "L1-L2:", "Ventricular System:", "Clinical Profile:")
       if (fColon && nText.includes(':')) {
@@ -672,7 +694,7 @@ export async function mergeFindingsIntoDocxWithAstEngine(
       const union = fWords.size + nWords.size - overlap;
       const score = union > 0 ? overlap / union : 0;
 
-      if (score > bestScore && score >= 0.15) {
+      if (score > bestScore && score >= 0.25) {
         bestScore = score;
         bestNodeId = node.id;
       }
@@ -694,8 +716,13 @@ export async function mergeFindingsIntoDocxWithAstEngine(
   });
 
   for (const item of unmatchedFindings) {
+    const isHeading = item.replace(/^BOLD::\s*/, '').trim().endsWith(':');
     for (const node of bodyNodes) {
       if (!usedNodeIds.has(node.id)) {
+        const isNodeHeading = node.type === 'section_heading' || node.current_text.trim().endsWith(':');
+        // Do not place narrative findings into section headings in sequential alignment
+        if (!isHeading && isNodeHeading) continue;
+
         usedNodeIds.add(node.id);
         mutations.push({
           node_id: node.id,
