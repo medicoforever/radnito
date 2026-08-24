@@ -441,3 +441,141 @@ export async function applyAstMutationsToDocx(
 
   return createZip(updatedEntries);
 }
+
+/**
+ * Surgically merges a structured findings array into a template DOCX using the Semantic AST engine.
+ * 100% deterministic, 0 API calls, 100% style/font/spacing preservation identical to AST auto-download.
+ */
+export async function mergeFindingsIntoDocxWithAstEngine(
+  templateBase64: string,
+  findings: string[]
+): Promise<Blob> {
+  const { ast, xmlDoc, zipEntries, pMap, cellMap, impressionSlotIds } = await buildDocumentAstFromDocx(templateBase64);
+
+  // 1. Separate findings into Body Findings and Impression Items
+  const bodyFindings: string[] = [];
+  const impressionItems: string[] = [];
+  let isInImpression = false;
+
+  for (const f of findings) {
+    let trimmed = (f || '').trim();
+    if (!trimmed) continue;
+    if (trimmed.includes('|') || trimmed.startsWith('+-') || trimmed.startsWith('|-')) continue;
+    if (trimmed.toLowerCase().startsWith('title:')) {
+      trimmed = trimmed.substring(trimmed.indexOf(':') + 1).trim();
+      if (!trimmed) continue;
+    }
+
+    if (trimmed.toUpperCase() === 'IMPRESSION:' || trimmed.toUpperCase().startsWith('IMPRESSION:') || trimmed.toUpperCase() === 'CONCLUSION:' || trimmed.toUpperCase().startsWith('CONCLUSION:')) {
+      isInImpression = true;
+      if (trimmed.includes('###')) {
+        const parts = trimmed.split('###').slice(1);
+        for (const p of parts) {
+          const cleanP = p.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
+          if (cleanP) impressionItems.push(cleanP);
+        }
+      }
+      continue;
+    }
+
+    if (isInImpression) {
+      const cleanP = trimmed.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
+      if (cleanP) impressionItems.push(cleanP);
+      continue;
+    }
+
+    bodyFindings.push(trimmed);
+  }
+
+  const mutations: AstMutation[] = [];
+  const usedNodeIds = new Set<string>();
+
+  // Filter AST body nodes (excluding impression items and header)
+  const bodyNodes = ast.filter(n => n.type !== 'impression_header' && n.type !== 'impression_item');
+
+  // Pass 1: Exact / Colon-Key / Word Overlap Matching
+  for (const finding of bodyFindings) {
+    const isBold = finding.startsWith('BOLD::') || finding.includes('BOLD::');
+    const cleanFinding = finding.replace(/^BOLD::\s*/, '').trim();
+    const fWords = new Set(cleanFinding.toLowerCase().replace(/[^a-zA-Z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2));
+
+    let bestScore = 0.0;
+    let bestNodeId: string | null = null;
+
+    const fColon = cleanFinding.includes(':') ? cleanFinding.split(':', 2)[0].trim().toLowerCase().replace(/[^a-zA-Z0-9]/g, '') : null;
+
+    for (const node of bodyNodes) {
+      if (usedNodeIds.has(node.id)) continue;
+
+      const nText = node.current_text.trim();
+      if (!nText) continue;
+
+      // 1. Colon match (e.g. "L1-L2:", "Ventricular System:", "Clinical Profile:")
+      if (fColon && nText.includes(':')) {
+        const nColon = nText.split(':', 2)[0].trim().toLowerCase().replace(/[^a-zA-Z0-9]/g, '');
+        if (fColon === nColon && fColon.length > 0) {
+          bestScore = 100.0;
+          bestNodeId = node.id;
+          break;
+        }
+      }
+
+      // 2. Exact match
+      if (cleanFinding.toLowerCase() === nText.toLowerCase()) {
+        bestScore = 90.0;
+        bestNodeId = node.id;
+        break;
+      }
+
+      // 3. Word overlap similarity
+      const nWords = new Set(nText.toLowerCase().replace(/[^a-zA-Z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2));
+      let overlap = 0;
+      fWords.forEach(w => { if (nWords.has(w)) overlap++; });
+      const union = fWords.size + nWords.size - overlap;
+      const score = union > 0 ? overlap / union : 0;
+
+      if (score > bestScore && score >= 0.15) {
+        bestScore = score;
+        bestNodeId = node.id;
+      }
+    }
+
+    if (bestNodeId) {
+      usedNodeIds.add(bestNodeId);
+      mutations.push({
+        node_id: bestNodeId,
+        new_text: finding,
+        bold: isBold
+      });
+    }
+  }
+
+  // Pass 2: Positional sequential alignment for unmatched body findings
+  const unmatchedFindings = bodyFindings.filter((_, idx) => {
+    return !mutations.some(m => m.new_text === bodyFindings[idx]);
+  });
+
+  for (const item of unmatchedFindings) {
+    for (const node of bodyNodes) {
+      if (!usedNodeIds.has(node.id)) {
+        usedNodeIds.add(node.id);
+        mutations.push({
+          node_id: node.id,
+          new_text: item,
+          bold: item.startsWith('BOLD::') || item.includes('BOLD::')
+        });
+        break;
+      }
+    }
+  }
+
+  return applyAstMutationsToDocx(
+    xmlDoc,
+    zipEntries,
+    pMap,
+    cellMap,
+    mutations,
+    impressionItems,
+    impressionSlotIds
+  );
+}
