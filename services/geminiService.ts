@@ -917,10 +917,17 @@ ${findingsText}
    - If all findings normal: "IMPRESSION:###Normal study.###No significant abnormality detected."
 8. **TITLE IMMUTABILITY MANDATE**:
    - The document title belongs strictly to the template document and MUST NOT be altered, shortened, or replaced by outside UI names or abbreviations. Do NOT include any title node in "updates".
-9. Return JSON schema:
+9. **BRAND-NEW / INCIDENTAL FINDINGS MANDATE ("insertions")**:
+   - If the radiologist dictates a pathology, measurement, or incidental finding that does NOT have a corresponding baseline node in the template AST (e.g. pleural effusion, atelectasis, lymphadenopathy, incidental cysts, fractures), you MUST include it in "insertions" specifying:
+     { "after_node_id": "<id of the preceding paragraph or paragraph immediately before IMPRESSION>", "text": "Exact clinical finding text", "bold": false }
+   - Also ensure it is present in "display_findings" at that exact same sequential position.
+10. Return JSON schema:
 {
   "updates": [
     { "node_id": "node_...", "new_text": "...", "bold": true }
+  ],
+  "insertions": [
+    { "after_node_id": "node_...", "text": "...", "bold": false }
   ],
   "impression": ["..."],
   "display_findings": ["..."]
@@ -956,6 +963,9 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
       const result = JSON.parse(cleaned);
 
       const updates: AstMutation[] = Array.isArray(result.updates) ? result.updates : [];
+      const rawInsertions: any[] = Array.isArray(result.insertions)
+        ? result.insertions
+        : (Array.isArray(result.inserted_findings) ? result.inserted_findings : []);
       let impression: string[] = Array.isArray(result.impression) ? result.impression : [];
       const displayFindings: string[] = Array.isArray(result.display_findings) && result.display_findings.length > 0
         ? result.display_findings
@@ -995,7 +1005,62 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
         displayFindings[0] = docTitle;
       }
 
-      // Apply exact AST mutations to the DOCX DOM
+      // Collect any extra/incidental findings from displayFindings that were not in safeUpdates or rawInsertions
+      const allInsertions: any[] = [...rawInsertions];
+      const insertedTexts = new Set(allInsertions.map(i => ((typeof i === 'string' ? i : i.text) || '').toLowerCase().replace(/[^a-z0-9]/g, '')));
+
+      let inImpSection = false;
+      let lastKnownNodeId: string | undefined;
+
+      for (let i = 0; i < displayFindings.length; i++) {
+        const df = displayFindings[i].trim();
+        if (!df) continue;
+        if (i === 0 && docTitle && df.toLowerCase().replace(/[^a-z0-9]/g, '') === docTitle.toLowerCase().replace(/[^a-z0-9]/g, '')) continue;
+        if (df.toUpperCase().startsWith('IMPRESSION:') || df.toUpperCase().startsWith('CONCLUSION:')) {
+          inImpSection = true;
+          continue;
+        }
+        if (inImpSection) continue;
+        if (df.includes('|')) continue;
+
+        const cleanDf = df.replace(/^BOLD::\s*/, '').trim();
+        const normDf = cleanDf.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (!normDf) continue;
+
+        let matchedNodeId: string | undefined;
+        for (const u of safeUpdates) {
+          const normUt = (u.new_text || '').replace(/^BOLD::\s*/, '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (normUt && normDf && normUt === normDf) {
+            matchedNodeId = u.node_id;
+            break;
+          }
+        }
+        if (!matchedNodeId) {
+          const matchedAstNode = ast.find(n => {
+            if (n.type === 'table_cell') return false;
+            const normAst = (n.current_text || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            return normAst && normDf && normAst === normDf;
+          });
+          if (matchedAstNode) {
+            matchedNodeId = matchedAstNode.id;
+          }
+        }
+
+        if (matchedNodeId) {
+          lastKnownNodeId = matchedNodeId;
+        } else {
+          if (!insertedTexts.has(normDf)) {
+            allInsertions.push({
+              after_node_id: lastKnownNodeId,
+              text: df,
+              bold: df.startsWith('BOLD::')
+            });
+            insertedTexts.add(normDf);
+          }
+        }
+      }
+
+      // Apply exact AST mutations & clean-run insertions to the DOCX DOM
       const docxBlob = await applyAstMutationsToDocx(
         xmlDoc,
         zipEntries,
@@ -1004,7 +1069,8 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
         safeUpdates,
         impression,
         impressionSlotIds,
-        impressionHeaderId
+        impressionHeaderId,
+        allInsertions
       );
 
       const finalFindings = displayFindings.length > 0 ? displayFindings : (selectedTemplate.lines || [selectedTemplate.name]);
