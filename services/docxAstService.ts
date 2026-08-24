@@ -464,7 +464,10 @@ export async function applyAstMutationsToDocx(
       let lastInserted = lastSlot;
 
       for (let i = 0; i < impressionItems.length; i++) {
-        const cleanBullet = impressionItems[i].replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
+        const cleanBullet = impressionItems[i]
+          .replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '')
+          .replace(/[\s\|]+$/g, '')
+          .trim();
         if (i < slotElements.length) {
           const p = slotElements[i];
           formatBulletParagraph(p, cleanBullet);
@@ -491,7 +494,10 @@ export async function applyAstMutationsToDocx(
       // Template has IMPRESSION: header but 0 pre-existing slot paragraphs
       let lastInserted: Element = headerEl;
       for (let i = 0; i < impressionItems.length; i++) {
-        const cleanBullet = impressionItems[i].replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
+        const cleanBullet = impressionItems[i]
+          .replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '')
+          .replace(/[\s\|]+$/g, '')
+          .trim();
         const newP = (headerEl as Element).cloneNode(true) as Element;
         
         // Remove bold tag or underline from bullet runs if header was bold/underlined
@@ -741,36 +747,14 @@ export async function mergeFindingsIntoDocxWithAstEngine(
     }
   }
 
-  // Pass 2: Positional sequential alignment for unmatched paragraph findings
+  // Unmatched paragraph findings that do not correspond to any baseline template node are incidental/extra findings
   const unmatchedFindings = paragraphFindings.filter((_, idx) => {
     return !mutations.some(m => m.new_text === paragraphFindings[idx]);
   });
 
   const insertedFindings: string[] = [];
-
   for (const item of unmatchedFindings) {
-    const isHeading = item.replace(/^BOLD::\s*/, '').trim().endsWith(':');
-    let matched = false;
-    for (const node of paragraphNodes) {
-      if (!usedNodeIds.has(node.id)) {
-        const isNodeHeading = node.type === 'section_heading' || node.current_text.trim().endsWith(':');
-        // Do not place narrative findings into section headings in sequential alignment
-        if (!isHeading && isNodeHeading) continue;
-        if (isHeading && !isNodeHeading) continue;
-
-        usedNodeIds.add(node.id);
-        mutations.push({
-          node_id: node.id,
-          new_text: item,
-          bold: item.startsWith('BOLD::') || item.includes('BOLD::')
-        });
-        matched = true;
-        break;
-      }
-    }
-    if (!matched) {
-      insertedFindings.push(item);
-    }
+    insertedFindings.push(item);
   }
 
   return applyAstMutationsToDocx(
