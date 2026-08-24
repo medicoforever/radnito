@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
-import { processAudio, processAudioWithDocx, processTextFindings, createChat, blobToBase64, continueAudioDictation, base64ToBlob, modifyFindingWithAudio, modifyReportWithAudio, modifyReportWithText, identifyPotentialErrors, runComplexImpressionGeneration, transcribeAudioForPrompt } from '../services/geminiService';
+import { processAudio, processAudioWithDocx, processTextFindings, mergeFindingsWithAst, createChat, blobToBase64, continueAudioDictation, base64ToBlob, modifyFindingWithAudio, modifyReportWithAudio, modifyReportWithText, identifyPotentialErrors, runComplexImpressionGeneration, transcribeAudioForPrompt } from '../services/geminiService';
 import { isRAGStyleMatchingEnabled, getRelevantStyleTemplates } from '../services/reportStyleRAG';
 import { saveAudioBlob, getAudioBlob, clearUnusedAudioBlobs } from '../services/audioStorage';
 import Spinner from './ui/Spinner';
@@ -1506,11 +1506,17 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
         }
 
         try {
+            const isSkillActive = isTemplateSkillEnabled();
+            const customSkillPrompt = selectedTemplate?.id ? getTemplateCustomPrompt(selectedTemplate.id) : undefined;
+            const activeSkillPrompt = isSkillActive ? (customSkillPrompt || (selectedTemplate as any)?.skillPrompt) : undefined;
+
             for (const batch of batchesWithFindings) {
                 const templateBase64 = selectedTemplate?.docxBase64;
                 const title = selectedTemplate?.name || batch.name || 'Radiology_Report';
                 const cleanName = `${(batch.name || title).replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().slice(0, 10)}.docx`;
-                let blob = batch.docxBlob;
+                const activeModel = batch.selectedModel || selectedModel;
+
+                let blob: Blob | null | undefined = (batch.docxBlob instanceof Blob && batch.docxBlob.size > 0) ? batch.docxBlob : null;
                 if (!blob) {
                     if (templateBase64 && batch.findings && batch.findings.length > 0) {
                         try {
@@ -1520,10 +1526,13 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                                 activeModel,
                                 batch.customPrompt,
                                 batch.customImages || [],
-                                true,
-                                (selectedTemplate as any).skillPrompt
+                                isSkillActive,
+                                activeSkillPrompt
                             );
                             blob = astRes.docxBlob;
+                            if (blob) {
+                                setBatches(prev => prev.map(b => b.id === batch.id ? { ...b, docxBlob: blob } : b));
+                            }
                         } catch (e) {
                             console.warn('AST docx generation fallback error:', e);
                         }
