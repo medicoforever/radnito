@@ -518,7 +518,11 @@ export async function mergeFindingsIntoDocx(
               const pt = pTexts[i];
               if (!pt) continue;
 
-              const score = computeParagraphSimilarity(fWords, pWordsList[i], cleanVal, pt);
+              let score = computeParagraphSimilarity(fWords, pWordsList[i], cleanVal, pt);
+              // Direct percentage/score matching (e.g. "15 %" replacing "0 %" in score boxes)
+              if (cleanVal.includes('%') && pt.includes('%')) {
+                score = 0.95;
+              }
               if (score > bestScore) {
                 bestScore = score;
                 bestIdx = i;
