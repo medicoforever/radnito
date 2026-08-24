@@ -628,8 +628,8 @@ export async function mergeFindingsIntoDocxWithAstEngine(
   const mutations: AstMutation[] = [];
   const usedNodeIds = new Set<string>();
 
-  // Filter AST body nodes (excluding impression items and header)
-  const bodyNodes = ast.filter(n => n.type !== 'impression_header' && n.type !== 'impression_item');
+  // Filter AST body nodes (excluding impression items, header, and the template's permanent title)
+  const bodyNodes = ast.filter(n => n.type !== 'impression_header' && n.type !== 'impression_item' && n.type !== 'title');
 
   // Pass 1: Exact / Colon-Key / Word Overlap Matching
   for (const finding of bodyFindings) {
