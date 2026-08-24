@@ -485,7 +485,10 @@ export async function applyAstMutationsToDocx(
       }
     }
 
-    const formatBulletParagraph = (p: Element, cleanBullet: string) => {
+    const formatBulletParagraph = (p: Element, rawBullet: string) => {
+      const isBold = rawBullet.startsWith('BOLD::') || rawBullet.includes('BOLD::');
+      const cleanBullet = rawBullet.replace(/^BOLD::\s*/, '').replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
+
       let pPr = p.getElementsByTagName('w:pPr')[0];
       if (!pPr) {
         pPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pPr');
@@ -566,7 +569,9 @@ export async function applyAstMutationsToDocx(
 
       let lastInserted: Element = headerEl;
       for (let i = 0; i < impressionItems.length; i++) {
-        const cleanBullet = impressionItems[i].replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
+        const rawItem = impressionItems[i];
+        const isBold = rawItem.startsWith('BOLD::') || rawItem.includes('BOLD::');
+        const cleanBullet = rawItem.replace(/^BOLD::\s*/, '').replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
         if (!cleanBullet) continue;
 
         const newP = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:p');
@@ -585,6 +590,13 @@ export async function applyAstMutationsToDocx(
         const szCs = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:szCs');
         szCs.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', '24');
         newRPr.appendChild(szCs);
+
+        if (isBold) {
+          const b = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:b');
+          newRPr.appendChild(b);
+          const bCs = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:bCs');
+          newRPr.appendChild(bCs);
+        }
 
         newR.appendChild(newRPr);
         const newT = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:t');
@@ -707,7 +719,7 @@ export async function mergeFindingsIntoDocxWithAstEngine(
       if (trimmed.includes('###')) {
         const parts = trimmed.split('###').slice(1);
         for (const p of parts) {
-          const cleanP = p.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
+          const cleanP = p.replace(/^BOLD::\s*/, '').replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
           if (cleanP) impressionItems.push(cleanP);
         }
       }
@@ -715,7 +727,7 @@ export async function mergeFindingsIntoDocxWithAstEngine(
     }
 
     if (isInImpression) {
-      const cleanP = trimmed.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
+      const cleanP = trimmed.replace(/^BOLD::\s*/, '').replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
       if (cleanP) impressionItems.push(cleanP);
       continue;
     }
