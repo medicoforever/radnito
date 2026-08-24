@@ -983,18 +983,21 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
             if (line.includes('###')) {
               const parts = line.split('###').slice(1);
               for (const p of parts) {
-                const cleanP = p.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
+                const cleanP = p.replace(/^BOLD::\s*/, '').replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
                 if (cleanP) impression.push(cleanP);
               }
             }
             continue;
           }
           if (inImp) {
-            const cleanP = line.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
+            const cleanP = line.replace(/^BOLD::\s*/, '').replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
             if (cleanP) impression.push(cleanP);
           }
         }
       }
+
+      // Ensure all impression items have BOLD:: stripped from text
+      impression = impression.map(item => item.replace(/^BOLD::\s*/, '').replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim()).filter(Boolean);
 
       // Filter out any mutation targeting the title node so template's native title is 100% untouched
       const safeUpdates = updates.filter(u => {
