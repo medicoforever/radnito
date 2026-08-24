@@ -315,8 +315,9 @@ export const processAudioWithDocx = async (
   existingFindings?: string[],
   batchName?: string,
   selectedTemplate?: { id?: string; name: string; category?: string; modality?: string; lines?: string[]; docxBase64?: string; skillPrompt?: string } | null,
-  skillEnabled: boolean = true,
-  activeSkillPrompt?: string
+  skillEnabled: boolean = false,
+  activeSkillPrompt?: string,
+  consultantStyleEnabled: boolean = false
 ): Promise<{ findings: string[]; docxBlob?: Blob }> => {
   const isReprocessing = existingFindings && existingFindings.length > 0;
 
@@ -344,17 +345,18 @@ export const processAudioWithDocx = async (
         customPrompt,
         customImages,
         skillEnabled,
-        activeSkillPrompt || (selectedTemplate as any).skillPrompt
+        activeSkillPrompt || (selectedTemplate as any).skillPrompt,
+        consultantStyleEnabled
       );
       if (astResult && astResult.findings && astResult.findings.length > 0) {
         return astResult;
       }
-      const fallbackFindings = await mergeFindingsWithTemplate(transcribedText, selectedTemplate, model, customPrompt, customImages);
+      const fallbackFindings = await mergeFindingsWithTemplate(transcribedText, selectedTemplate, model, customPrompt, customImages, skillEnabled, activeSkillPrompt, consultantStyleEnabled);
       return { findings: fallbackFindings };
     } catch (step2Error: any) {
       console.warn('AST merge failed, trying mergeFindingsWithTemplate fallback:', step2Error);
       try {
-        const fallbackFindings = await mergeFindingsWithTemplate(transcribedText, selectedTemplate, model, customPrompt, customImages);
+        const fallbackFindings = await mergeFindingsWithTemplate(transcribedText, selectedTemplate, model, customPrompt, customImages, skillEnabled, activeSkillPrompt, consultantStyleEnabled);
         return { findings: fallbackFindings };
       } catch (fallbackErr) {
         console.warn('Generating emergency local merged fallback:', fallbackErr);
@@ -403,17 +405,18 @@ export const processAudio = async (
         model,
         customPrompt,
         customImages,
-        true,
-        (selectedTemplate as any).skillPrompt
+        false,
+        (selectedTemplate as any).skillPrompt,
+        false
       );
       if (findings && findings.length > 0) {
         return findings;
       }
-      return await mergeFindingsWithTemplate(transcribedText, selectedTemplate, model, customPrompt, customImages);
+      return await mergeFindingsWithTemplate(transcribedText, selectedTemplate, model, customPrompt, customImages, false, (selectedTemplate as any).skillPrompt, false);
     } catch (step2Error: any) {
       console.warn('AST merge failed, trying mergeFindingsWithTemplate fallback:', step2Error);
       try {
-        return await mergeFindingsWithTemplate(transcribedText, selectedTemplate, model, customPrompt, customImages);
+        return await mergeFindingsWithTemplate(transcribedText, selectedTemplate, model, customPrompt, customImages, false, (selectedTemplate as any).skillPrompt, false);
       } catch (fallbackErr) {
         console.warn('Generating emergency local merged fallback:', fallbackErr);
         return generateLocalMergedFallback(transcribedText, selectedTemplate);
@@ -853,27 +856,47 @@ export const mergeFindingsWithAst = async (
   model: string,
   customPrompt?: string,
   customImages?: Array<{ data: string; mimeType: string }> | null,
-  skillEnabled: boolean = true,
-  activeSkillPrompt?: string
+  skillEnabled: boolean = false,
+  activeSkillPrompt?: string,
+  consultantStyleEnabled: boolean = false
 ): Promise<{ findings: string[]; docxBlob?: Blob }> => {
   if (!selectedTemplate.docxBase64) {
-    const findings = await mergeFindingsWithTemplate(findingsText, selectedTemplate, model, customPrompt, customImages, skillEnabled, activeSkillPrompt);
+    const findings = await mergeFindingsWithTemplate(findingsText, selectedTemplate, model, customPrompt, customImages, skillEnabled, activeSkillPrompt, consultantStyleEnabled);
     return { findings };
   }
 
   try {
     const { ast, xmlDoc, zipEntries, pMap, cellMap, impressionSlotIds } = await buildDocumentAstFromDocx(selectedTemplate.docxBase64);
 
-    // Cross-Modality Auto-Skill Discovery for AST Merger
-    const secondarySkills = (skillEnabled !== false)
+    // Cross-Modality Auto-Skill Discovery for AST Merger (only when skillEnabled is active)
+    const secondarySkills = (skillEnabled === true)
       ? findCrossModalitySkills(findingsText, selectedTemplate.id)
       : [];
 
     let crossSkillBlock = '';
+    if (secondarySkills.length > 0) {
       crossSkillBlock = `\n\n### ⚡ CROSS-MODALITY & INCIDENTAL PATHOLOGY CONSULTANT DIRECTIVES (Auto-Detected Secondary Skills):\nThe radiologist's dictation includes clinical findings related to adjacent or incidental organ systems. You MUST cross-reference the following specialized consultant directives for those findings:\n` + secondarySkills.map(s => `[CROSS-MODALITY SKILL: ${s.name} (${s.category || 'Specialized'})]:\n${s.skillPrompt}`).join('\n\n') + `\n*Directive for Cross-Modality Findings*: Use the exact consultant grading, AST pathological translation, and diagnostic criteria from the matching secondary skill above.`;
+    }
 
     const titleNode = ast.find(n => n.type === 'title');
     const docTitle = titleNode?.current_text?.trim() || selectedTemplate.lines?.[0] || selectedTemplate.name;
+
+    const styleDirectives = consultantStyleEnabled
+      ? `4. **Vague Dictation Translation**:
+   - Translate colloquial phrases into formal consultant terminology: "fuzzy liver thing" -> "Ill-defined focal lesion in segment VI...", "whited out left base" -> "Homogeneous dense opacification of the left hemithorax base...", "dirty fat around appendix" -> "Blind-ending thickened appendix with surrounding fat stranding...", "bright spot on dwi" -> "Focal area of acute restricted diffusion on DWI...", "torn meniscus" -> "Linear high signal intensity... consistent with meniscal tear", "broken hip ball" -> "Displaced subcapital fracture of femoral neck".
+5. **RADS Scoring Standards**:
+   - BI-RADS (0-6), PI-RADS v2.1 (PZ vs TZ sequence dominance, categories 1-5), TI-RADS (TR1-TR5), LI-RADS (LR-1 to LR-5), Lung-RADS v2022 (Categories 1-4X), CAD-RADS 2.0 (0-5 with modifiers).
+6. **Non-Verb Impression Synthesis**:
+   - Synthesize concise, non-verb bullet points under "impression": ["Point 1", "Point 2"].
+   - In "display_findings", format impression as: "IMPRESSION:###Point 1###Point 2".
+   - If all findings normal: "IMPRESSION:###Normal study.###No significant abnormality detected."`
+      : `4. **STRICT VERBATIM FINDINGS INSERTION MANDATE**:
+   - You MUST insert the radiologist's findings into the matching target anatomical node EXACTLY as dictated/provided.
+   - Do NOT rewrite, expand, paraphrase, or embellish the radiologist's sentences into different consultant language.
+   - Do NOT add extra adjectives, unmentioned clinical details, or additional sentences.
+5. **IMPRESSION PRESERVATION MANDATE**:
+   - Preserve whatever impression was provided in the input text.
+   - If NO impression was dictated or provided by the radiologist, RETAIN the template's baseline normal impression without synthesizing new AI diagnostic assertions or inferences.`;
 
     const astPrompt = `You are an expert radiology report integration engine.
 Your task is to merge the radiologist's findings into the target document's exact Abstract Syntax Tree (AST) nodes.
@@ -893,7 +916,7 @@ ${findingsText}
 
 ---
 
-## STRICT AST SURGERY & 100% CLINICAL FIDELITY RULES:
+## STRICT AST SURGERY & CLINICAL FIDELITY RULES:
 1. **100% Comprehensive Clinical Ingestion**:
    - EVERY observation, measurement, pathology, and clinical history dictated by the radiologist MUST be completely included in the final report.
 2. **Surgical Node Updates, Clinical Profile Placement & Contradiction Removal**:
@@ -906,17 +929,11 @@ ${findingsText}
 3. **5-Layer Structural DNA & BOLD Protocol**:
    - Update Clinical Profile node if history/indication is dictated (written as "Clinical profile: ...").
    - In "display_findings", produce the full ordered report array:
-     Layer 1: Exact Template Title: "${docTitle}" (MUST preserve the exact template document title verbatim without changing, shortening, or removing any words like MRI/CT) -> "Clinical profile: ..." (or "Clinical profile:") -> Technique -> Findings (prefix modified lines with "BOLD::", preserve normal lines verbatim without "BOLD::") -> Synthesized Impression starting with "IMPRESSION:###".
-4. **Vague Dictation Translation**:
-   - Translate colloquial phrases into formal consultant terminology: "fuzzy liver thing" -> "Ill-defined focal lesion in segment VI...", "whited out left base" -> "Homogeneous dense opacification of the left hemithorax base...", "dirty fat around appendix" -> "Blind-ending thickened appendix with surrounding fat stranding...", "bright spot on dwi" -> "Focal area of acute restricted diffusion on DWI...", "torn meniscus" -> "Linear high signal intensity... consistent with meniscal tear", "broken hip ball" -> "Displaced subcapital fracture of femoral neck".
-5. **RADS Scoring Standards**:
-   - BI-RADS (0-6), PI-RADS v2.1 (PZ vs TZ sequence dominance, categories 1-5), TI-RADS (TR1-TR5), LI-RADS (LR-1 to LR-5), Lung-RADS v2022 (Categories 1-4X), CAD-RADS 2.0 (0-5 with modifiers).
-6. **Cross-Template Contamination Isolation**:
+     Layer 1: Exact Template Title: "${docTitle}" (MUST preserve the exact template document title verbatim without changing, shortening, or removing any words like MRI/CT) -> "Clinical profile: ..." (or "Clinical profile:") -> Technique -> Findings (prefix modified lines with "BOLD::", preserve normal lines verbatim without "BOLD::") -> Impression starting with "IMPRESSION:###" (or template baseline).
+${styleDirectives}
+${crossSkillBlock}
+7. **Cross-Template Contamination Isolation**:
    - Restrict findings strictly to the active template's anatomical domain. Do NOT merge mismatched organ findings into unrelated template nodes.
-7. **Non-Verb Impression Synthesis**:
-   - Synthesize concise, non-verb bullet points under "impression": ["Point 1", "Point 2"].
-   - In "display_findings", format impression as: "IMPRESSION:###Point 1###Point 2".
-   - If all findings normal: "IMPRESSION:###Normal study.###No significant abnormality detected."
 8. **TITLE IMMUTABILITY MANDATE**:
    - The document title belongs strictly to the template document and MUST NOT be altered, shortened, or replaced by outside UI names or abbreviations. Do NOT include any title node in "updates".
 9. **BRAND-NEW / INCIDENTAL FINDINGS MANDATE ("insertions")**:
@@ -1085,7 +1102,7 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
     console.warn('AST merge failed, falling back to standard merger:', astErr);
   }
 
-  const findings = await mergeFindingsWithTemplate(findingsText, selectedTemplate, model, customPrompt, customImages, skillEnabled, activeSkillPrompt);
+  const findings = await mergeFindingsWithTemplate(findingsText, selectedTemplate, model, customPrompt, customImages, skillEnabled, activeSkillPrompt, consultantStyleEnabled);
   return { findings };
 };
 
@@ -1096,8 +1113,9 @@ export const mergeFindingsWithTemplate = async (
   model: string,
   customPrompt?: string,
   customImages?: Array<{ data: string; mimeType: string }> | null,
-  skillEnabled: boolean = true,
-  activeSkillPrompt?: string
+  skillEnabled: boolean = false,
+  activeSkillPrompt?: string,
+  consultantStyleEnabled: boolean = false
 ): Promise<string[]> => {
   const normalFindingsText = selectedTemplate.lines && selectedTemplate.lines.length > 0
     ? selectedTemplate.lines.map((l, i) => `${i + 1}. ${l}`).join('\n')
@@ -1107,9 +1125,22 @@ export const mergeFindingsWithTemplate = async (
     ? selectedTemplate.lines[0]
     : selectedTemplate.name;
 
-    const consultantSkill = (skillEnabled !== false && (activeSkillPrompt || selectedTemplate.skillPrompt)) 
+  const consultantSkill = (skillEnabled === true && (activeSkillPrompt || selectedTemplate.skillPrompt)) 
     ? (activeSkillPrompt || selectedTemplate.skillPrompt)
     : '';
+
+  const styleRules = consultantStyleEnabled
+    ? `3. **Vague Dictation Translation & RADS Scoring**:
+   - Translate colloquial radiologist dictation into formal board-certified terminology ("fuzzy liver thing" -> "Ill-defined focal lesion in segment VI...", "whited out base" -> "Homogeneous dense opacification...", "dirty fat" -> "perilesional fat stranding...").
+   - Apply standardized scoring criteria for BI-RADS, PI-RADS v2.1, TI-RADS, LI-RADS, Lung-RADS v2022, CAD-RADS 2.0.
+4. **Non-Verb Impression Synthesis**:
+   - Format: "IMPRESSION:###Point 1###Point 2". Non-verb, concise summaries.
+   - If all findings normal: "IMPRESSION:###Normal study.###No significant abnormality detected."`
+    : `3. **STRICT VERBATIM FINDINGS INSERTION MANDATE**:
+   - Insert the radiologist's findings into the matching target anatomical section EXACTLY as dictated/provided.
+   - Do NOT rewrite, expand, or add extra consultant phrasing or unmentioned details.
+4. **IMPRESSION PRESERVATION**:
+   - Preserve whatever impression was provided in the input. If no impression was dictated, retain the template's default impression verbatim.`;
 
   const prompt = `You are an expert radiologist and medical transcriptionist.
 Your task is to merge the radiologist's findings directly into the target standard radiology report template.
@@ -1142,18 +1173,13 @@ ${findingsText}
    - Layer 2: Clinical Profile: format as "*Clinical Profile: C/o [complaint] with H/o [history].*" or "*Clinical Profile:*" if none provided.
    - Layer 3: Scanning Technique: preserve the template's technique line.
    - Layer 4: Anatomical Findings: organized by anatomical subsystem.
-   - Layer 5: Synthesized Impression: starting with "IMPRESSION:###".
+   - Layer 5: Impression: starting with "IMPRESSION:###".
 2. **Deterministic Baseline Preservation & BOLD Marker Protocol**:
    - For any organ/structure where abnormal or dictated findings were provided, replace or update the normal description with the patient's actual finding and prefix that abnormal/dictated line with "BOLD::".
    - For all other structures where no abnormality was mentioned, keep the standard normal baseline line from the template VERBATIM, without "BOLD::".
-3. **Vague Dictation Translation & RADS Scoring**:
-   - Translate colloquial radiologist dictation into formal board-certified terminology ("fuzzy liver thing" -> "Ill-defined focal lesion in segment VI...", "whited out base" -> "Homogeneous dense opacification...", "dirty fat" -> "perilesional fat stranding...").
-   - Apply standardized scoring criteria for BI-RADS, PI-RADS v2.1, TI-RADS, LI-RADS, Lung-RADS v2022, CAD-RADS 2.0.
-4. **Contamination Isolation Gate**:
+${styleRules}
+5. **Contamination Isolation Gate**:
    - Strictly map findings to the active template's anatomical domain. Do NOT overwrite baseline normal organs with mismatched organ findings. Place out-of-domain incidental findings in a distinct paragraph before the impression.
-5. **Non-Verb Impression Synthesis**:
-   - Format: "IMPRESSION:###Point 1###Point 2". Non-verb, concise summaries. No extraneous numbers/measurements.
-   - If all findings normal: "IMPRESSION:###Normal study.###No significant abnormality detected."
 6. Output JSON format: { "findings": string[] }.
 ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
 `;
@@ -1212,7 +1238,9 @@ export const processTextFindings = async (
   model: string,
   customPrompt?: string,
   customImages?: Array<{ data: string; mimeType: string }> | null,
-  selectedTemplate?: { id: string; name: string; category?: string; modality?: string; lines: string[]; docxBase64?: string; skillPrompt?: string } | null
+  selectedTemplate?: { id: string; name: string; category?: string; modality?: string; lines: string[]; docxBase64?: string; skillPrompt?: string } | null,
+  skillEnabled: boolean = false,
+  consultantStyleEnabled: boolean = false
 ): Promise<{ findings: string[]; docxBlob?: Blob }> => {
   if (selectedTemplate) {
     if (selectedTemplate.docxBase64) {
@@ -1223,8 +1251,9 @@ export const processTextFindings = async (
           model,
           customPrompt,
           customImages,
-          true,
-          selectedTemplate.skillPrompt
+          skillEnabled,
+          selectedTemplate.skillPrompt,
+          consultantStyleEnabled
         );
         if (astRes && astRes.findings && astRes.findings.length > 0) {
           return astRes;
@@ -1233,7 +1262,7 @@ export const processTextFindings = async (
         console.warn('AST text merge error, falling back:', e);
       }
     }
-    const findings = await mergeFindingsWithTemplate(rawText, selectedTemplate, model, customPrompt, customImages);
+    const findings = await mergeFindingsWithTemplate(rawText, selectedTemplate, model, customPrompt, customImages, skillEnabled, selectedTemplate.skillPrompt, consultantStyleEnabled);
     return { findings };
   }
 

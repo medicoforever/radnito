@@ -315,17 +315,29 @@ export async function deleteUserTemplate(id: string): Promise<boolean> {
 // Consultant Skill Prompt Storage & Toggles
 // ==========================================
 const TEMPLATE_SKILL_ENABLED_KEY = 'radiology_template_skill_enabled';
+const CONSULTANT_STYLE_ENABLED_KEY = 'radiology_consultant_style_enabled';
 const TEMPLATE_CUSTOM_PROMPTS_KEY = 'radiology_template_custom_prompts';
 
 export function isTemplateSkillEnabled(): boolean {
-  if (typeof window === 'undefined') return true;
+  if (typeof window === 'undefined') return false;
   const val = localStorage.getItem(TEMPLATE_SKILL_ENABLED_KEY);
-  return val === null ? true : val === 'true';
+  return val === null ? false : val === 'true';
 }
 
 export function setTemplateSkillEnabled(enabled: boolean): void {
   if (typeof window === 'undefined') return;
   localStorage.setItem(TEMPLATE_SKILL_ENABLED_KEY, enabled ? 'true' : 'false');
+}
+
+export function isConsultantStyleEnabled(): boolean {
+  if (typeof window === 'undefined') return false;
+  const val = localStorage.getItem(CONSULTANT_STYLE_ENABLED_KEY);
+  return val === null ? false : val === 'true';
+}
+
+export function setConsultantStyleEnabled(enabled: boolean): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(CONSULTANT_STYLE_ENABLED_KEY, enabled ? 'true' : 'false');
 }
 
 export function getTemplateCustomPrompt(templateId: string): string | null {

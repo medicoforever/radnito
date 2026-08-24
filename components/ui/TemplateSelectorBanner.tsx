@@ -6,6 +6,8 @@ import { SelectedTemplateData } from './TemplateSelectionModal';
 import {
   isTemplateSkillEnabled,
   setTemplateSkillEnabled,
+  isConsultantStyleEnabled,
+  setConsultantStyleEnabled,
   getTemplateCustomPrompt,
   setTemplateCustomPrompt,
   resetTemplateCustomPrompt,
@@ -34,6 +36,7 @@ const TemplateSelectorBanner: React.FC<TemplateSelectorBannerProps> = ({
   onSelectTemplate,
   className = '',
 }) => {
+  const [isConsultantStyleActive, setIsConsultantStyleActive] = useState<boolean>(() => isConsultantStyleEnabled());
   const [isSkillEnabled, setIsSkillEnabled] = useState<boolean>(() => isTemplateSkillEnabled());
   const [isSkillExpanded, setIsSkillExpanded] = useState<boolean>(false);
   const [customSkillPrompt, setCustomSkillPrompt] = useState<string>('');
@@ -57,6 +60,11 @@ const TemplateSelectorBanner: React.FC<TemplateSelectorBannerProps> = ({
     } else if (onToggleAutoDownload) {
       onToggleAutoDownload(prev => !prev);
     }
+  };
+
+  const handleToggleConsultantStyle = (enabled: boolean) => {
+    setIsConsultantStyleActive(enabled);
+    setConsultantStyleEnabled(enabled);
   };
 
   const handleToggleSkill = (enabled: boolean) => {
@@ -111,41 +119,36 @@ const TemplateSelectorBanner: React.FC<TemplateSelectorBannerProps> = ({
   };
 
   return (
-    <div className={`w-full mb-6 rounded-2xl bg-white dark:bg-slate-800 border border-blue-200/80 dark:border-slate-700/80 shadow-sm transition-all overflow-hidden ${className}`}>
-      {/* Save as Custom Template Sub-Modal */}
+    <div className={`rounded-2xl border border-blue-200/80 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm overflow-hidden transition-all ${className}`}>
+      {/* Save Modal */}
       {isSavingCustomModalOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-md w-full border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <span>💾 Save Modified Skill as New Custom Template</span>
-            </h3>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl border border-slate-200 dark:border-slate-700 space-y-4">
+            <h4 className="text-base font-bold text-slate-900 dark:text-white">Save as Custom Template</h4>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              This will save this template structure (.docx) along with your customized consultant skill prompt permanently to your personal template library.
+              Save this template along with your customized consultant directives for fast one-click selection.
             </p>
             <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Custom Template Name:
-              </label>
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">Custom Template Name</label>
               <input
                 type="text"
                 value={customTemplateSaveName}
                 onChange={e => setCustomTemplateSaveName(e.target.value)}
-                placeholder="e.g. Brain CT - Institutional Format"
-                className="w-full p-2.5 text-xs font-semibold border border-slate-300 dark:border-slate-600 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full p-2.5 text-sm border border-slate-300 dark:border-slate-600 rounded-xl bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white"
               />
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setIsSavingCustomModalOpen(false)}
-                className="px-3.5 py-2 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleSaveAsCustomTemplate}
-                className="px-4 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-all"
+                className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-sm"
               >
                 Save to My Templates
               </button>
@@ -170,9 +173,16 @@ const TemplateSelectorBanner: React.FC<TemplateSelectorBannerProps> = ({
                   {selectedTemplate.modality || selectedTemplate.category || 'General'}
                 </span>
               )}
-              {selectedTemplate?.skillPrompt && (
-                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
-                  ⚡ Consultant Skill Attached
+              <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${
+                isConsultantStyleActive
+                  ? 'bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 border-blue-300 dark:border-blue-700'
+                  : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700'
+              }`}>
+                {isConsultantStyleActive ? '⚡ AI Consultant Phrasing' : '✓ Verbatim Merge Mode'}
+              </span>
+              {isSkillEnabled && (
+                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-700">
+                  ⚡ Skill Prompt ON
                 </span>
               )}
             </div>
@@ -207,7 +217,7 @@ const TemplateSelectorBanner: React.FC<TemplateSelectorBannerProps> = ({
               onClick={() => setIsSkillExpanded(!isSkillExpanded)}
               className="px-3 py-1.5 rounded-xl text-xs font-bold border border-slate-300 dark:border-slate-600 bg-white/80 dark:bg-slate-900/80 text-slate-700 dark:text-slate-200 hover:bg-white transition-all flex items-center gap-1"
             >
-              <span>{isSkillExpanded ? '▲ Hide Skill' : '⚡ View / Edit Skill'}</span>
+              <span>{isSkillExpanded ? '▲ Hide Settings' : '⚙️ Intelligence & Skill Settings'}</span>
             </button>
           )}
 
@@ -237,10 +247,45 @@ const TemplateSelectorBanner: React.FC<TemplateSelectorBannerProps> = ({
         </div>
       </div>
 
-      {/* Expanded Skill Editor & Toggle in Main Dictation Mode */}
+      {/* Expanded Intelligence & Skill Controls */}
       {selectedTemplate && isSkillExpanded && (
-        <div className="p-4 sm:p-5 border-t border-slate-100 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/70 space-y-3 animate-fade-in">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="p-4 sm:p-5 border-t border-slate-100 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/70 space-y-4 animate-fade-in">
+          {/* TOGGLE 1: AI CONSULTANT PHRASING */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center gap-3">
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isConsultantStyleActive}
+                  onChange={e => handleToggleConsultantStyle(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={`text-xs font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${
+                    isConsultantStyleActive 
+                      ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                      : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                  }`}>
+                    {isConsultantStyleActive ? '⚡ AI Consultant Phrasing Active' : '✓ Verbatim / Literal Merge (Default)'}
+                  </span>
+                  <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                    {isConsultantStyleActive ? 'Consultant Terminology & Synthetic Impression' : 'Exact Dictated Findings & Unaltered Impression'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  {isConsultantStyleActive
+                    ? 'AI translates shorthand dictation to formal consultant sentences, applies RADS scoring, and creates synthesized impressions.'
+                    : 'Transcribed text is merged verbatim into matching template nodes. No extra AI sentences or diagnostic syntheses added.'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* TOGGLE 2: TEMPLATE CONSULTANT SKILL DIRECTIVES */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
             <div className="flex items-center gap-3">
               <label className="relative inline-flex items-center cursor-pointer">
                 <input
@@ -249,25 +294,25 @@ const TemplateSelectorBanner: React.FC<TemplateSelectorBannerProps> = ({
                   onChange={e => handleToggleSkill(e.target.checked)}
                   className="sr-only peer"
                 />
-                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
               </label>
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className={`text-xs font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${
                     isSkillEnabled 
-                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                      ? 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300'
                       : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400'
                   }`}>
-                    {isSkillEnabled ? '⚡ Consultant Skill Active' : 'Consultant Skill Disabled'}
+                    {isSkillEnabled ? '⚡ Consultant Skill Directives Active' : 'Consultant Skills Off (Default)'}
                   </span>
                   <span className="text-[11px] text-slate-400 dark:text-slate-500">
-                    {isSkillEnabled ? 'Archive-Derived Directives & RADS Scoring' : 'Standard Baseline'}
+                    {isSkillEnabled ? 'Archive Directives & Cross-Modality Rules' : 'Standard Baseline'}
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   {isSkillEnabled
-                    ? 'AI enforces zero-filler consultant reporting, AST line replacement, and RADS scoring for audio dictation.'
-                    : 'Audio transcribed and merged into template without specialized consultant skill directives.'}
+                    ? 'AI enforces specialized template archive ground truth directives and cross-modality rules for audio dictation.'
+                    : 'Standard template merge without injecting specialized archive skill directives.'}
                 </p>
               </div>
             </div>

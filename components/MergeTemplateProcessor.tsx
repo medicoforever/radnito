@@ -20,6 +20,8 @@ import {
   saveUserTemplate,
   isTemplateSkillEnabled,
   setTemplateSkillEnabled,
+  isConsultantStyleEnabled,
+  setConsultantStyleEnabled,
   getTemplateCustomPrompt,
   setTemplateCustomPrompt,
   resetTemplateCustomPrompt,
@@ -58,9 +60,10 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
   const [isCopied, setIsCopied] = useState<boolean>(false);
   const [downloadSuccess, setDownloadSuccess] = useState<string | null>(null);
 
-  // Skill System States
+  // Consultant Style & Skill States (Both Default OFF for Literal Verbatim Merge)
+  const [isConsultantStyleActive, setIsConsultantStyleActive] = useState<boolean>(() => isConsultantStyleEnabled());
   const [isSkillEnabled, setIsSkillEnabled] = useState<boolean>(() => isTemplateSkillEnabled());
-  const [isSkillExpanded, setIsSkillExpanded] = useState<boolean>(true);
+  const [isSkillExpanded, setIsSkillExpanded] = useState<boolean>(false);
   const [customSkillPrompt, setCustomSkillPrompt] = useState<string>('');
   const [skillNotice, setSkillNotice] = useState<string | null>(null);
   const [isSavingCustomModalOpen, setIsSavingCustomModalOpen] = useState<boolean>(false);
@@ -112,6 +115,11 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
     }
     setIsTemplateModalOpen(false);
     setError(null);
+  };
+
+  const handleToggleConsultantStyle = (enabled: boolean) => {
+    setIsConsultantStyleActive(enabled);
+    setConsultantStyleEnabled(enabled);
   };
 
   const handleToggleSkill = (enabled: boolean) => {
@@ -194,7 +202,8 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
         customNotes.trim() || undefined,
         null,
         isSkillEnabled,
-        customSkillPrompt.trim() || undefined
+        customSkillPrompt.trim() || undefined,
+        isConsultantStyleActive
       );
 
       setMergedFindings(result);
@@ -453,10 +462,49 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
         </button>
       </div>
 
-      {/* DEDICATED CONSULTANT SKILL VIEWER & INLINE CUSTOMIZER */}
+      {/* MERGE INTELLIGENCE & CONSULTANT SETTINGS */}
       {activeTemplate && (
-        <div className="bg-white dark:bg-slate-800 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-3">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="bg-white dark:bg-slate-800 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
+          <div className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+            Merge Intelligence Controls
+          </div>
+
+          {/* TOGGLE 1: AI CONSULTANT PHRASING & IMPRESSION SYNTHESIS */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700/60">
+            <div className="flex items-center gap-3">
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isConsultantStyleActive}
+                  onChange={e => handleToggleConsultantStyle(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={`text-xs font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${
+                    isConsultantStyleActive 
+                      ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                      : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                  }`}>
+                    {isConsultantStyleActive ? '⚡ AI Consultant Phrasing Active' : '✓ Verbatim / Literal Merge (Default)'}
+                  </span>
+                  <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                    {isConsultantStyleActive ? 'Terminology Translation • RADS • Synthetic Impression' : 'Exact Dictated Text • Unmodified Impression'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  {isConsultantStyleActive
+                    ? 'AI rewrites colloquial shorthand into formal consultant terminology, applies RADS scoring, and synthesizes diagnostic impressions.'
+                    : 'Pasted findings are inserted strictly verbatim without AI rewriting. Impression is preserved as-is.'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* TOGGLE 2: TEMPLATE CONSULTANT SKILL DIRECTIVES */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700/60">
             <div className="flex items-center gap-3">
               <label className="relative inline-flex items-center cursor-pointer">
                 <input
@@ -465,25 +513,25 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
                   onChange={e => handleToggleSkill(e.target.checked)}
                   className="sr-only peer"
                 />
-                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
               </label>
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className={`text-xs font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${
                     isSkillEnabled 
-                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                      ? 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300'
                       : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400'
                   }`}>
-                    {isSkillEnabled ? '⚡ Consultant Skill Active' : 'Consultant Skill Disabled'}
+                    {isSkillEnabled ? '⚡ Consultant Skill Directives Active' : 'Consultant Skills Off (Default)'}
                   </span>
                   <span className="text-[11px] text-slate-400 dark:text-slate-500">
-                    {isSkillEnabled ? 'Zero-Filler • AST Replacement • Archive-Derived' : 'Standard Baseline'}
+                    {isSkillEnabled ? 'Archive Directives • Cross-Modality Rules' : 'Standard Baseline'}
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   {isSkillEnabled
-                    ? 'Applies specialized consultant directives, vague dictation translation, and RADS scoring for this template.'
-                    : 'Standard template merge without specialized consultant skill prompt.'}
+                    ? 'Applies specialized template archive ground truth directives and cross-modality diagnostic rules.'
+                    : 'Standard template merge without injecting archive skill directives.'}
                 </p>
               </div>
             </div>
