@@ -486,13 +486,32 @@ export async function applyAstMutationsToDocx(
     }
 
     const formatBulletParagraph = (p: Element, rawBullet: string) => {
-      const isBold = rawBullet.startsWith('BOLD::') || rawBullet.includes('BOLD::');
       const cleanBullet = rawBullet.replace(/^BOLD::\s*/, '').replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
 
       let pPr = p.getElementsByTagName('w:pPr')[0];
       if (!pPr) {
         pPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pPr');
         p.insertBefore(pPr, p.firstChild);
+      }
+
+      // Ensure bold on all runs in the impression bullet paragraph
+      const rTags = p.getElementsByTagName('w:r');
+      for (let r_i = 0; r_i < rTags.length; r_i++) {
+        let rPr = rTags[r_i].getElementsByTagName('w:rPr')[0];
+        if (!rPr) {
+          rPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rPr');
+          rTags[r_i].insertBefore(rPr, rTags[r_i].firstChild);
+        }
+        let bTag = rPr.getElementsByTagName('w:b')[0];
+        if (!bTag) {
+          bTag = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:b');
+          rPr.appendChild(bTag);
+        }
+        let bCsTag = rPr.getElementsByTagName('w:bCs')[0];
+        if (!bCsTag) {
+          bCsTag = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:bCs');
+          rPr.appendChild(bCsTag);
+        }
       }
 
       if (masterNumPr || masterPStyle) {
@@ -570,7 +589,6 @@ export async function applyAstMutationsToDocx(
       let lastInserted: Element = headerEl;
       for (let i = 0; i < impressionItems.length; i++) {
         const rawItem = impressionItems[i];
-        const isBold = rawItem.startsWith('BOLD::') || rawItem.includes('BOLD::');
         const cleanBullet = rawItem.replace(/^BOLD::\s*/, '').replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
         if (!cleanBullet) continue;
 
@@ -591,12 +609,11 @@ export async function applyAstMutationsToDocx(
         szCs.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', '24');
         newRPr.appendChild(szCs);
 
-        if (isBold) {
-          const b = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:b');
-          newRPr.appendChild(b);
-          const bCs = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:bCs');
-          newRPr.appendChild(bCs);
-        }
+        // Always bold impression bullet text
+        const b = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:b');
+        newRPr.appendChild(b);
+        const bCs = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:bCs');
+        newRPr.appendChild(bCs);
 
         newR.appendChild(newRPr);
         const newT = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:t');
