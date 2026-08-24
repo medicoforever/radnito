@@ -976,6 +976,9 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                             ? Promise.resolve(generatedDocxBlob)
                             : mergeFindingsIntoDocx(templateBase64, findings, title);
                         dlBlobPromise.then(blob => {
+                            if (blob) {
+                                setBatches(prev => prev.map(b => b.id === batch.id ? { ...b, docxBlob: blob } : b));
+                            }
                             downloadDocxBlob(blob, cleanName);
                         }).catch(docErr => {
                             console.warn('Auto DOCX download background error:', docErr);
@@ -1514,33 +1517,11 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                 const templateBase64 = selectedTemplate?.docxBase64;
                 const title = selectedTemplate?.name || batch.name || 'Radiology_Report';
                 const cleanName = `${(batch.name || title).replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().slice(0, 10)}.docx`;
-                const activeModel = batch.selectedModel || selectedModel;
 
-                let blob: Blob | null | undefined = (batch.docxBlob instanceof Blob && batch.docxBlob.size > 0) ? batch.docxBlob : null;
-                if (!blob) {
-                    if (templateBase64 && batch.findings && batch.findings.length > 0) {
-                        try {
-                            const astRes = await mergeFindingsWithAst(
-                                batch.findings.join('\n'),
-                                selectedTemplate as any,
-                                activeModel,
-                                batch.customPrompt,
-                                batch.customImages || [],
-                                isSkillActive,
-                                activeSkillPrompt
-                            );
-                            blob = astRes.docxBlob;
-                            if (blob) {
-                                setBatches(prev => prev.map(b => b.id === batch.id ? { ...b, docxBlob: blob } : b));
-                            }
-                        } catch (e) {
-                            console.warn('AST docx generation fallback error:', e);
-                        }
-                    }
-                    if (!blob) {
-                        blob = await mergeFindingsIntoDocx(templateBase64, batch.findings!, title);
-                    }
-                }
+                const blob = (batch.docxBlob instanceof Blob && batch.docxBlob.size > 0)
+                    ? batch.docxBlob
+                    : await mergeFindingsIntoDocx(templateBase64, batch.findings!, title);
+
                 downloadDocxBlob(blob, cleanName);
             }
             showNotification(`Downloaded ${batchesWithFindings.length} Word DOCX report${batchesWithFindings.length > 1 ? 's' : ''} (Times New Roman 12pt)!`);
