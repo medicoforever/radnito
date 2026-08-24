@@ -513,56 +513,6 @@ export async function applyAstMutationsToDocx(
     }
   }
 
-    // 2.5. Zero-Drop Findings Reconciliation Guard:
-  // Verifies that every clinical finding in mutations was successfully written to the Word document DOM.
-  // If the AI omitted a node update or index shifted, this guard guarantees 100% placement!
-  if (mutations && mutations.length > 0) {
-    const updatedTexts = new Set<string>();
-    pMap.forEach((el) => {
-      const t = getElementText(el).trim();
-      if (t) updatedTexts.add(t);
-    });
-
-    for (const mut of mutations) {
-      const clean = (mut.new_text || '').replace(/^BOLD::\s*/, '').trim();
-      if (!clean) continue;
-
-      let found = false;
-      for (const ut of updatedTexts) {
-        if (ut.includes(clean) || clean.includes(ut)) {
-          found = true;
-          break;
-        }
-      }
-
-      // If a dictated finding is missing from DOM, find the best matching baseline node and update it
-      if (!found) {
-        let bestTarget: Element | null = null;
-        let bestScore = 0;
-        pMap.forEach((el, key) => {
-          if (key.startsWith('node_') || key.startsWith('p_')) {
-            const currentT = getElementText(el).trim();
-            const isHead = currentT.endsWith(':');
-            if (currentT && key !== 'node_0' && key !== 'p_0' && !currentT.toUpperCase().startsWith('IMPRESSION:') && (!isHead || clean.endsWith(':'))) {
-              // Word overlap score
-              const cWords = new Set(clean.toLowerCase().split(/\W+/).filter(w => w.length > 2));
-              const tWords = new Set(currentT.toLowerCase().split(/\W+/).filter(w => w.length > 2));
-              let overlap = 0;
-              cWords.forEach(w => { if (tWords.has(w)) overlap++; });
-              if (overlap > bestScore) {
-                bestScore = overlap;
-                bestTarget = el;
-              }
-            }
-          }
-        });
-
-        if (bestTarget) {
-          applyTextToParagraphRuns(bestTarget, clean, mut.bold);
-        }
-      }
-    }
-  }
 
   // 3. Serialize modified DOM back into DOCX zip
   const serializer = new XMLSerializer();
@@ -591,8 +541,9 @@ export async function mergeFindingsIntoDocxWithAstEngine(
 ): Promise<Blob> {
   const { ast, xmlDoc, zipEntries, pMap, cellMap, impressionHeaderId, impressionSlotIds } = await buildDocumentAstFromDocx(templateBase64);
 
-  // 1. Separate findings into Body Findings and Impression Items
-  const bodyFindings: string[] = [];
+  // 1. Separate findings into Table Rows, Body Paragraphs, and Impression Items
+  const tableRowFindings: string[] = [];
+  const paragraphFindings: string[] = [];
   const impressionItems: string[] = [];
   let isInImpression = false;
 
@@ -606,10 +557,8 @@ export async function mergeFindingsIntoDocxWithAstEngine(
     const f = findings[fIdx];
     let trimmed = (f || '').trim();
     if (!trimmed) continue;
-    if (trimmed.includes('|') || trimmed.startsWith('+-') || trimmed.startsWith('|-')) continue;
-    if (trimmed.toLowerCase().startsWith('title:')) {
-      continue;
-    }
+    if (trimmed.startsWith('+-') || trimmed.startsWith('|-') || trimmed.startsWith('+=')) continue;
+    if (trimmed.toLowerCase().startsWith('title:')) continue;
 
     const normalizedF = trimmed.toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -639,17 +588,55 @@ export async function mergeFindingsIntoDocxWithAstEngine(
       continue;
     }
 
-    bodyFindings.push(trimmed);
+    if (trimmed.includes('|')) {
+      tableRowFindings.push(trimmed);
+    } else {
+      paragraphFindings.push(trimmed);
+    }
   }
 
   const mutations: AstMutation[] = [];
   const usedNodeIds = new Set<string>();
 
-  // Filter AST body nodes (excluding impression items, header, and the template's permanent title)
-  const bodyNodes = ast.filter(n => n.type !== 'impression_header' && n.type !== 'impression_item' && n.type !== 'title');
+  // A. Process Table Row Findings against table_cell nodes
+  const tableCellNodes = ast.filter(n => n.type === 'table_cell');
+  for (const rowStr of tableRowFindings) {
+    const cols = rowStr.split('|').map(c => c.replace(/^BOLD::\s*/, '').trim());
+    if (cols.length < 2) continue;
+    const rowKey = cols[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!rowKey) continue;
+
+    // Find table cell in col 0 that matches rowKey
+    for (const cell of tableCellNodes) {
+      const cellText = (cell.current_text || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (cellText === rowKey && cell.id.includes('_')) {
+        const parts = cell.id.split('_'); // ['cell', tblIdx, rIdx, cIdx]
+        if (parts.length === 4) {
+          const tblIdx = parts[1];
+          const rIdx = parts[2];
+          for (let c = 1; c < cols.length; c++) {
+            const targetCellId = `cell_${tblIdx}_${rIdx}_${c}`;
+            const targetVal = cols[c];
+            if (targetVal) {
+              usedNodeIds.add(targetCellId);
+              mutations.push({
+                node_id: targetCellId,
+                new_text: targetVal,
+                bold: rowStr.includes('BOLD::')
+              });
+            }
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  // B. Process Paragraph Findings against paragraph nodes (NEVER table cells)
+  const paragraphNodes = ast.filter(n => n.type !== 'table_cell' && n.type !== 'impression_header' && n.type !== 'impression_item' && n.type !== 'title');
 
   // Pass 1: Exact / Colon-Key / Word Overlap Matching
-  for (const finding of bodyFindings) {
+  for (const finding of paragraphFindings) {
     const isBold = finding.startsWith('BOLD::') || finding.includes('BOLD::');
     const cleanFinding = finding.replace(/^BOLD::\s*/, '').trim();
     const isHeading = cleanFinding.endsWith(':');
@@ -660,7 +647,7 @@ export async function mergeFindingsIntoDocxWithAstEngine(
 
     const fColon = cleanFinding.includes(':') ? cleanFinding.split(':', 2)[0].trim().toLowerCase().replace(/[^a-zA-Z0-9]/g, '') : null;
 
-    for (const node of bodyNodes) {
+    for (const node of paragraphNodes) {
       if (usedNodeIds.has(node.id)) continue;
 
       const nText = node.current_text.trim();
@@ -669,6 +656,8 @@ export async function mergeFindingsIntoDocxWithAstEngine(
 
       // Do not match narrative findings onto section headings via word overlap
       if (!isHeading && isNodeHeading) continue;
+      // Do not match section headings onto narrative nodes
+      if (isHeading && !isNodeHeading) continue;
 
       // 1. Colon match (e.g. "L1-L2:", "Ventricular System:", "Clinical Profile:")
       if (fColon && nText.includes(':')) {
@@ -710,18 +699,19 @@ export async function mergeFindingsIntoDocxWithAstEngine(
     }
   }
 
-  // Pass 2: Positional sequential alignment for unmatched body findings
-  const unmatchedFindings = bodyFindings.filter((_, idx) => {
-    return !mutations.some(m => m.new_text === bodyFindings[idx]);
+  // Pass 2: Positional sequential alignment for unmatched paragraph findings
+  const unmatchedFindings = paragraphFindings.filter((_, idx) => {
+    return !mutations.some(m => m.new_text === paragraphFindings[idx]);
   });
 
   for (const item of unmatchedFindings) {
     const isHeading = item.replace(/^BOLD::\s*/, '').trim().endsWith(':');
-    for (const node of bodyNodes) {
+    for (const node of paragraphNodes) {
       if (!usedNodeIds.has(node.id)) {
         const isNodeHeading = node.type === 'section_heading' || node.current_text.trim().endsWith(':');
         // Do not place narrative findings into section headings in sequential alignment
         if (!isHeading && isNodeHeading) continue;
+        if (isHeading && !isNodeHeading) continue;
 
         usedNodeIds.add(node.id);
         mutations.push({
