@@ -1151,7 +1151,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
             if (b.id === batchId && b.findings) {
                 const updatedFindings = [...b.findings];
                 updatedFindings[findingIndex] = newText;
-                return { ...b, findings: updatedFindings, docxBlob: null }; // Invalidate pre-cached blob so manual download regenerates freshest DOCX
+                return { ...b, findings: updatedFindings }; // Retain AST docxBlob so manual download always matches auto-download
             }
             return b;
         }));
