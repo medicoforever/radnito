@@ -313,7 +313,12 @@ export async function applyAstMutationsToDocx(
     if (pMap.has(nid)) {
       const p = pMap.get(nid)!;
       if (!cleanText) {
-        // Remove the superseded/contradicted paragraph element cleanly from DOM (no leftover empty blank lines)
+        // Remove the superseded/contradicted paragraph element and its trailing spacer cleanly from DOM
+        let next = p.nextSibling;
+        while (next && next.nodeType !== 1) next = next.nextSibling;
+        if (next && ((next as Element).localName === 'p' || (next as Element).nodeName === 'w:p') && !getElementText(next as Element).trim()) {
+          (next as Element).parentNode?.removeChild(next as Element);
+        }
         if (p.parentNode) {
           p.parentNode.removeChild(p);
         } else {
@@ -724,13 +729,50 @@ export async function applyAstMutationsToDocx(
       const normNodeText = nodeText.toLowerCase().replace(/[^a-z0-9]/g, '');
       if (!normNodeText) continue;
 
-      // If Gemini excluded this node's text from display_findings, remove it from DOCX DOM
+      // If Gemini excluded this node's text from display_findings, remove it and its trailing spacer from DOCX DOM
       if (!displayTextsNorm.has(normNodeText)) {
+        let next = pEl.nextSibling;
+        while (next && next.nodeType !== 1) next = next.nextSibling;
+        if (next && ((next as Element).localName === 'p' || (next as Element).nodeName === 'w:p') && !getElementText(next as Element).trim()) {
+          (next as Element).parentNode?.removeChild(next as Element);
+        }
         pEl.parentNode.removeChild(pEl);
       }
     }
   }
 
+  // 2.8. Normalize Paragraph Spacing & Collapse Consecutive Empty Spacers
+  const bodyEl = xmlDoc.getElementsByTagName('w:body')[0];
+  if (bodyEl) {
+    const toRemoveEmptyP: Element[] = [];
+    let prevWasEmpty = false;
+
+    for (let i = 0; i < bodyEl.childNodes.length; i++) {
+      const child = bodyEl.childNodes[i];
+      if (child.nodeType !== 1) continue;
+      const el = child as Element;
+      if (el.localName === 'p' || el.nodeName === 'w:p') {
+        const txt = getElementText(el).trim();
+        if (!txt) {
+          if (prevWasEmpty) {
+            toRemoveEmptyP.push(el);
+          } else {
+            prevWasEmpty = true;
+          }
+        } else {
+          prevWasEmpty = false;
+        }
+      } else {
+        prevWasEmpty = false;
+      }
+    }
+
+    for (const emptyEl of toRemoveEmptyP) {
+      if (emptyEl.parentNode) {
+        emptyEl.parentNode.removeChild(emptyEl);
+      }
+    }
+  }
 
   // 3. Serialize modified DOM back into DOCX zip
   const serializer = new XMLSerializer();
