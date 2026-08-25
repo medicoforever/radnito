@@ -737,65 +737,103 @@ export async function mergeFindingsIntoDocxWithAstEngine(
 
   const titleNode = ast.find(n => n.type === 'title');
   const templateTitleNormalized = (titleNode?.current_text || ast[0]?.current_text || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
+  // Flatten and expand findings (in case lines are conjoined or pasted in one item)
+  const expandedRawLines: string[] = [];
+  for (const item of findings) {
+    if (!item) continue;
+    const lines = item.split(/\r?\n/);
+    for (const l of lines) {
+      if (l.trim()) expandedRawLines.push(l.trim());
+    }
+  }
 
-  for (let fIdx = 0; fIdx < findings.length; fIdx++) {
-    const f = findings[fIdx];
-    let trimmed = (f || '').trim();
+  let inImpressionSection = false;
+  let rawImpressionAccumulator = '';
+
+  for (let fIdx = 0; fIdx < expandedRawLines.length; fIdx++) {
+    const rawLine = expandedRawLines[fIdx];
+    let trimmed = rawLine.trim();
     if (!trimmed) continue;
     if (trimmed.startsWith('+-') || trimmed.startsWith('|-') || trimmed.startsWith('+=')) continue;
     if (trimmed.toLowerCase().startsWith('title:')) continue;
 
-    const normalizedF = trimmed.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-    // Skip the document Title line from body findings
-    if (fIdx === 0 && (!trimmed.includes(':') || (templateTitleNormalized && normalizedF === templateTitleNormalized))) {
-      continue;
-    }
-    if (templateTitleNormalized && normalizedF === templateTitleNormalized) {
+    // Check if line contains IMPRESSION or CONCLUSION
+    const normLine = trimmed.replace(/^[\s\.\*\-\u2022\"'\u00a0\u200b]+/, '');
+    if (normLine.toUpperCase() === 'IMPRESSION:' || normLine.toUpperCase().startsWith('IMPRESSION:') || normLine.toUpperCase() === 'CONCLUSION:' || normLine.toUpperCase().startsWith('CONCLUSION:')) {
+      inImpressionSection = true;
+      rawImpressionAccumulator += ' ' + trimmed;
       continue;
     }
 
-    if (trimmed.toUpperCase() === 'IMPRESSION:' || trimmed.toUpperCase().startsWith('IMPRESSION:') || trimmed.toUpperCase() === 'CONCLUSION:' || trimmed.toUpperCase().startsWith('CONCLUSION:')) {
-      isInImpression = true;
-      if (trimmed.includes('###')) {
-        const parts = trimmed.split('###').slice(1);
-        for (const p of parts) {
-          const cleanP = cleanImpressionText(p);
-          const u = cleanP.toUpperCase();
-          if (cleanP && u !== 'IMPRESSION:' && u !== 'CONCLUSION:' && u !== 'IMPRESSION' && u !== 'CONCLUSION') {
-            impressionItems.push(cleanP);
-          }
+    if (inImpressionSection) {
+      rawImpressionAccumulator += ' ' + trimmed;
+      continue;
+    }
+
+    // Split conjoined headings if present (e.g. "MRI SCAN OF RIGHT KNEE JOINTClinical profile: C/o...")
+    const conjoinedParts = trimmed.split(/(?i)(?=(?:Clinical profile:|Technique:|Bones and joints:|Meniscus:|Ligaments:|Rest of soft tissues:|IMPRESSION:|CONCLUSION:))/);
+    for (const cp of conjoinedParts) {
+      const cleanSub = cp.trim().replace(/^[\s\.\*\-\u2022\u00a0\u200b]+/, '').trim();
+      if (!cleanSub) continue;
+
+      const normSub = cleanSub.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (fIdx === 0 && templateTitleNormalized && normSub === templateTitleNormalized) {
+        continue;
+      }
+      if (templateTitleNormalized && normSub === templateTitleNormalized) {
+        continue;
+      }
+
+      if (cleanSub.includes('|')) {
+        tableRowFindings.push(cleanSub);
+        continue;
+      }
+
+      const knownHeadings = ['Bones and joints:', 'Meniscus:', 'Ligaments:', 'Rest of soft tissues:', 'Clinical profile:', 'Technique:'];
+      let matchedH: string | null = null;
+      for (const kh of knownHeadings) {
+        if (cleanSub.toLowerCase().startsWith(kh.toLowerCase())) {
+          matchedH = kh;
+          break;
+        }
+      }
+
+      if (matchedH && cleanSub.length > matchedH.length) {
+        const afterH = cleanSub.substring(matchedH.length).trim();
+        paragraphFindings.push(matchedH);
+        if (afterH) {
+          paragraphFindings.push(afterH);
         }
       } else {
-        const colonIdx = trimmed.indexOf(':');
+        paragraphFindings.push(cleanSub);
+      }
+    }
+  }
+
+  // Parse all accumulated impression text into discrete clean bullet points
+  if (rawImpressionAccumulator) {
+    const cleanedImp = rawImpressionAccumulator.replace(/\[(?:raw findings|user query|citation)[^\]]*\]/gi, '');
+    const rawParts = cleanedImp.split(/(?:###|""|"\s*"\s*|(?:\.|\))\s*"|\r?\n)/);
+    for (const part of rawParts) {
+      let p = part.replace(/^BOLD::\s*/, '');
+      p = p.replace(/^[\s\.\*\-\u2022\d\.\)\("'\u00a0\u200b]+/, '');
+      p = p.replace(/["'\s\.]+$/, '');
+      p = p.replace(/\s{2,}/g, ' ').trim();
+      const u = p.toUpperCase();
+      if (u.startsWith('IMPRESSION:') || u.startsWith('CONCLUSION:')) {
+        const colonIdx = p.indexOf(':');
         if (colonIdx !== -1) {
-          const afterColon = trimmed.substring(colonIdx + 1).trim();
-          const cleanP = cleanImpressionText(afterColon);
-          const u = cleanP.toUpperCase();
-          if (cleanP && u !== 'IMPRESSION:' && u !== 'CONCLUSION:' && u !== 'IMPRESSION' && u !== 'CONCLUSION') {
-            impressionItems.push(cleanP);
+          let after = p.substring(colonIdx + 1).trim();
+          after = after.replace(/^[\s\.\*\-\u2022\d\.\)\("'\u00a0\u200b]+/, '').replace(/["'\s\.]+$/, '').trim();
+          if (after.length > 3) {
+            impressionItems.push(after.endsWith('.') ? after : `${after}.`);
           }
         }
+        continue;
       }
-      continue;
-    }
-
-    if (isInImpression) {
-      const cleanP = cleanImpressionText(trimmed);
-      const u = cleanP.toUpperCase();
-      if (cleanP && u !== 'IMPRESSION:' && u !== 'CONCLUSION:' && u !== 'IMPRESSION' && u !== 'CONCLUSION') {
-        impressionItems.push(cleanP);
+      if (p.length > 3 && u !== 'IMPRESSION' && u !== 'CONCLUSION') {
+        impressionItems.push(p.endsWith('.') ? p : `${p}.`);
       }
-      continue;
-    }
-
-    if (trimmed.includes('|')) {
-      tableRowFindings.push(trimmed);
-    } else {
-      paragraphFindings.push(trimmed);
     }
   }
 
