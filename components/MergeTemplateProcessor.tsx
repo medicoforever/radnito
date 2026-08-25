@@ -418,43 +418,6 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
         )}
       </div>
 
-      {/* Selected Template Card */}
-      <div 
-        onClick={handleOpenModal}
-        className="bg-white dark:bg-slate-800 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 cursor-pointer hover:border-blue-400 dark:hover:border-blue-600 transition-all"
-      >
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
-              Active Template:
-            </span>
-            {activeTemplate && (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300">
-                {activeTemplate.category || activeTemplate.modality}
-              </span>
-            )}
-            {activeTemplate?.skillPrompt && (
-              <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                ⚡ Consultant Skill Attached
-              </span>
-            )}
-          </div>
-          <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
-            {activeTemplate ? activeTemplate.name : 'No Template Selected (Click to Choose)'}
-          </h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            {activeTemplate
-              ? `${activeTemplate.lines?.length || 0} standard normal sections • Native DOCX format`
-              : 'Please choose a CT, MRI, or custom DOCX template to merge your findings.'}
-          </p>
-        </div>
-
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            handleOpenModal();
-          }}
       {/* Main Banner */}
       <TemplateSelectorBanner
         selectedTemplate={activeTemplate}
