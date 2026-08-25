@@ -425,15 +425,16 @@ export async function mergeFindingsIntoDocx(
             }
           }
 
-          // 1. Separate findings into Body Findings and Impression Items
+          // 1. Separate findings into Body Findings, Table Findings, and Impression Items
           const bodyFindings: string[] = [];
+          const tableFindings: string[] = [];
           const impressionItems: string[] = [];
           let isInImpression = false;
 
           for (const f of findings) {
             let trimmed = f.trim();
             if (!trimmed) continue;
-            if (trimmed.includes('|') || trimmed.startsWith('+-') || trimmed.startsWith('|-')) continue;
+            if (trimmed.startsWith('+-') || trimmed.startsWith('|-')) continue;
             if (trimmed.toLowerCase().startsWith('title:')) {
               trimmed = trimmed.substring(trimmed.indexOf(':') + 1).trim();
               if (!trimmed) continue;
@@ -461,7 +462,50 @@ export async function mergeFindingsIntoDocx(
               continue;
             }
 
+            if (trimmed.includes('|')) {
+              tableFindings.push(trimmed);
+              continue;
+            }
+
             bodyFindings.push(trimmed);
+          }
+
+          // 1.5. Populate Table Cells across all tables in the document
+          const allTbl = xmlDoc.getElementsByTagName('w:tbl');
+          for (let t_i = 0; t_i < allTbl.length; t_i++) {
+            const tbl = allTbl[t_i];
+            const rows = tbl.getElementsByTagName('w:tr');
+            for (let r_i = 0; r_i < rows.length; r_i++) {
+              const row = rows[r_i];
+              const cells = row.getElementsByTagName('w:tc');
+              if (cells.length === 0) continue;
+
+              const labelP = cells[0].getElementsByTagName('w:p')[0];
+              const labelTTags = labelP ? labelP.getElementsByTagName('w:t') : [];
+              let rowLabel = '';
+              for (let j = 0; j < labelTTags.length; j++) rowLabel += labelTTags[j].textContent || '';
+              const rowKey = rowLabel.toLowerCase().replace(/[^a-z0-9]/g, '');
+              if (!rowKey) continue;
+
+              for (const tf of tableFindings) {
+                const cols = tf.split('|').map(c => c.trim());
+                if (cols.length < 2) continue;
+                const fKey = cols[0].replace(/^BOLD::\s*/, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                if (fKey === rowKey) {
+                  for (let c_i = 1; c_i < cols.length && c_i < cells.length; c_i++) {
+                    const cellVal = cols[c_i];
+                    if (cellVal !== undefined && cellVal !== '') {
+                      let cellP = cells[c_i].getElementsByTagName('w:p')[0];
+                      if (!cellP) {
+                        cellP = xmlDoc.createElementNS(W_NS, 'w:p');
+                        cells[c_i].appendChild(cellP);
+                      }
+                      applyTextToParagraph(cellP, cellVal, cellVal.includes('BOLD::'));
+                    }
+                  }
+                }
+              }
+            }
           }
 
           // 2. Locate IMPRESSION Header in Template
