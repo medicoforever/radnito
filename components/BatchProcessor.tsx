@@ -1219,7 +1219,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
             acc.plain.push(cleanFinding);
             acc.html.push(`<p style="text-align:center;"><strong><u>${cleanFinding}</u></strong></p>`);
           } else if (isImpression) {
-            acc.plain.push(`${title.toUpperCase()}\n${points.map(p => `. ${p}`).join('\n')}`);
+            acc.plain.push(`${title.toUpperCase()}\n${points.map(p => `• ${p}`).join('\n')}`);
             acc.html.push(`<p><strong style="text-decoration: underline;">${title.toUpperCase()}</strong></p><ul>${points.map(p => `<li><strong>${p}</strong></li>`).join('')}</ul>`);
           } else if (isStructured) {
             acc.plain.push([title, ...points].join('\n'));
@@ -1325,7 +1325,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
           plainText = cleanFinding;
           htmlText = `<p style="text-align:center;"><strong><u>${cleanFinding}</u></strong></p>`;
         } else if (isImpression) {
-            plainText = `${title.toUpperCase()}\n${points.map(p => `. ${p}`).join('\n')}`;
+            plainText = `${title.toUpperCase()}\n${points.map(p => `• ${p}`).join('\n')}`;
             htmlText = `<p><strong style="text-decoration: underline;">${title.toUpperCase()}</strong></p><ul>${points.map(p => `<li><strong>${p}</strong></li>`).join('')}</ul>`;
         } else if (isStructured) {
             plainText = [title, ...points].join('\n');
@@ -1367,7 +1367,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
             const { isStructured, title, points } = parseStructuredFinding(cleanFinding);
             const isImpression = isStructured && title.trim().toUpperCase() === 'IMPRESSION:';
             if (isImpression) {
-                return `${title.toUpperCase()}\n${points.map(p => `. ${p}`).join('\n')}`;
+                return `${title.toUpperCase()}\n${points.map(p => `• ${p}`).join('\n')}`;
             }
             if (isStructured) {
               return [title, ...points].join('\n');
@@ -1422,7 +1422,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                 const cleanFinding = isBold ? f.substring(6) : f;
                 const { isStructured, title, points } = parseStructuredFinding(cleanFinding);
                 const isImpression = isStructured && title.trim().toUpperCase() === 'IMPRESSION:';
-                if (isImpression) return `${title.toUpperCase()}\n${points.map(p => `. ${p}`).join('\n')}`;
+                if (isImpression) return `${title.toUpperCase()}\n${points.map(p => `• ${p}`).join('\n')}`;
                 if (isStructured) return [title, ...points].join('\n');
                 if (cleanFinding.startsWith('*') && cleanFinding.endsWith('*')) return cleanFinding.slice(1, -1);
                 return cleanFinding;
@@ -2276,7 +2276,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                                                 className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow transition-all transform hover:scale-105"
                                                 title="Retry processing this batch"
                                             >
-                                                ? Retry
+                                                ↻ Retry
                                             </button>
                                             {batch.audioBlobs.length > 0 && (
                                                 <button onClick={() => handleDownload(batch)} className="flex items-center gap-1.5 bg-slate-500 hover:bg-slate-600 text-white text-xs px-2.5 py-1.5 rounded-lg transition-colors" aria-label={`Download audio for ${batch.name}`}>
@@ -2290,13 +2290,13 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
 
                                 {batch.error && batch.status === 'error' && (
                                     <div className="w-full text-xs text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/40 p-2.5 rounded-lg border border-red-200 dark:border-red-800 flex items-center justify-between">
-                                        <span>? {batch.error}</span>
+                                        <span>⚠ {batch.error}</span>
                                         <button
                                             type="button"
                                             onClick={() => handleReprocessBatch(batch.id)}
                                             className="ml-2 font-bold underline text-amber-700 dark:text-amber-300 hover:opacity-80 flex items-center gap-1 whitespace-nowrap"
                                         >
-                                            ? Retry Now
+                                            ↻ Retry Now
                                         </button>
                                     </div>
                                 )}
@@ -2347,7 +2347,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                     disabled={!hasProcessableRecordings || !allProcessed || isBusy}
                     className="bg-green-600 text-white font-bold py-2.5 px-5 rounded-xl hover:bg-green-700 disabled:bg-green-300 disabled:cursor-not-allowed w-full sm:w-auto flex-grow shadow text-xs sm:text-sm flex items-center justify-center gap-2"
                 >
-                    {allProcessed ? '?? Process All Batches' : <><Spinner className="w-4 h-4 inline mr-1" /> Processing All...</>}
+                    {allProcessed ? '🚀 Process All Batches' : <><Spinner className="w-4 h-4 inline mr-1" /> Processing All...</>}
                 </button>
                 {!allProcessed && (
                     <button
@@ -2368,7 +2368,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                         disabled={isBusy}
                         className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 px-4 rounded-xl transition-all shadow flex items-center justify-center gap-1.5 w-full sm:w-auto text-xs sm:text-sm"
                     >
-                        ? Retry All Failed ({batches.filter(b => b.status === 'error' && !b.findings).length})
+                        ↻ Retry All Failed ({batches.filter(b => b.status === 'error' && !b.findings).length})
                     </button>
                 )}
 
@@ -2501,7 +2501,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                                                         className="text-sm font-bold py-1.5 px-3 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition-colors flex items-center gap-1 shadow-xs"
                                                         title="Move to Main Place / Top for next dictation"
                                                     >
-                                                        <span>? Move to Main Place</span>
+                                                        <span>⬆ Move to Main Place</span>
                                                     </button>
                                                     <button
                                                         onClick={() => handleToggleMergeMode(batch.id)}
@@ -2878,7 +2878,7 @@ const BatchProcessor: React.FC<BatchProcessorProps> = ({ onBack, selectedModel, 
                                                                 className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-lg hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50 transition-all w-full sm:w-auto flex items-center justify-center gap-2 shadow"
                                                                 title="Move to main place (Top) for next dictation"
                                                             >
-                                                                <span>? Move to Main Place / Top</span>
+                                                                <span>⬆ Move to Main Place / Top</span>
                                                             </button>
                                                             <button
                                                                 onClick={() => handleStartContinue(batch.id)}

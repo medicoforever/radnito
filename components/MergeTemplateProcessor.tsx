@@ -165,7 +165,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
 
       setActiveTemplate(newActive);
       setIsSavingCustomModalOpen(false);
-      setSkillNotice(`? Saved as custom template "${saveName}" in your library!`);
+      setSkillNotice(`✓ Saved as custom template "${saveName}" in your library!`);
       setTimeout(() => setSkillNotice(null), 4000);
     } catch (err: any) {
       setSkillNotice(`Failed to save template: ${err.message || err}`);
@@ -253,7 +253,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
         const clean = f.replace(/BOLD::/g, '');
         if (clean.startsWith('IMPRESSION:')) {
           const parts = clean.split('###').map(p => p.trim()).filter(Boolean);
-          return `${parts[0]}\n${parts.slice(1).map(p => `. ${p}`).join('\n')}`;
+          return `${parts[0]}\n${parts.slice(1).map(p => `• ${p}`).join('\n')}`;
         }
         return clean;
       })
@@ -354,7 +354,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fade-in">
           <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-md w-full border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4">
             <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <span>?? Save Modified Skill as New Custom Template</span>
+              <span>💾 Save Modified Skill as New Custom Template</span>
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400">
               This will save this template structure (.docx) along with your customized consultant skill prompt permanently to your personal template library.
@@ -435,7 +435,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
             )}
             {activeTemplate?.skillPrompt && (
               <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                ? Consultant Skill Attached
+                ⚡ Consultant Skill Attached
               </span>
             )}
           </div>
@@ -444,7 +444,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             {activeTemplate
-              ? `${activeTemplate.lines?.length || 0} standard normal sections . Native DOCX format`
+              ? `${activeTemplate.lines?.length || 0} standard normal sections • Native DOCX format`
               : 'Please choose a CT, MRI, or custom DOCX template to merge your findings.'}
           </p>
         </div>
@@ -497,10 +497,10 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
                       ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
                       : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
                   }`}>
-                    {isConsultantStyleActive ? '? AI Consultant Phrasing Active' : '? Verbatim / Literal Merge (Default)'}
+                    {isConsultantStyleActive ? '⚡ AI Consultant Phrasing Active' : '✓ Verbatim / Literal Merge (Default)'}
                   </span>
                   <span className="text-[11px] text-slate-400 dark:text-slate-500">
-                    {isConsultantStyleActive ? 'Consultant Terminology . Auto-Impression' : 'Unaltered Findings . Default Impression'}
+                    {isConsultantStyleActive ? 'Consultant Terminology • Auto-Impression' : 'Unaltered Findings • Default Impression'}
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
@@ -531,10 +531,10 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
                       ? 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300'
                       : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400'
                   }`}>
-                    {isSkillEnabled ? '? Consultant Skill Directives Active' : 'Consultant Skills Off (Default)'}
+                    {isSkillEnabled ? '⚡ Consultant Skill Directives Active' : 'Consultant Skills Off (Default)'}
                   </span>
                   <span className="text-[11px] text-slate-400 dark:text-slate-500">
-                    {isSkillEnabled ? 'Archive Directives . Cross-Modality Rules' : 'Standard Baseline'}
+                    {isSkillEnabled ? 'Archive Directives • Cross-Modality Rules' : 'Standard Baseline'}
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
@@ -550,7 +550,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
               onClick={() => setIsSkillExpanded(!isSkillExpanded)}
               className="text-xs font-bold px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors flex items-center gap-1.5 whitespace-nowrap"
             >
-              <span>{isSkillExpanded ? '? Hide Skill Prompt' : '?? View / Edit Skill Prompt'}</span>
+              <span>{isSkillExpanded ? '▲ Hide Skill Prompt' : '⚙️ View / Edit Skill Prompt'}</span>
             </button>
           </div>
 
@@ -578,7 +578,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
 
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs pt-1">
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                  ?? <em>Changes here apply immediately to your current dictation session.</em>
+                  💡 <em>Changes here apply immediately to your current dictation session.</em>
                 </span>
                 <div className="flex items-center gap-2 flex-wrap">
                   <button
@@ -586,14 +586,14 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
                     onClick={handleResetSkillToDefault}
                     className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 font-semibold"
                   >
-                    ? Reset to Default
+                    ↺ Reset to Default
                   </button>
                   <button
                     type="button"
                     onClick={() => setIsSavingCustomModalOpen(true)}
                     className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-sm transition-all flex items-center gap-1"
                   >
-                    <span>?? Save as Custom Template</span>
+                    <span>💾 Save as Custom Template</span>
                   </button>
                 </div>
               </div>
@@ -604,7 +604,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
 
       {downloadSuccess && (
         <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 rounded-xl text-xs text-emerald-800 dark:text-emerald-200 font-bold flex items-center gap-2 animate-fade-in">
-          <span>?</span>
+          <span>✓</span>
           <span>{downloadSuccess}</span>
         </div>
       )}
@@ -694,7 +694,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-4 border-b border-slate-100 dark:border-slate-700">
             <div>
               <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
-                ? Report Generated Successfully
+                ✓ Report Generated Successfully
               </span>
               <h3 className="text-lg font-black text-slate-900 dark:text-white">
                 {activeTemplate?.name || 'Radiology Report'}
@@ -708,7 +708,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
                 className="px-3 py-2 bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-xl text-xs font-extrabold transition-all flex items-center gap-1.5 shadow-xs"
                 title="Scroll smoothly up to main place"
               >
-                <span>? Move to Main / Top</span>
+                <span>⬆ Move to Main / Top</span>
               </button>
               <button
                 type="button"
@@ -855,7 +855,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
               onClick={handleNewDictationAndMoveTop}
               className="w-full sm:w-auto px-6 py-3 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-extrabold text-xs sm:text-sm shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2"
             >
-              <span>? Move to Main Place & Start Next Dictation</span>
+              <span>⬆ Move to Main Place & Start Next Dictation</span>
             </button>
             <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
               <button
@@ -863,7 +863,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
                 onClick={handleScrollToMainPlace}
                 className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition-all flex items-center gap-1.5 shadow-xs"
               >
-                <span>? Move to Top</span>
+                <span>⬆ Move to Top</span>
               </button>
               <button
                 type="button"
@@ -886,7 +886,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
           className="fixed bottom-6 right-6 z-40 p-3 px-4 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-2xl border-2 border-white dark:border-slate-800 transition-all flex items-center gap-2 text-xs font-extrabold hover:scale-105"
           title="Move to Main Place / Top"
         >
-          <span className="text-base leading-none font-black">?</span>
+          <span className="text-base leading-none font-black">⬆</span>
           <span className="tracking-wide">Main Place</span>
         </button>
       )}
