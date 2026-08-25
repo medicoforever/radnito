@@ -490,34 +490,103 @@ export async function mergeFindingsIntoDocx(
             pWordsList.push(extractSignificantWords(cleanT));
           }
 
-          const applyTextToParagraph = (p: Element, text: string, isBold: boolean) => {
-            let tTags = p.getElementsByTagName('w:t');
-            if (tTags.length === 0) {
+          const applyTextToParagraph = (p: Element, text: string, defaultBold: boolean) => {
+            const allRuns: Element[] = [];
+            for (let i = 0; i < p.childNodes.length; i++) {
+              if (p.childNodes[i].nodeName === 'w:r' || (p.childNodes[i] as Element).localName === 'r') {
+                allRuns.push(p.childNodes[i] as Element);
+              }
+            }
+            if (allRuns.length === 0) {
               const newRun = xmlDoc.createElementNS(W_NS, 'w:r');
               const newT = xmlDoc.createElementNS(W_NS, 'w:t');
               newRun.appendChild(newT);
               p.appendChild(newRun);
-              tTags = p.getElementsByTagName('w:t');
+              allRuns.push(newRun);
             }
-            if (tTags.length > 0) {
-              tTags[0].textContent = text;
-              tTags[0].setAttribute('xml:space', 'preserve');
-              for (let k = 1; k < tTags.length; k++) tTags[k].textContent = '';
-            }
-            if (isBold) {
-              const runs = p.getElementsByTagName('w:r');
-              if (runs.length > 0) {
-                let rPr = runs[0].getElementsByTagName('w:rPr')[0];
+
+            const firstRun = allRuns[0];
+            if (text.includes('BOLD::')) {
+              const boldIdx = text.indexOf('BOLD::');
+              const prefix = text.substring(0, boldIdx);
+              const boldVal = text.substring(boldIdx + 6).trim();
+
+              if (prefix) {
+                const tTags = firstRun.getElementsByTagName('w:t');
+                if (tTags.length > 0) {
+                  tTags[0].textContent = prefix;
+                  tTags[0].setAttribute('xml:space', 'preserve');
+                  for (let k = 1; k < tTags.length; k++) tTags[k].textContent = '';
+                }
+                let secondRun: Element;
+                if (allRuns.length > 1) {
+                  secondRun = allRuns[1];
+                } else {
+                  secondRun = firstRun.cloneNode(true) as Element;
+                  firstRun.parentNode?.insertBefore(secondRun, firstRun.nextSibling);
+                }
+                let rPr = secondRun.getElementsByTagName('w:rPr')[0];
                 if (!rPr) {
                   rPr = xmlDoc.createElementNS(W_NS, 'w:rPr');
-                  runs[0].insertBefore(rPr, runs[0].firstChild);
+                  secondRun.insertBefore(rPr, secondRun.firstChild);
                 }
-                let bTag = rPr.getElementsByTagName('w:b')[0];
-                if (!bTag) {
-                  bTag = xmlDoc.createElementNS(W_NS, 'w:b');
-                  bTag.setAttributeNS(W_NS, 'w:val', '1');
+                if (!rPr.getElementsByTagName('w:b')[0]) {
+                  const bTag = xmlDoc.createElementNS(W_NS, 'w:b');
                   rPr.appendChild(bTag);
                 }
+                const secondTTags = secondRun.getElementsByTagName('w:t');
+                if (secondTTags.length > 0) {
+                  secondTTags[0].textContent = boldVal;
+                  secondTTags[0].setAttribute('xml:space', 'preserve');
+                  for (let k = 1; k < secondTTags.length; k++) secondTTags[k].textContent = '';
+                }
+                for (let j = 2; j < allRuns.length; j++) {
+                  const laterTags = allRuns[j].getElementsByTagName('w:t');
+                  for (let k = 0; k < laterTags.length; k++) laterTags[k].textContent = '';
+                }
+              } else {
+                let rPr = firstRun.getElementsByTagName('w:rPr')[0];
+                if (!rPr) {
+                  rPr = xmlDoc.createElementNS(W_NS, 'w:rPr');
+                  firstRun.insertBefore(rPr, firstRun.firstChild);
+                }
+                if (!rPr.getElementsByTagName('w:b')[0]) {
+                  const bTag = xmlDoc.createElementNS(W_NS, 'w:b');
+                  rPr.appendChild(bTag);
+                }
+                const tTags = firstRun.getElementsByTagName('w:t');
+                if (tTags.length > 0) {
+                  tTags[0].textContent = boldVal;
+                  tTags[0].setAttribute('xml:space', 'preserve');
+                  for (let k = 1; k < tTags.length; k++) tTags[k].textContent = '';
+                }
+                for (let j = 1; j < allRuns.length; j++) {
+                  const laterTags = allRuns[j].getElementsByTagName('w:t');
+                  for (let k = 0; k < laterTags.length; k++) laterTags[k].textContent = '';
+                }
+              }
+            } else {
+              const cleanText = text.replace(/^BOLD::\s*/, '').trim();
+              const tTags = firstRun.getElementsByTagName('w:t');
+              if (tTags.length > 0) {
+                tTags[0].textContent = cleanText;
+                tTags[0].setAttribute('xml:space', 'preserve');
+                for (let k = 1; k < tTags.length; k++) tTags[k].textContent = '';
+              }
+              if (defaultBold) {
+                let rPr = firstRun.getElementsByTagName('w:rPr')[0];
+                if (!rPr) {
+                  rPr = xmlDoc.createElementNS(W_NS, 'w:rPr');
+                  firstRun.insertBefore(rPr, firstRun.firstChild);
+                }
+                if (!rPr.getElementsByTagName('w:b')[0]) {
+                  const bTag = xmlDoc.createElementNS(W_NS, 'w:b');
+                  rPr.appendChild(bTag);
+                }
+              }
+              for (let j = 1; j < allRuns.length; j++) {
+                const laterTags = allRuns[j].getElementsByTagName('w:t');
+                for (let k = 0; k < laterTags.length; k++) laterTags[k].textContent = '';
               }
             }
           };
