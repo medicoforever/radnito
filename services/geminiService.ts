@@ -190,6 +190,83 @@ function generateLocalMergedFallback(
   return lines;
 }
 
+export function normalizeClinicalProfileAndTechnique(lines: string[]): string[] {
+  if (!lines || lines.length === 0) return lines;
+  const result: string[] = [...lines];
+
+  // Helper to extract clean text without markdown or prefixes
+  const getRawText = (s: string) => {
+    if (!s) return '';
+    return s.replace(/^BOLD::\s*/, '')
+      .replace(/^[\*\_#\s\u00a0\u200b]+/, '')
+      .replace(/[\*\_#\s\u00a0\u200b]+$/, '')
+      .trim();
+  };
+
+  // 1. Conjoined line at index 0 (e.g. "MRI SCAN OF RIGHT KNEE JOINTClinical profile: C/o...")
+  const firstLine = result[0] || '';
+  const firstRaw = getRawText(firstLine);
+  if (firstRaw.includes('Clinical profile:') || firstRaw.includes('Clinical Profile:')) {
+    const parts = firstLine.split(/(?=(?:Clinical profile:|Clinical Profile:))/i);
+    if (parts.length > 1) {
+      result[0] = parts[0].trim();
+      const rest = parts.slice(1).join('').trim();
+      result.splice(1, 0, rest);
+    }
+  }
+
+  // 2. Case 1: "Clinical profile: C/o..." conjoined with "Technique: ..." in line 1 or 2
+  for (let i = 1; i < Math.min(result.length, 5); i++) {
+    const raw = getRawText(result[i]);
+    const isCP = raw.toLowerCase().startsWith('clinical profile:') || raw.toLowerCase().startsWith('clinical history:');
+    if (isCP && (raw.includes('Technique:') || raw.includes('Scanning technique:') || raw.includes('Protocol:'))) {
+      const parts = result[i].split(/(?=(?:Technique:|Scanning technique:|Protocol:))/i);
+      if (parts.length > 1) {
+        result[i] = parts[0].trim();
+        result.splice(i + 1, 0, parts.slice(1).join('').trim());
+        break;
+      }
+    }
+  }
+
+  // 3. Case 2 & 3: Clinical profile header followed by conjoined technique & history
+  for (let i = 1; i < Math.min(result.length - 1, 5); i++) {
+    const lineI = result[i];
+    const rawI = getRawText(lineI);
+    const lineNext = result[i + 1];
+    const rawNext = getRawText(lineNext);
+
+    // Case 2: Line i is empty header "Clinical profile:", Line i+1 is "Technique: PD fs... C/o..."
+    if (rawI.toLowerCase() === 'clinical profile:' || rawI.toLowerCase() === 'clinical history:') {
+      const isTech = rawNext.toLowerCase().startsWith('technique:') || rawNext.toLowerCase().startsWith('scanning technique:');
+      if (isTech && (rawNext.includes('C/o') || rawNext.includes('c/o') || rawNext.includes('H/o') || rawNext.includes('h/o') || rawNext.includes('pain') || rawNext.includes('swelling'))) {
+        const splitMatch = lineNext.match(/^((?:BOLD::)?(?:\*|_)?(?:Technique|Scanning technique|Protocol):\s*[^.]+?\.)\s+(.+)$/i);
+        if (splitMatch) {
+          const techPart = splitMatch[1].trim();
+          const historyPart = splitMatch[2].trim();
+          result[i] = `Clinical profile: ${historyPart}`;
+          result[i + 1] = techPart;
+          break;
+        }
+      }
+    }
+
+    // Case 3: Line i is "Clinical profile:", Line i+1 is "Technique:", and line i+2 has conjoined text
+    if (i + 2 < result.length && (rawI.toLowerCase() === 'clinical profile:' || rawI.toLowerCase() === 'clinical history:')) {
+      if (rawNext.toLowerCase() === 'technique:' || rawNext.toLowerCase() === 'scanning technique:') {
+        const lineAfter = result[i + 2];
+        const rawAfter = getRawText(lineAfter);
+        if (rawAfter.includes('C/o') || rawAfter.includes('c/o') || rawAfter.includes('pain') || rawAfter.includes('swelling')) {
+          result[i] = `Clinical profile: ${rawAfter}`;
+          result.splice(i + 2, 1);
+          break;
+        }
+      }
+    }
+  }
+
+  return result;
+}
 
 const getCleanMimeType = (blob: Blob, fileName?: string): string => {
     let mimeType = blob.type;
@@ -1010,7 +1087,8 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
         displayFindings[0] = docTitle;
       }
 
-      const finalFindings = displayFindings.length > 0 ? displayFindings : (selectedTemplate.lines || [selectedTemplate.name]);
+      const rawFinalFindings = displayFindings.length > 0 ? displayFindings : (selectedTemplate.lines || [selectedTemplate.name]);
+      const finalFindings = normalizeClinicalProfileAndTechnique(rawFinalFindings);
       const docxBlob = await mergeFindingsIntoDocxWithAstEngine(
         selectedTemplate.docxBase64,
         finalFindings
@@ -1130,7 +1208,7 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
     const result = JSON.parse(cleanedJsonString);
 
     if (result && Array.isArray(result.findings)) {
-      return result.findings;
+      return normalizeClinicalProfileAndTechnique(result.findings);
     } else {
       throw new Error("Invalid data structure in API response. Expected a 'findings' array.");
     }
