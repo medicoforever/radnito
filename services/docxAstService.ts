@@ -372,6 +372,42 @@ export async function applyAstMutationsToDocx(
       allRuns.push(newRun);
     }
 
+    const colonMatch = rawText.match(/^((?:Clinical profile|Clinical history|Technique|Scanning technique|Protocol):)\s*(.*)$/i);
+    if (colonMatch) {
+      const labelText = colonMatch[1] + ' ';
+      const valText = colonMatch[2];
+
+      ensureRunFormatting(firstRun, true, true);
+      const tTags = firstRun.getElementsByTagName('w:t');
+      if (tTags.length > 0) {
+        tTags[0].textContent = labelText;
+        tTags[0].setAttribute('xml:space', 'preserve');
+        for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
+      }
+
+      if (valText) {
+        let secondRun: Element;
+        if (allRuns.length > 1) {
+          secondRun = allRuns[1];
+        } else {
+          secondRun = firstRun.cloneNode(true) as Element;
+          firstRun.parentNode?.insertBefore(secondRun, firstRun.nextSibling);
+        }
+        ensureRunFormatting(secondRun, false, false);
+        const secondTTags = secondRun.getElementsByTagName('w:t');
+        if (secondTTags.length > 0) {
+          secondTTags[0].textContent = valText;
+          secondTTags[0].setAttribute('xml:space', 'preserve');
+          for (let j = 1; j < secondTTags.length; j++) secondTTags[j].textContent = '';
+        }
+        for (let j = 2; j < allRuns.length; j++) {
+          const laterTags = allRuns[j].getElementsByTagName('w:t');
+          for (let k = 0; k < laterTags.length; k++) laterTags[k].textContent = '';
+        }
+      }
+      return;
+    }
+
     const firstRun = allRuns[0];
     if (rawText.includes('BOLD::')) {
       const boldIdx = rawText.indexOf('BOLD::');
@@ -1017,7 +1053,23 @@ function extractMedicalKeywords(text: string): Set<string> {
       if (!nText) continue;
       const isNodeHeading = node.type === 'section_heading' || nText.endsWith(':');
 
-      // 1. Section Heading Matching
+      // 1. Specialized Header Matching for Clinical Profile & Technique (FIRST PRIORITY)
+      if (fColon === 'clinicalprofile' || fColon === 'clinicalhistory') {
+        if (node.type === 'clinical_profile' || nText.toLowerCase().startsWith('clinical profile') || nText.toLowerCase().startsWith('clinical history')) {
+          bestScore = 100.0;
+          bestNodeId = node.id;
+          break;
+        }
+      }
+      if (fColon === 'technique' || fColon === 'scanningtechnique' || fColon === 'protocol') {
+        if (node.type === 'technique' || nText.toLowerCase().startsWith('technique:') || nText.toLowerCase().startsWith('scanning technique:') || nText.toLowerCase().startsWith('protocol:')) {
+          bestScore = 100.0;
+          bestNodeId = node.id;
+          break;
+        }
+      }
+
+      // 2. Section Heading Matching
       if (isHeading && isNodeHeading) {
         let nKey = nText.toLowerCase().replace(/[^a-z0-9]/g, '');
         if (nKey.includes('softtissue')) nKey = 'softtissue';
@@ -1031,11 +1083,11 @@ function extractMedicalKeywords(text: string): Set<string> {
       }
 
       // Do not match narrative findings onto section headings
-      if (!isHeading && isNodeHeading) continue;
+      if (!isHeading && isNodeHeading && node.type !== 'clinical_profile' && node.type !== 'technique') continue;
       // Do not match section headings onto narrative nodes
       if (isHeading && !isNodeHeading) continue;
 
-      // 2. Colon match (e.g. "L1-L2:", "Ventricular System:", "Clinical Profile:")
+      // 3. Colon match (e.g. "L1-L2:", "Ventricular System:", "Clinical Profile:")
       if (fColon && nText.includes(':')) {
         const nColon = nText.split(':', 2)[0].trim().toLowerCase().replace(/[^a-zA-Z0-9]/g, '');
         if (fColon === nColon && fColon.length > 0) {
