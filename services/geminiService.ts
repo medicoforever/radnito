@@ -190,6 +190,52 @@ function generateLocalMergedFallback(
   return lines;
 }
 
+export function normalizeClinicalProfileAndTechnique(lines: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const u = line.toUpperCase();
+
+    // Case 1: "Clinical profile:" alone followed by "Technique: <history>"
+    if (u === 'CLINICAL PROFILE:' || u === 'CLINICAL PROFILE' || u === 'CLINICAL HISTORY:' || u === 'CLINICAL HISTORY' || u === '*CLINICAL PROFILE:*' || u === '*CLINICAL PROFILE*') {
+      if (i + 1 < lines.length) {
+        const nextLine = lines[i + 1].trim();
+        if (nextLine.toLowerCase().startsWith('technique:') && /\b(c\/o|pain|swelling|trauma|h\/o|fever|fall|rto|r\/t\/o|complaint|post-op|k\/c\/o|mass|lump)\b/i.test(nextLine)) {
+          const colonIdx = nextLine.indexOf(':');
+          const histVal = nextLine.substring(colonIdx + 1).trim();
+          out.push(`Clinical profile: ${histVal}`);
+          i++;
+
+          if (i + 1 < lines.length && /\b(PD|fs|IR|T1|T2|GRE|FLAIR|DWI|ADC|CT|kVp|mA|slices|planes|axial|sagittal|coronal)\b/i.test(lines[i + 1])) {
+            const actualTech = lines[i + 1].trim().replace(/^(?:Technique:\s*)+/i, '');
+            out.push(`Technique: ${actualTech}`);
+            i++;
+          }
+          continue;
+        }
+      }
+    }
+
+    // Case 2: Line itself is "Technique: <clinical history>"
+    if (line.toLowerCase().startsWith('technique:') && /\b(c\/o|pain|swelling|trauma|h\/o|fever|fall|rto|r\/t\/o|complaint|post-op|k\/c\/o|mass|lump)\b/i.test(line)) {
+      const colonIdx = line.indexOf(':');
+      const histVal = line.substring(colonIdx + 1).trim();
+      out.push(`Clinical profile: ${histVal}`);
+
+      if (i + 1 < lines.length && /\b(PD|fs|IR|T1|T2|GRE|FLAIR|DWI|ADC|CT|kVp|mA|slices|planes|axial|sagittal|coronal)\b/i.test(lines[i + 1])) {
+        const actualTech = lines[i + 1].trim().replace(/^(?:Technique:\s*)+/i, '');
+        out.push(`Technique: ${actualTech}`);
+        i++;
+      }
+      continue;
+    }
+
+    out.push(line);
+  }
+  return out;
+}
+
 
 const getCleanMimeType = (blob: Blob, fileName?: string): string => {
     let mimeType = blob.type;
@@ -1005,52 +1051,6 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
         const targetNode = ast.find(n => n.id === u.node_id);
         return targetNode?.type !== 'title';
       });
-
-function normalizeClinicalProfileAndTechnique(lines: string[]): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    const u = line.toUpperCase();
-
-    // Case 1: "Clinical profile:" alone followed by "Technique: <history>"
-    if (u === 'CLINICAL PROFILE:' || u === 'CLINICAL PROFILE' || u === 'CLINICAL HISTORY:' || u === 'CLINICAL HISTORY' || u === '*CLINICAL PROFILE:*' || u === '*CLINICAL PROFILE*') {
-      if (i + 1 < lines.length) {
-        const nextLine = lines[i + 1].trim();
-        if (nextLine.toLowerCase().startsWith('technique:') && /\b(c\/o|pain|swelling|trauma|h\/o|fever|fall|rto|r\/t\/o|complaint|post-op|k\/c\/o|mass|lump)\b/i.test(nextLine)) {
-          const colonIdx = nextLine.indexOf(':');
-          const histVal = nextLine.substring(colonIdx + 1).trim();
-          out.push(`Clinical profile: ${histVal}`);
-          i++;
-
-          if (i + 1 < lines.length && /\b(PD|fs|IR|T1|T2|GRE|FLAIR|DWI|ADC|CT|kVp|mA|slices|planes|axial|sagittal|coronal)\b/i.test(lines[i + 1])) {
-            const actualTech = lines[i + 1].trim().replace(/^(?:Technique:\s*)+/i, '');
-            out.push(`Technique: ${actualTech}`);
-            i++;
-          }
-          continue;
-        }
-      }
-    }
-
-    // Case 2: Line itself is "Technique: <clinical history>"
-    if (line.toLowerCase().startsWith('technique:') && /\b(c\/o|pain|swelling|trauma|h\/o|fever|fall|rto|r\/t\/o|complaint|post-op|k\/c\/o|mass|lump)\b/i.test(line)) {
-      const colonIdx = line.indexOf(':');
-      const histVal = line.substring(colonIdx + 1).trim();
-      out.push(`Clinical profile: ${histVal}`);
-
-      if (i + 1 < lines.length && /\b(PD|fs|IR|T1|T2|GRE|FLAIR|DWI|ADC|CT|kVp|mA|slices|planes|axial|sagittal|coronal)\b/i.test(lines[i + 1])) {
-        const actualTech = lines[i + 1].trim().replace(/^(?:Technique:\s*)+/i, '');
-        out.push(`Technique: ${actualTech}`);
-        i++;
-      }
-      continue;
-    }
-
-    out.push(line);
-  }
-  return out;
-}
 
       // Ensure displayFindings[0] uses the exact template document title verbatim
       if (displayFindings.length > 0 && docTitle) {
