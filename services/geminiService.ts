@@ -190,97 +190,6 @@ function generateLocalMergedFallback(
   return lines;
 }
 
-export function normalizeClinicalProfileAndTechnique(lines: string[]): string[] {
-  const out: string[] = [];
-  const clinicalKeywords = /\b(c\/o|pain|swelling|trauma|h\/o|fever|fall|rto|r\/t\/o|complaint|post-op|k\/c\/o|mass|lump|known case|operated|injury|fracture)\b/i;
-  const techKeywords = /\b(PD|fs|IR|T1|T2|GRE|FLAIR|DWI|ADC|CT|kVp|mA|slices|planes|axial|sagittal|coronal|STIR|FIESTA|CISS|TOF|MRA|HRCT|NCCT|CECT)\b/i;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-
-    // Strip BOLD:: prefix and markdown italic markers for detection only
-    const cleanLine = line.replace(/^BOLD::\s*/, '').replace(/^\*+|\*+$/g, '').trim();
-    const cleanU = cleanLine.toUpperCase().replace(/\s+/g, ' ').trim();
-
-    // Case 1: "Clinical profile:" alone followed by "Technique: <history>"
-    if (cleanU === 'CLINICAL PROFILE:' || cleanU === 'CLINICAL PROFILE' || cleanU === 'CLINICAL HISTORY:' || cleanU === 'CLINICAL HISTORY') {
-      if (i + 1 < lines.length) {
-        const nextRaw = lines[i + 1].trim();
-        const nextClean = nextRaw.replace(/^BOLD::\s*/, '').replace(/^\*+|\*+$/g, '').trim();
-
-        // Sub-case A: next line is "Technique: <clinical history>"
-        if (nextClean.toLowerCase().startsWith('technique:') && clinicalKeywords.test(nextClean)) {
-          const colonIdx = nextClean.indexOf(':');
-          const histVal = nextClean.substring(colonIdx + 1).trim();
-          out.push(`Clinical profile: ${histVal}`);
-          i++;
-
-          if (i + 1 < lines.length) {
-            const techCandidate = lines[i + 1].trim().replace(/^BOLD::\s*/, '').replace(/^\*+|\*+$/g, '').trim();
-            if (techKeywords.test(techCandidate)) {
-              const actualTech = techCandidate.replace(/^(?:Technique:\s*)+/i, '');
-              out.push(`Technique: ${actualTech}`);
-              i++;
-            }
-          }
-          continue;
-        }
-
-        // Sub-case B: next line is also "Technique:" (empty), values follow on separate lines
-        const nextU = nextClean.toUpperCase().replace(/\s+/g, ' ').trim();
-        if (nextU === 'TECHNIQUE:' || nextU === 'TECHNIQUE' || nextU === 'SCANNING TECHNIQUE:') {
-          // Look ahead for clinical history line and technique line
-          let histLine: string | null = null;
-          let techLine: string | null = null;
-          let consumed = 1; // already consumed the Technique: line
-
-          for (let j = i + 2; j < Math.min(i + 5, lines.length); j++) {
-            const candidate = lines[j].trim().replace(/^BOLD::\s*/, '').replace(/^\*+|\*+$/g, '').trim();
-            if (!candidate) continue;
-            if (!histLine && clinicalKeywords.test(candidate) && !candidate.toLowerCase().startsWith('technique:')) {
-              histLine = candidate;
-              consumed = j - i;
-            } else if (!techLine && techKeywords.test(candidate) && !clinicalKeywords.test(candidate)) {
-              techLine = candidate.replace(/^(?:Technique:\s*)+/i, '');
-              consumed = j - i;
-            }
-          }
-
-          if (histLine) {
-            out.push(`Clinical profile: ${histLine}`);
-            if (techLine) {
-              out.push(`Technique: ${techLine}`);
-            }
-            i += consumed;
-            continue;
-          }
-        }
-      }
-    }
-
-    // Case 2: Line itself is "Technique: <clinical history>"
-    if (cleanLine.toLowerCase().startsWith('technique:') && clinicalKeywords.test(cleanLine)) {
-      const colonIdx = cleanLine.indexOf(':');
-      const histVal = cleanLine.substring(colonIdx + 1).trim();
-      out.push(`Clinical profile: ${histVal}`);
-
-      if (i + 1 < lines.length) {
-        const techCandidate = lines[i + 1].trim().replace(/^BOLD::\s*/, '').replace(/^\*+|\*+$/g, '').trim();
-        if (techKeywords.test(techCandidate)) {
-          const actualTech = techCandidate.replace(/^(?:Technique:\s*)+/i, '');
-          out.push(`Technique: ${actualTech}`);
-          i++;
-        }
-      }
-      continue;
-    }
-
-    out.push(line);
-  }
-  return out;
-}
-
 
 const getCleanMimeType = (blob: Blob, fileName?: string): string => {
     let mimeType = blob.type;
@@ -989,16 +898,15 @@ ${findingsText}
    - EVERY observation, measurement, pathology, and clinical history dictated by the radiologist MUST be completely included in the final report.
 2. **Surgical Node Updates, Clinical Profile Placement & Contradiction Removal**:
    - Map each clinical finding to its most appropriate anatomical node_id.
-   - **Clinical Profile / History Placement**: Always map the clinical history / patient complaint to the "Clinical profile:" or "Indication:" node at the top of the report (written as "Clinical profile: <dictated history>"). NEVER leave an empty "Clinical profile:" line and put history under "Technique:". NEVER place clinical history inside Technique or Examination title.
-   - **Technique Node Mandate**: The "Technique:" node MUST contain ONLY imaging sequences/protocol (e.g. "Technique: PD fs, IR, T1, GRE in all planes." or the dictated sequence list). NEVER put patient symptoms, trauma history, or clinical complaints inside Technique!
+   - **Clinical Profile / History Placement**: Always map the clinical history / patient complaint to the "Clinical profile:" or "Indication:" node at the top of the report (written as "Clinical profile: ..."). NEVER insert Clinical Profile at the bottom.
    - **Baseline Normal Sentence Overwrite**: When an anatomical structure is dictated with an abnormal finding (e.g. SI joint degenerative changes, facet arthropathy, disc bulge), you MUST target the baseline normal template node for that structure (e.g. "SI joints and pubic symphysis appears normal" or "No disc bulge or protrusion is seen") in "updates" to overwrite it with the abnormal finding. NEVER leave the baseline normal sentence untouched or duplicated alongside the abnormal finding.
    - **Mingled Sentence Handling**: If a baseline template node combines multiple anatomical concepts (e.g. "The basal cisterns, cortical sulci and sylvian fissures are normal") and only one structure is abnormal (e.g. cortical sulcal prominence), rewrite that node so the normal structures are retained (e.g. "The basal cisterns are normal.") and the abnormal finding is accurately documented.
    - **Automatic Contradiction Removal**: If an abnormal finding supersedes, covers, or contradicts an existing baseline normal node (e.g. ventricular atrophy finding supersedes normal ventricular system node, or disc bulge finding supersedes 'no significant disc bulge' node), you MUST include that superseded normal node in "updates" with "new_text": "" (empty string) so it is cleanly removed from the Word document with zero leftover contradictory text.
    - For unaffected normal nodes, do NOT include them in "updates" (they remain 100% intact with their original template styles).
 3. **5-Layer Structural DNA & BOLD Protocol**:
-   - Update Clinical Profile node if history/indication is dictated (written as "Clinical profile: <history>").
+   - Update Clinical Profile node if history/indication is dictated (written as "Clinical profile: ...").
    - In "display_findings", produce the full ordered report array:
-     Layer 1: Exact Template Title: "${docTitle}" (MUST preserve the exact template document title verbatim without changing, shortening, or removing any words like MRI/CT) -> "Clinical profile: <history>" (or "Clinical profile:") -> "Technique: <protocol>" -> Findings (prefix modified lines with "BOLD::", preserve normal lines verbatim without "BOLD::") -> Synthesized Impression starting with "IMPRESSION:###".
+     Layer 1: Exact Template Title: "${docTitle}" (MUST preserve the exact template document title verbatim without changing, shortening, or removing any words like MRI/CT) -> "Clinical profile: ..." (or "Clinical profile:") -> Technique -> Findings (prefix modified lines with "BOLD::", preserve normal lines verbatim without "BOLD::") -> Synthesized Impression starting with "IMPRESSION:###".
 4. **Vague Dictation Translation**:
    - Translate colloquial phrases into formal consultant terminology: "fuzzy liver thing" -> "Ill-defined focal lesion in segment VI...", "whited out left base" -> "Homogeneous dense opacification of the left hemithorax base...", "dirty fat around appendix" -> "Blind-ending thickened appendix with surrounding fat stranding...", "bright spot on dwi" -> "Focal area of acute restricted diffusion on DWI...", "torn meniscus" -> "Linear high signal intensity... consistent with meniscal tear", "broken hip ball" -> "Displaced subcapital fracture of femoral neck".
 5. **RADS Scoring Standards**:
@@ -1102,8 +1010,7 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
         displayFindings[0] = docTitle;
       }
 
-      const sanitizedDisplayFindings = normalizeClinicalProfileAndTechnique(displayFindings);
-      const finalFindings = sanitizedDisplayFindings.length > 0 ? sanitizedDisplayFindings : (selectedTemplate.lines || [selectedTemplate.name]);
+      const finalFindings = displayFindings.length > 0 ? displayFindings : (selectedTemplate.lines || [selectedTemplate.name]);
       const docxBlob = await mergeFindingsIntoDocxWithAstEngine(
         selectedTemplate.docxBase64,
         finalFindings
@@ -1115,7 +1022,7 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
   }
 
   const findings = await mergeFindingsWithTemplate(findingsText, selectedTemplate, model, customPrompt, customImages, skillEnabled, activeSkillPrompt);
-  return { findings: normalizeClinicalProfileAndTechnique(findings) };
+  return { findings };
 };
 
 
