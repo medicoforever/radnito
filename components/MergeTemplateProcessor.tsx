@@ -269,6 +269,22 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
     }
   };
 
+  const handleScrollToMainPlace = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    const el = document.getElementById('merge-dictation-main-top');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  const handleNewDictationAndMoveTop = () => {
+    setMergedFindings(null);
+    setMergedDocxBlob(null);
+    setFindingsInput('');
+    setError(null);
+    handleScrollToMainPlace();
+  };
+
   const handleApplyTextModification = async () => {
     if (!modificationText.trim() || !mergedFindings) return;
     setModificationState('processing');
@@ -339,7 +355,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
   };
 
   return (
-    <div className="w-full max-w-4xl mx-auto space-y-6">
+    <div id="merge-dictation-main-top" className="w-full max-w-4xl mx-auto space-y-6">
       {/* Template Selection Modal */}
       <TemplateSelectionModal
         isOpen={isTemplateModalOpen}
