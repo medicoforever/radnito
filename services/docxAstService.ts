@@ -94,12 +94,18 @@ export async function buildDocumentAstFromDocx(docxBase64: string): Promise<{
     const txt = getElementText(p).trim();
     if (!txt) continue;
 
+    // Do NOT split paragraphs that are headings or start with "Rest of"
+    if (txt.endsWith(':') && txt.length < 60) continue;
+    if (txt.toLowerCase().startsWith('rest of')) continue;
+
     // Detect if paragraph contains embedded section heading or IMPRESSION: (e.g. "Technique: ... Bones and joints:" or "... fluid collection is seen. IMPRESSION:")
     const match = txt.match(/^(.+?)\s+(Bones and joints:|Soft tissues?:|Meniscus:|Ligaments:|Screening of [^:]+:|IMPRESSION:|CONCLUSION:)\s*(.*)$/i);
     if (match) {
       const prefix = match[1].trim();
       const heading = match[2].trim();
       const suffix = match[3].trim();
+
+      if (prefix.length < 15 || prefix.toLowerCase().endsWith('rest of')) continue;
 
       const tTags = p.getElementsByTagName('w:t');
       if (tTags.length > 0) {
@@ -983,14 +989,19 @@ function extractMedicalKeywords(text: string): Set<string> {
 }
 
   let activeReportSection = 'header';
+  const processedFindingsText: string[] = [];
 
-  // Pass 1: Exact / Colon-Key / Word Overlap Matching
+  // Pass 1: Exact / Colon-Key / Section / Word Overlap Matching
   for (const finding of paragraphFindings) {
     const isBold = finding.startsWith('BOLD::') || finding.includes('BOLD::');
     const cleanFinding = finding.replace(/^BOLD::\s*/, '').trim();
+    if (!cleanFinding) continue;
+
     const isHeading = cleanFinding.endsWith(':');
     if (isHeading) {
-      activeReportSection = cleanFinding.toLowerCase().replace(/[^a-z0-9]/g, '');
+      let sKey = cleanFinding.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (sKey.includes('softtissue')) sKey = 'softtissue';
+      activeReportSection = sKey;
     }
     const fWords = extractMedicalKeywords(cleanFinding);
 
@@ -1006,12 +1017,25 @@ function extractMedicalKeywords(text: string): Set<string> {
       if (!nText) continue;
       const isNodeHeading = node.type === 'section_heading' || nText.endsWith(':');
 
-      // Section Isolation: Narrative findings inside a section cannot match nodes in previous/other sections
-      if (activeReportSection !== 'header' && node.section && node.section !== 'header' && node.section !== activeReportSection) {
-        continue;
+      // 1. Section Heading Matching
+      if (isHeading && isNodeHeading) {
+        let nKey = nText.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (nKey.includes('softtissue')) nKey = 'softtissue';
+        let fKey = cleanFinding.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (fKey.includes('softtissue')) fKey = 'softtissue';
+        if (nKey === fKey || nKey.includes(fKey) || fKey.includes(nKey)) {
+          bestScore = 100.0;
+          bestNodeId = node.id;
+          break;
+        }
       }
 
-      // 1. Colon match (e.g. "L1-L2:", "Ventricular System:", "Clinical Profile:")
+      // Do not match narrative findings onto section headings
+      if (!isHeading && isNodeHeading) continue;
+      // Do not match section headings onto narrative nodes
+      if (isHeading && !isNodeHeading) continue;
+
+      // 2. Colon match (e.g. "L1-L2:", "Ventricular System:", "Clinical Profile:")
       if (fColon && nText.includes(':')) {
         const nColon = nText.split(':', 2)[0].trim().toLowerCase().replace(/[^a-zA-Z0-9]/g, '');
         if (fColon === nColon && fColon.length > 0) {
@@ -1021,31 +1045,44 @@ function extractMedicalKeywords(text: string): Set<string> {
         }
       }
 
-      // Do not match narrative findings onto section headings via word overlap
-      if (!isHeading && isNodeHeading) continue;
-      // Do not match section headings onto narrative nodes
-      if (isHeading && !isNodeHeading) continue;
-
-      // 2. Exact match
+      // 3. Exact match
       if (cleanFinding.toLowerCase() === nText.toLowerCase()) {
         bestScore = 90.0;
         bestNodeId = node.id;
         break;
       }
 
-      // 3. Medical Keyword Coverage match (e.g. "Right SI joint sclerosis", "Sacroiliac narrowing" vs "SI joints and pubic symphysis appears normal")
+      // 4. Section Isolation with smart cross-section allowance
+      const nodeSectionNorm = (node.section || '').replace(/[^a-z0-9]/g, '');
+      const activeSectionNorm = activeReportSection.replace(/[^a-z0-9]/g, '');
+      if (activeSectionNorm !== 'header' && nodeSectionNorm && nodeSectionNorm !== 'header' && nodeSectionNorm !== activeSectionNorm) {
+        // Allow cross-section match only if keyword coverage is very high (>= 0.50)
+        const nWords = extractMedicalKeywords(nText);
+        let overlap = 0;
+        fWords.forEach(w => { if (nWords.has(w)) overlap++; });
+        if (nWords.size > 0 && overlap > 0) {
+          const coverage = overlap / nWords.size;
+          if (coverage >= 0.50 && coverage > bestScore) {
+            bestScore = coverage;
+            bestNodeId = node.id;
+          }
+        }
+        continue;
+      }
+
+      // 5. Medical Keyword Coverage match within section
       const nWords = extractMedicalKeywords(nText);
       let overlap = 0;
       fWords.forEach(w => { if (nWords.has(w)) overlap++; });
       if (nWords.size > 0 && overlap > 0) {
         const coverage = overlap / nWords.size;
-        if ((coverage >= 0.40 || overlap >= 2) && coverage > bestScore) {
+        if ((coverage >= 0.35 || overlap >= 2) && coverage > bestScore) {
           bestScore = coverage;
           bestNodeId = node.id;
         }
       }
 
-      // 4. Word overlap similarity (strict threshold to avoid cross-concept collisions)
+      // 6. Word overlap similarity (strict threshold to avoid cross-concept collisions)
       const union = fWords.size + nWords.size - overlap;
       const score = union > 0 && overlap > 0 ? overlap / union : 0;
 
@@ -1058,18 +1095,34 @@ function extractMedicalKeywords(text: string): Set<string> {
     if (bestNodeId) {
       usedNodeIds.add(bestNodeId);
       lastMatchedNodeId = bestNodeId;
+      processedFindingsText.push(cleanFinding);
       mutations.push({
         node_id: bestNodeId,
         new_text: finding,
         bold: isBold
       });
     } else {
-      // Clean incidental finding insertion at its exact sequential position in report
-      insertions.push({
-        after_node_id: lastMatchedNodeId,
-        text: finding,
-        bold: isBold
-      });
+      // Suppress near-duplicate findings if already covered by an earlier finding in report
+      let isDuplicate = false;
+      for (const pf of processedFindingsText) {
+        const pfWords = extractMedicalKeywords(pf);
+        let overlap = 0;
+        fWords.forEach(w => { if (pfWords.has(w)) overlap++; });
+        if (fWords.size > 0 && (overlap / fWords.size) >= 0.70) {
+          isDuplicate = true;
+          break;
+        }
+      }
+
+      if (!isDuplicate) {
+        processedFindingsText.push(cleanFinding);
+        // Clean incidental finding insertion at its exact sequential position in report
+        insertions.push({
+          after_node_id: lastMatchedNodeId,
+          text: finding,
+          bold: isBold
+        });
+      }
     }
   }
 
