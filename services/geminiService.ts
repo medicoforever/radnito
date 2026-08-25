@@ -1092,7 +1092,8 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
         impression,
         impressionSlotIds,
         impressionHeaderId,
-        allInsertions
+        allInsertions,
+        displayFindings
       );
 
       const finalFindings = displayFindings.length > 0 ? displayFindings : (selectedTemplate.lines || [selectedTemplate.name]);

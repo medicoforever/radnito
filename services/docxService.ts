@@ -252,6 +252,12 @@ export function generateDocxFromFindings(
             paragraphXmls.push(buildParagraphXml(buildRunXml(`•  ${cleanP}`, true, false, false)));
           }
         }
+      } else {
+        // Fallback: extract text after "IMPRESSION:" / "CONCLUSION:" directly
+        const textAfter = raw.replace(/^(IMPRESSION|CONCLUSION):\s*(BOLD::)?\s*/i, '').trim();
+        if (textAfter) {
+          paragraphXmls.push(buildParagraphXml(buildRunXml(`•  ${textAfter}`, true, false, false)));
+        }
       }
       continue;
     }
@@ -441,6 +447,10 @@ export async function mergeFindingsIntoDocx(
                   const cleanP = p.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
                   if (cleanP) impressionItems.push(cleanP);
                 }
+              } else {
+                // Fallback: extract text after "IMPRESSION:" / "CONCLUSION:" directly
+                const textAfter = trimmed.replace(/^(IMPRESSION|CONCLUSION):\s*(BOLD::)?\s*/i, '').trim();
+                if (textAfter) impressionItems.push(textAfter);
               }
               continue;
             }
