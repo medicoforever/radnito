@@ -483,6 +483,13 @@ export async function applyAstMutationsToDocx(
       const oldPStyle = pPr.getElementsByTagName('w:pStyle')[0];
       if (oldPStyle) pPr.removeChild(oldPStyle);
 
+      // Keep bullet lines together across page breaks (prevents mid-sentence page splitting)
+      let keepLines = pPr.getElementsByTagName('w:keepLines')[0];
+      if (!keepLines) {
+        keepLines = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:keepLines');
+        pPr.appendChild(keepLines);
+      }
+
       // Ensure clean 0pt after spacing and single line spacing
       let spacing = pPr.getElementsByTagName('w:spacing')[0];
       if (!spacing) {
@@ -493,14 +500,25 @@ export async function applyAstMutationsToDocx(
       spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:line', '240');
       spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:lineRule', 'auto');
 
-      // Uniform Manual Bullet with clean Hanging Indent (Left: 720 / Hanging: 360) across all platforms
-      let ind = pPr.getElementsByTagName('w:ind')[0];
-      if (!ind) {
-        ind = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:ind');
-        pPr.appendChild(ind);
+      const isRecommendation = cleanBullet.toLowerCase().startsWith('suggested clinical correlation') ||
+                               cleanBullet.toLowerCase().startsWith('advised clinical correlation') ||
+                               cleanBullet.toLowerCase().startsWith('clinical correlation is advised') ||
+                               cleanBullet.toLowerCase().startsWith('please correlate clinically');
+
+      if (isRecommendation) {
+        // Concluding correlation advice without bullet glyph and standard margin
+        const oldInd = pPr.getElementsByTagName('w:ind')[0];
+        if (oldInd) pPr.removeChild(oldInd);
+      } else {
+        // Uniform Manual Bullet with clean Hanging Indent (Left: 720 / Hanging: 360) across all platforms
+        let ind = pPr.getElementsByTagName('w:ind')[0];
+        if (!ind) {
+          ind = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:ind');
+          pPr.appendChild(ind);
+        }
+        ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:left', '720');
+        ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:hanging', '360');
       }
-      ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:left', '720');
-      ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:hanging', '360');
 
       // Ensure bold on all runs in the impression bullet paragraph
       const rTags = p.getElementsByTagName('w:r');
@@ -547,7 +565,7 @@ export async function applyAstMutationsToDocx(
 
       const tTags = p.getElementsByTagName('w:t');
       if (tTags.length > 0) {
-        tTags[0].textContent = `•  ${cleanBullet}`;
+        tTags[0].textContent = isRecommendation ? cleanBullet : `•  ${cleanBullet}`;
         tTags[0].setAttribute('xml:space', 'preserve');
         for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
       }
@@ -564,6 +582,18 @@ function cleanImpressionText(raw: string): string {
     // Clean up old slot elements and any existing paragraphs after headerEl
     if (headerEl && headerEl.parentNode) {
       const parent = headerEl.parentNode;
+
+      // Keep IMPRESSION: header with the first bullet point (prevents orphan headers)
+      let headPPr = headerEl.getElementsByTagName('w:pPr')[0];
+      if (!headPPr) {
+        headPPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pPr');
+        headerEl.insertBefore(headPPr, headerEl.firstChild);
+      }
+      let kwn = headPPr.getElementsByTagName('w:keepWithNext')[0];
+      if (!kwn) {
+        kwn = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:keepWithNext');
+        headPPr.appendChild(kwn);
+      }
       const toRemove: Element[] = [];
       let sib = headerEl.nextSibling;
       while (sib) {
