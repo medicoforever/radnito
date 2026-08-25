@@ -843,8 +843,52 @@ export async function mergeFindingsIntoDocxWithAstEngine(
     return false;
   };
 
-  for (let fIdx = 0; fIdx < expandedRawLines.length; fIdx++) {
-    const rawLine = expandedRawLines[fIdx];
+  // Auto-correct any swapped Clinical Profile and Technique lines
+  const normalizedRawLines: string[] = [];
+  for (let i = 0; i < expandedRawLines.length; i++) {
+    const line = expandedRawLines[i].trim();
+    if (!line) continue;
+    const u = line.toUpperCase();
+
+    // Case 1: "Clinical profile:" alone followed by "Technique: <history>"
+    if (u === 'CLINICAL PROFILE:' || u === 'CLINICAL PROFILE' || u === 'CLINICAL HISTORY:' || u === 'CLINICAL HISTORY') {
+      if (i + 1 < expandedRawLines.length) {
+        const nextLine = expandedRawLines[i + 1].trim();
+        if (nextLine.toLowerCase().startsWith('technique:') && /\b(c\/o|pain|swelling|trauma|h\/o|fever|fall|rto|r\/t\/o|complaint|post-op|k\/c\/o|mass|lump)\b/i.test(nextLine)) {
+          const colonIdx = nextLine.indexOf(':');
+          const histVal = nextLine.substring(colonIdx + 1).trim();
+          normalizedRawLines.push(`Clinical profile: ${histVal}`);
+          i++;
+
+          if (i + 1 < expandedRawLines.length && /\b(PD|fs|IR|T1|T2|GRE|FLAIR|DWI|ADC|CT|kVp|mA|slices|planes|axial|sagittal|coronal)\b/i.test(expandedRawLines[i + 1])) {
+            const actualTech = expandedRawLines[i + 1].trim().replace(/^(?:Technique:\s*)+/i, '');
+            normalizedRawLines.push(`Technique: ${actualTech}`);
+            i++;
+          }
+          continue;
+        }
+      }
+    }
+
+    // Case 2: Line itself is "Technique: <clinical history>"
+    if (line.toLowerCase().startsWith('technique:') && /\b(c\/o|pain|swelling|trauma|h\/o|fever|fall|rto|r\/t\/o|complaint|post-op|k\/c\/o|mass|lump)\b/i.test(line)) {
+      const colonIdx = line.indexOf(':');
+      const histVal = line.substring(colonIdx + 1).trim();
+      normalizedRawLines.push(`Clinical profile: ${histVal}`);
+
+      if (i + 1 < expandedRawLines.length && /\b(PD|fs|IR|T1|T2|GRE|FLAIR|DWI|ADC|CT|kVp|mA|slices|planes|axial|sagittal|coronal)\b/i.test(expandedRawLines[i + 1])) {
+        const actualTech = expandedRawLines[i + 1].trim().replace(/^(?:Technique:\s*)+/i, '');
+        normalizedRawLines.push(`Technique: ${actualTech}`);
+        i++;
+      }
+      continue;
+    }
+
+    normalizedRawLines.push(line);
+  }
+
+  for (let fIdx = 0; fIdx < normalizedRawLines.length; fIdx++) {
+    const rawLine = normalizedRawLines[fIdx];
     let trimmed = rawLine.trim();
     if (!trimmed) continue;
     if (trimmed.startsWith('+-') || trimmed.startsWith('|-') || trimmed.startsWith('+=')) continue;
