@@ -195,22 +195,29 @@ export function normalizeClinicalProfileAndTechnique(lines: string[]): string[] 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
-    const u = line.toUpperCase();
+
+    // Strip BOLD:: prefix and markdown italic markers for detection only
+    const cleanLine = line.replace(/^BOLD::\s*/, '').replace(/^\*+|\*+$/g, '').trim();
+    const cleanU = cleanLine.toUpperCase();
 
     // Case 1: "Clinical profile:" alone followed by "Technique: <history>"
-    if (u === 'CLINICAL PROFILE:' || u === 'CLINICAL PROFILE' || u === 'CLINICAL HISTORY:' || u === 'CLINICAL HISTORY' || u === '*CLINICAL PROFILE:*' || u === '*CLINICAL PROFILE*') {
+    if (cleanU === 'CLINICAL PROFILE:' || cleanU === 'CLINICAL PROFILE' || cleanU === 'CLINICAL HISTORY:' || cleanU === 'CLINICAL HISTORY' || cleanU === 'CLINICAL PROFILE: ' || cleanU === 'CLINICAL HISTORY: ') {
       if (i + 1 < lines.length) {
-        const nextLine = lines[i + 1].trim();
-        if (nextLine.toLowerCase().startsWith('technique:') && /\b(c\/o|pain|swelling|trauma|h\/o|fever|fall|rto|r\/t\/o|complaint|post-op|k\/c\/o|mass|lump)\b/i.test(nextLine)) {
-          const colonIdx = nextLine.indexOf(':');
-          const histVal = nextLine.substring(colonIdx + 1).trim();
+        const nextRaw = lines[i + 1].trim();
+        const nextClean = nextRaw.replace(/^BOLD::\s*/, '').replace(/^\*+|\*+$/g, '').trim();
+        if (nextClean.toLowerCase().startsWith('technique:') && /\b(c\/o|pain|swelling|trauma|h\/o|fever|fall|rto|r\/t\/o|complaint|post-op|k\/c\/o|mass|lump)\b/i.test(nextClean)) {
+          const colonIdx = nextClean.indexOf(':');
+          const histVal = nextClean.substring(colonIdx + 1).trim();
           out.push(`Clinical profile: ${histVal}`);
           i++;
 
-          if (i + 1 < lines.length && /\b(PD|fs|IR|T1|T2|GRE|FLAIR|DWI|ADC|CT|kVp|mA|slices|planes|axial|sagittal|coronal)\b/i.test(lines[i + 1])) {
-            const actualTech = lines[i + 1].trim().replace(/^(?:Technique:\s*)+/i, '');
-            out.push(`Technique: ${actualTech}`);
-            i++;
+          if (i + 1 < lines.length) {
+            const techCandidate = lines[i + 1].trim().replace(/^BOLD::\s*/, '').replace(/^\*+|\*+$/g, '').trim();
+            if (/\b(PD|fs|IR|T1|T2|GRE|FLAIR|DWI|ADC|CT|kVp|mA|slices|planes|axial|sagittal|coronal)\b/i.test(techCandidate)) {
+              const actualTech = techCandidate.replace(/^(?:Technique:\s*)+/i, '');
+              out.push(`Technique: ${actualTech}`);
+              i++;
+            }
           }
           continue;
         }
@@ -218,15 +225,18 @@ export function normalizeClinicalProfileAndTechnique(lines: string[]): string[] 
     }
 
     // Case 2: Line itself is "Technique: <clinical history>"
-    if (line.toLowerCase().startsWith('technique:') && /\b(c\/o|pain|swelling|trauma|h\/o|fever|fall|rto|r\/t\/o|complaint|post-op|k\/c\/o|mass|lump)\b/i.test(line)) {
-      const colonIdx = line.indexOf(':');
-      const histVal = line.substring(colonIdx + 1).trim();
+    if (cleanLine.toLowerCase().startsWith('technique:') && /\b(c\/o|pain|swelling|trauma|h\/o|fever|fall|rto|r\/t\/o|complaint|post-op|k\/c\/o|mass|lump)\b/i.test(cleanLine)) {
+      const colonIdx = cleanLine.indexOf(':');
+      const histVal = cleanLine.substring(colonIdx + 1).trim();
       out.push(`Clinical profile: ${histVal}`);
 
-      if (i + 1 < lines.length && /\b(PD|fs|IR|T1|T2|GRE|FLAIR|DWI|ADC|CT|kVp|mA|slices|planes|axial|sagittal|coronal)\b/i.test(lines[i + 1])) {
-        const actualTech = lines[i + 1].trim().replace(/^(?:Technique:\s*)+/i, '');
-        out.push(`Technique: ${actualTech}`);
-        i++;
+      if (i + 1 < lines.length) {
+        const techCandidate = lines[i + 1].trim().replace(/^BOLD::\s*/, '').replace(/^\*+|\*+$/g, '').trim();
+        if (/\b(PD|fs|IR|T1|T2|GRE|FLAIR|DWI|ADC|CT|kVp|mA|slices|planes|axial|sagittal|coronal)\b/i.test(techCandidate)) {
+          const actualTech = techCandidate.replace(/^(?:Technique:\s*)+/i, '');
+          out.push(`Technique: ${actualTech}`);
+          i++;
+        }
       }
       continue;
     }
