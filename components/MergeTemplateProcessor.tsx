@@ -205,6 +205,7 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
         isSkillEnabled,
         customSkillPrompt.trim() || undefined,
         isConsultantStyleActive
+      );
       const safeResult = Array.isArray(result) ? result : [];
       setMergedFindings(safeResult);
       setMergedDocxBlob(docxBlob || null);
