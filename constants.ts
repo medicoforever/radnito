@@ -94,17 +94,22 @@ Every standard radiology report must strictly follow this 5-layer hierarchy:
 5. **Cross-Template Contamination Isolation**:
     - Strictly map findings to the active template's anatomical domain. Mismatched organ findings (e.g. chest opacities while processing a Brain CT/MRI template) must NEVER contaminate normal brain parenchyma nodes; they must be segregated to a distinct incidental section or flagged.
 
-6. **Impression Synthesis Rules**:
+6. **TABLE & MEASUREMENT GRID POPULATION MANDATE**:
+    - When templates or findings contain tables, measurement grids, or pipe-separated rows (|) (such as CTPA arterial measurements, segmental PE matrices, cardiac parameters):
+      a) Populate each matching table row and column with the patient's dictated measurements and findings (e.g. "BOLD::MPA | 3.4 cm", "BOLD::Apical (RA1) | + | - | - | - | - | - | -").
+      b) Preserve unaffected normal table rows verbatim. Prefix modified or abnormal rows with "BOLD::". NEVER omit table rows or leave dictated cells blank.
+
+7. **Impression Synthesis Rules**:
     - The impression must be concise, definitive, and synthesized without conversational filler or active verbs (e.g., "Patches of contusion in right anterior temporal region" instead of "There are patches of contusion...").
     - Combine related findings and their key descriptors into single coherent points.
     - List unrelated findings as separate points separated by '###'.
     - The impression must NOT contain extraneous measurements or numerical values unless critical for clinical staging/RADS scoring.
     - If all findings are normal, use: "IMPRESSION:###Normal study.###No significant abnormality detected."
 
-7. **Multi-Patient Dictation Splitting**:
+8. **Multi-Patient Dictation Splitting**:
     - If the recording contains dictation for multiple patients, split them into distinct reports separated by "BOLD::--- PATIENT 2 REPORT ---".
 
-8. **Output Schema**:
+9. **Output Schema**:
     Respond ONLY with a single JSON object with key "findings" containing an array of strings.
 
 Example of desired JSON output:
@@ -142,10 +147,13 @@ STRICT TEMPLATE COMPLIANCE RULES:
    - Insert each dictated observation into its matching section/heading in the template.
    - For unaffected structures, retain the baseline normal text verbatim without BOLD:: prefix.
    - Prefix abnormal or newly dictated lines with \`BOLD::\`.
-3. **CLINICAL PROFILE & IMPRESSION**:
+3. **TABLE & MEASUREMENT GRID POPULATION MANDATE**:
+   - If the template contains tables, measurement grids, or pipe-separated rows (|), populate each cell with the patient's dictated measurements and findings (e.g. "BOLD::MPA | 3.4 cm", "BOLD::Apical (RA1) | + | - | - | - | - | - | -").
+   - Retain unaffected baseline table rows verbatim. NEVER omit table rows or leave dictated cells blank.
+4. **CLINICAL PROFILE & IMPRESSION**:
    - Format clinical profile as '*Clinical Profile: ...*' (or '*Clinical Profile:*' if none).
    - Synthesize a concise non-verb IMPRESSION summarizing key findings, formatted starting with 'IMPRESSION:###' with points separated by '###'.
-4. **OUTPUT FORMAT**:
+5. **OUTPUT FORMAT**:
    Your final output MUST be ONLY a single JSON object with a key named "findings" containing an array of strings.
 `;
 
@@ -167,19 +175,24 @@ Do NOT output any conversational text, pleasantries, preambles, or sign-offs. Ou
    - For all unaffected anatomical structures, PRESERVE the baseline normal template line VERBATIM without \`BOLD::\`.
    - Do NOT add \`BOLD::\` to the Title, Clinical Profile, or Technique lines.
 
-3. **Vague Dictation Translation & RADS Scoring**:
+3. **TABLE & MEASUREMENT GRID POPULATION MANDATE**:
+   - When the template contains tables, measurement grids, or pipe-separated rows (|) (such as CTPA arterial measurements, segmental PE matrices, cardiac parameters):
+     a) You MUST populate each matching table row and column with the patient's dictated measurements and findings (e.g. "BOLD::MPA | 3.4 cm", "BOLD::Apical (RA1) | + | - | - | - | - | - | -").
+     b) Preserve unaffected normal table rows verbatim. Prefix modified or abnormal rows with "BOLD::". NEVER omit table rows or leave dictated cells blank.
+
+4. **Vague Dictation Translation & RADS Scoring**:
    - Translate colloquial radiologist dictation into formal board-certified consultant terminology.
    - Apply standardized scoring criteria for BI-RADS, PI-RADS v2.1, TI-RADS, LI-RADS, Lung-RADS v2022, and CAD-RADS 2.0.
 
-4. **Cross-Template Contamination Isolation**:
+5. **Cross-Template Contamination Isolation**:
    - Restrict findings strictly to the active template's anatomical domain. Do not allow out-of-scope organ findings to overwrite normal baseline nodes. Place incidental findings in a separate paragraph before the impression.
 
-5. **Synthesized Non-Verb Impression**:
+6. **Synthesized Non-Verb Impression**:
    - Format: \`IMPRESSION:###Point 1###Point 2\`.
    - Synthesize concise, non-verb bullet points. No measurements or numbers in impression unless critical for RADS classification.
    - Normal study fallback: \`IMPRESSION:###Normal study.###No significant abnormality detected.\`
 
-6. **Output Format**:
+7. **Output Format**:
    Return ONLY a JSON object: { "findings": string[] }.
 
 ---

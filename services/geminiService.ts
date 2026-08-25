@@ -939,7 +939,7 @@ export const mergeFindingsWithAst = async (
   }
 
   try {
-    const { ast, xmlDoc, zipEntries, pMap, cellMap, impressionSlotIds } = await buildDocumentAstFromDocx(selectedTemplate.docxBase64);
+    const { ast, xmlDoc, zipEntries, pMap, cellMap, impressionHeaderId, impressionSlotIds } = await buildDocumentAstFromDocx(selectedTemplate.docxBase64);
 
     // Cross-Modality Auto-Skill Discovery for AST Merger
     const secondarySkills = (skillEnabled !== false)
@@ -984,23 +984,27 @@ ${findingsText}
    - Update Clinical Profile node if history/indication is dictated (written as "Clinical profile: ...").
    - In "display_findings", produce the full ordered report array:
      Layer 1: Exact Template Title: "${docTitle}" (MUST preserve the exact template document title verbatim without changing, shortening, or removing any words like MRI/CT) -> "Clinical profile: ..." (or "Clinical profile:") -> Technique -> Findings (prefix modified lines with "BOLD::", preserve normal lines verbatim without "BOLD::") -> Synthesized Impression starting with "IMPRESSION:###".
-4. **Vague Dictation Translation**:
+4. **TABLE & MEASUREMENT GRID POPULATION MANDATE**:
+   - When the target template contains table cells (nodes with type: "table_cell" and IDs like "tbl_X_r_Y_c_Z", pulmonary artery dimension tables, PE clot load matrices, cardiac functional parameter tables, etc.):
+     a) In "updates": You MUST map every dictated measurement, dimension, or segmental pathology directly to its exact table_cell node_id with the dictated value (e.g. {"node_id": "tbl_0_r_1_c_1", "new_text": "3.4 cm", "bold": true}) and set "bold": true for modified/abnormal values.
+     b) In "display_findings": You MUST output the complete report retaining all table rows in pipe-delimited format (e.g. "BOLD::MPA | 3.4 cm", "BOLD::Apical (RA1) | + | - | - | - | - | - | -"), filling in all dictated measurements and positive signs into their respective row and column slots. Unaffected baseline table rows must be retained verbatim without BOLD:: (e.g. "LPA | " or "Posterior (RA3) | - | - | - | - | - | - | -"). NEVER omit table rows or leave dictated table cells blank.
+5. **Vague Dictation Translation**:
    - Translate colloquial phrases into formal consultant terminology: "fuzzy liver thing" -> "Ill-defined focal lesion in segment VI...", "whited out left base" -> "Homogeneous dense opacification of the left hemithorax base...", "dirty fat around appendix" -> "Blind-ending thickened appendix with surrounding fat stranding...", "bright spot on dwi" -> "Focal area of acute restricted diffusion on DWI...", "torn meniscus" -> "Linear high signal intensity... consistent with meniscal tear", "broken hip ball" -> "Displaced subcapital fracture of femoral neck".
-5. **RADS Scoring Standards**:
+6. **RADS Scoring Standards**:
    - BI-RADS (0-6), PI-RADS v2.1 (PZ vs TZ sequence dominance, categories 1-5), TI-RADS (TR1-TR5), LI-RADS (LR-1 to LR-5), Lung-RADS v2022 (Categories 1-4X), CAD-RADS 2.0 (0-5 with modifiers).
-6. **Cross-Template Contamination Isolation**:
+7. **Cross-Template Contamination Isolation**:
    - Restrict findings strictly to the active template's anatomical domain. Do NOT merge mismatched organ findings into unrelated template nodes.
-7. **Non-Verb Impression Synthesis**:
+8. **Non-Verb Impression Synthesis**:
    - Synthesize concise, non-verb bullet points under "impression": ["Point 1", "Point 2"].
    - In "display_findings", format impression as: "IMPRESSION:###Point 1###Point 2".
    - If all findings normal: "IMPRESSION:###Normal study.###No significant abnormality detected."
-8. **TITLE IMMUTABILITY MANDATE**:
+9. **TITLE IMMUTABILITY MANDATE**:
    - The document title belongs strictly to the template document and MUST NOT be altered, shortened, or replaced by outside UI names or abbreviations. Do NOT include any title node in "updates".
-9. **BRAND-NEW / INCIDENTAL FINDINGS MANDATE ("insertions")**:
+10. **BRAND-NEW / INCIDENTAL FINDINGS MANDATE ("insertions")**:
    - If the radiologist dictates a pathology, measurement, or incidental finding that does NOT have a corresponding baseline node in the template AST (e.g. pleural effusion, atelectasis, lymphadenopathy, incidental cysts, fractures), you MUST include it in "insertions" specifying:
      { "after_node_id": "<id of the preceding paragraph or paragraph immediately before IMPRESSION>", "text": "Exact clinical finding text", "bold": false }
    - Also ensure it is present in "display_findings" at that exact same sequential position.
-10. Return JSON schema:
+11. Return JSON schema:
 {
   "updates": [
     { "node_id": "node_...", "new_text": "...", "bold": true }
@@ -1076,10 +1080,10 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
       // Ensure all impression items have BOLD:: stripped from text
       impression = impression.map(item => item.replace(/^BOLD::\s*/, '').replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim()).filter(Boolean);
 
-      // Filter out any mutation targeting the title node so template's native title is 100% untouched
+      // Filter out any mutation targeting the title node or impression header so template structure is 100% protected
       const safeUpdates = updates.filter(u => {
         const targetNode = ast.find(n => n.id === u.node_id);
-        return targetNode?.type !== 'title';
+        return targetNode?.type !== 'title' && targetNode?.type !== 'impression_header';
       });
 
       // Ensure displayFindings[0] uses the exact template document title verbatim
@@ -1090,19 +1094,63 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
       const rawFinalFindings = displayFindings.length > 0 ? displayFindings : (selectedTemplate.lines || [selectedTemplate.name]);
       const finalFindings = normalizeClinicalProfileAndTechnique(rawFinalFindings);
 
-      // Build DOCX: Use API's structured node_id mutations directly (covers table cells),
+      // Convert rawInsertions to typed AstInsertion[]
+      const explicitInsertions: AstInsertion[] = rawInsertions
+        .filter((ins: any) => ins && (ins.text || ins.new_text))
+        .map((ins: any) => ({
+          after_node_id: ins.after_node_id,
+          text: (ins.text || ins.new_text || '').replace(/^BOLD::\s*/, ''),
+          bold: ins.bold ?? (ins.text || ins.new_text || '').startsWith('BOLD::'),
+        }));
+
+      // Auto-detect any additional / incidental findings present in displayFindings but missing from safeUpdates & insertions
+      const autoInsertions: AstInsertion[] = [];
+      const knownInsertedTexts = new Set(explicitInsertions.map(ins => ins.text.toLowerCase().trim()));
+
+      let inImpSection = false;
+      for (let i = 1; i < finalFindings.length; i++) {
+        const line = finalFindings[i];
+        if (!line) continue;
+        const cleanLine = line.replace(/^BOLD::\s*/, '').trim();
+        const upper = cleanLine.toUpperCase();
+        if (upper.startsWith('IMPRESSION:') || upper.startsWith('CONCLUSION:')) {
+          inImpSection = true;
+          continue;
+        }
+        if (inImpSection) continue;
+        if (cleanLine.toLowerCase().startsWith('clinical profile:') || cleanLine.toLowerCase().startsWith('technique:')) continue;
+        if (cleanLine.endsWith(':') && cleanLine.length < 50) continue; // Section heading
+        if (cleanLine.includes('|')) continue; // Table row
+
+        // Check if this finding was matched to any node in safeUpdates
+        const wasUpdated = safeUpdates.some(u => {
+          const uClean = (u.new_text || '').replace(/^BOLD::\s*/, '').trim();
+          return uClean === cleanLine || uClean.includes(cleanLine) || cleanLine.includes(uClean);
+        });
+
+        // Check if this finding matches an unchanged baseline template node
+        const isBaselineNormal = ast.some(n => {
+          if (n.type === 'table_cell' || n.type === 'title' || n.type === 'impression_header' || n.type === 'impression_item') return false;
+          const nClean = n.current_text.trim();
+          return nClean.toLowerCase() === cleanLine.toLowerCase();
+        });
+
+        if (!wasUpdated && !isBaselineNormal && !knownInsertedTexts.has(cleanLine.toLowerCase())) {
+          knownInsertedTexts.add(cleanLine.toLowerCase());
+          autoInsertions.push({
+            after_node_id: undefined,
+            text: cleanLine,
+            bold: line.startsWith('BOLD::'),
+          });
+        }
+      }
+
+      const allSafeInsertions: AstInsertion[] = [...explicitInsertions, ...autoInsertions];
+
+      // Build DOCX: Use API's structured node_id mutations directly (covers table cells and incidental findings),
       // then fall back to text-based merger if the direct approach produces no mutations.
       let docxBlob: Blob;
-      if (safeUpdates.length > 0 || rawInsertions.length > 0 || impression.length > 0) {
-        // Convert rawInsertions to typed AstInsertion[]
-        const safeInsertions: AstInsertion[] = rawInsertions
-          .filter((ins: any) => ins && (ins.text || ins.new_text))
-          .map((ins: any) => ({
-            after_node_id: ins.after_node_id,
-            text: (ins.text || ins.new_text || '').replace(/^BOLD::\s*/, ''),
-            bold: ins.bold ?? (ins.text || ins.new_text || '').startsWith('BOLD::'),
-          }));
-
+      if (safeUpdates.length > 0 || allSafeInsertions.length > 0 || impression.length > 0) {
         try {
           docxBlob = await applyAstMutationsToDocx(
             xmlDoc,
@@ -1113,7 +1161,7 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
             impression,
             impressionSlotIds,
             impressionHeaderId,
-            safeInsertions
+            allSafeInsertions
           );
         } catch (directErr) {
           console.warn('Direct AST mutation failed, falling back to text-based merger:', directErr);
@@ -1200,10 +1248,14 @@ ${findingsText}
    - Apply standardized scoring criteria for BI-RADS, PI-RADS v2.1, TI-RADS, LI-RADS, Lung-RADS v2022, CAD-RADS 2.0.
 4. **Contamination Isolation Gate**:
    - Strictly map findings to the active template's anatomical domain. Do NOT overwrite baseline normal organs with mismatched organ findings. Place out-of-domain incidental findings in a distinct paragraph before the impression.
-5. **Non-Verb Impression Synthesis**:
+5. **TABLE & MEASUREMENT GRID POPULATION MANDATE**:
+   - When the template contains tables, measurement grids, or pipe-separated rows (|) (such as CTPA arterial measurements, segmental PE matrices, cardiac parameters):
+     a) You MUST populate each matching table row and column with the patient's dictated measurements and findings (e.g. "BOLD::MPA | 3.4 cm", "BOLD::Apical (RA1) | + | - | - | - | - | - | -").
+     b) Preserve unaffected normal table rows verbatim. Prefix modified or abnormal rows with "BOLD::". NEVER omit table rows or leave dictated cells blank.
+6. **Non-Verb Impression Synthesis**:
    - Format: "IMPRESSION:###Point 1###Point 2". Non-verb, concise summaries. No extraneous numbers/measurements.
    - If all findings normal: "IMPRESSION:###Normal study.###No significant abnormality detected."
-6. Output JSON format: { "findings": string[] }.
+7. Output JSON format: { "findings": string[] }.
 ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
 `;
 

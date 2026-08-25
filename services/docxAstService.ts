@@ -48,6 +48,15 @@ function getDirectChildren(parent: Element, localName: string): Element[] {
   return result;
 }
 
+function cleanImpressionText(raw: string): string {
+  let s = raw.replace(/^BOLD::\s*/, '');
+  s = s.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\*\d\.\)\(•]+/gu, '');
+  s = s.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\*\d\.\)\(•]+/gu, '');
+  s = s.replace(/^["'\s]+|["'\s]+$/g, '');
+  s = s.replace(/\[(?:raw findings|user query|citation)[^\]]*\]/gi, '').replace(/\s{2,}/g, ' ');
+  return s.trim();
+}
+
 /**
  * Parses a DOCX template binary into a Semantic Document AST and maps each node ID to DOM elements.
  */
@@ -94,10 +103,6 @@ export async function buildDocumentAstFromDocx(docxBase64: string): Promise<{
     const txt = getElementText(p).trim();
     if (!txt) continue;
 
-    // Do NOT split paragraphs that are headings or start with "Rest of"
-    if (txt.endsWith(':') && txt.length < 60) continue;
-    if (txt.toLowerCase().startsWith('rest of')) continue;
-
     // Detect if paragraph contains embedded section heading or IMPRESSION: (e.g. "Technique: ... Bones and joints:" or "... fluid collection is seen. IMPRESSION:")
     const match = txt.match(/^(.+?)\s+(Bones and joints:|Soft tissues?:|Meniscus:|Ligaments:|Screening of [^:]+:|IMPRESSION:|CONCLUSION:)\s*(.*)$/i);
     if (match) {
@@ -105,21 +110,46 @@ export async function buildDocumentAstFromDocx(docxBase64: string): Promise<{
       const heading = match[2].trim();
       const suffix = match[3].trim();
 
-      if (prefix.length < 15 || prefix.toLowerCase().endsWith('rest of')) continue;
+      // If prefix is just the heading itself (e.g. "Bones and joints:"), do not split
+      if (prefix.toLowerCase() === heading.toLowerCase() || prefix.toLowerCase().endsWith('rest of')) continue;
 
-      const tTags = p.getElementsByTagName('w:t');
-      if (tTags.length > 0) {
-        tTags[0].textContent = prefix;
-        for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
+      // Clean prefix runs in p
+      const pPr = p.getElementsByTagName('w:pPr')[0];
+      while (p.firstChild) {
+        p.removeChild(p.firstChild);
       }
+      if (pPr) p.appendChild(pPr);
+      const prefR = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:r');
+      const prefRPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rPr');
+      const prefFonts = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rFonts');
+      prefFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:ascii', 'Times New Roman');
+      prefFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:hAnsi', 'Times New Roman');
+      prefFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:cs', 'Times New Roman');
+      prefRPr.appendChild(prefFonts);
+      prefR.appendChild(prefRPr);
+      const prefT = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:t');
+      prefT.textContent = prefix;
+      prefR.appendChild(prefT);
+      p.appendChild(prefR);
 
+      // Create newHeadP for heading
       const newHeadP = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:p');
-      const headPPr = p.getElementsByTagName('w:pPr')[0];
-      if (headPPr) {
-        newHeadP.appendChild(headPPr.cloneNode(true));
-      }
+      const headPPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pPr');
+      const spacing = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:spacing');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', '120');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '40');
+      headPPr.appendChild(spacing);
+      const kwn = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:keepWithNext');
+      headPPr.appendChild(kwn);
+      newHeadP.appendChild(headPPr);
+
       const newR = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:r');
       const newRPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rPr');
+      const rFonts = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rFonts');
+      rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:ascii', 'Times New Roman');
+      rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:hAnsi', 'Times New Roman');
+      rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:cs', 'Times New Roman');
+      newRPr.appendChild(rFonts);
       const b = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:b');
       const u = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:u');
       u.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', 'single');
@@ -135,15 +165,12 @@ export async function buildDocumentAstFromDocx(docxBase64: string): Promise<{
 
       if (suffix) {
         const newSufP = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:p');
-        if (headPPr) {
-          newSufP.appendChild(headPPr.cloneNode(true));
-        }
         const sufR = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:r');
         const sufT = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:t');
         sufT.textContent = suffix;
         sufR.appendChild(sufT);
         newSufP.appendChild(sufR);
-        p.parentNode?.insertBefore(newSufP, newHeadP.nextSibling);
+        newHeadP.parentNode?.insertBefore(newSufP, newHeadP.nextSibling);
       }
     }
   }
@@ -703,15 +730,6 @@ export async function applyAstMutationsToDocx(
       }
     };
 
-function cleanImpressionText(raw: string): string {
-  let s = raw.replace(/^BOLD::\s*/, '');
-  s = s.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\*\d\.\)\(•]+/gu, '');
-  s = s.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\*\d\.\)\(•]+/gu, '');
-  s = s.replace(/^["'\s]+|["'\s]+$/g, '');
-  s = s.replace(/\[(?:raw findings|user query|citation)[^\]]*\]/gi, '').replace(/\s{2,}/g, ' ');
-  return s.trim();
-}
-
     // Clean up old slot elements and any existing paragraphs after headerEl
     if (headerEl && headerEl.parentNode) {
       const parent = headerEl.parentNode;
@@ -968,16 +986,65 @@ export async function mergeFindingsIntoDocxWithAstEngine(
 
   // A. Process Table Row Findings against table_cell nodes
   const tableCellNodes = ast.filter(n => n.type === 'table_cell');
+  
+  const normalizeKey = (k: string) => k.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  const rowAliases: Record<string, string[]> = {
+    mpa: ['mainpulmonaryartery', 'mainpulmonarytrunk', 'pulmonarytrunk', 'mpa'],
+    rpa: ['rightpulmonaryartery', 'rightmainpulmonaryartery', 'rpa'],
+    lpa: ['leftpulmonaryartery', 'leftmainpulmonaryartery', 'lpa'],
+    mpaaortaratio: ['mpatoaortaratio', 'mpaaortaratio', 'pulmonaryarterytoaortaratio'],
+    apicalra1: ['apicalra1', 'ra1', 'apicalsegment', 'rulapical', 'apical'],
+    anteriorra2: ['anteriorra2', 'ra2', 'anteriorsegment', 'rulanterior'],
+    posteriorra3: ['posteriorra3', 'ra3', 'posteriorsegment', 'rulposterior'],
+    lateralra4: ['lateralra4', 'ra4', 'lateralsegment', 'rmllateral'],
+    medialra5: ['medialra5', 'ra5', 'medialsegment', 'rmlmedial'],
+    superiorra6: ['superiorra6', 'ra6', 'superiorsegment', 'rllsuperior'],
+    medialra7: ['medialra7', 'ra7', 'medialbasal', 'rllmedial'],
+    anteriorra8: ['anteriorra8', 'ra8', 'anteriorbasal', 'rllanterior'],
+    lateralra9: ['lateralra9', 'ra9', 'lateralbasal', 'rlllateral'],
+    posteriorra10: ['posteriorra10', 'ra10', 'posteriorbasal', 'rllposterior'],
+    apicopostla13: ['apicopostla13', 'apicoposterior', 'la13', 'la1', 'la3', 'lulapicopost'],
+    anteriorla2: ['anteriorla2', 'la2', 'lulanterior'],
+    suplingulala4: ['suplingulala4', 'superiorlingula', 'la4', 'lingulasuperior'],
+    inflingulala5: ['inflingulala5', 'inferiorlingula', 'la5', 'lingulainferior'],
+    superiorla6: ['superiorla6', 'la6', 'lllsuperior'],
+    antmedialla78: ['antmedialla78', 'anteromedial', 'la78', 'la7', 'la8', 'lllanteromedial'],
+    lateralla9: ['lateralla9', 'la9', 'llllateral'],
+    posteriorla10: ['posteriorla10', 'la10', 'lllposterior'],
+  };
+
+  const matchesRow = (targetKey: string, cellKey: string): boolean => {
+    if (!targetKey || !cellKey) return false;
+    if (targetKey === cellKey) return true;
+    
+    // Check canonical aliases
+    for (const [canonical, aliases] of Object.entries(rowAliases)) {
+      const allKeys = [canonical, ...aliases];
+      const targetMatches = allKeys.includes(targetKey);
+      const cellMatches = allKeys.includes(cellKey);
+      if (targetMatches && cellMatches) return true;
+    }
+
+    // Substring match only if both are >= 6 chars and neither is a compound ratio
+    if (targetKey.length >= 6 && cellKey.length >= 6 && !targetKey.includes('ratio') && !cellKey.includes('ratio')) {
+      if (targetKey.startsWith(cellKey) || cellKey.startsWith(targetKey)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   for (const rowStr of tableRowFindings) {
     const cols = rowStr.split('|').map(c => c.replace(/^BOLD::\s*/, '').trim());
     if (cols.length < 2) continue;
-    const rowKey = cols[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+    const rowKey = normalizeKey(cols[0]);
     if (!rowKey) continue;
 
     // Match table cells whose row_label matches rowKey
     for (const cell of tableCellNodes) {
-      const cellRowLabel = (cell.row_label || cell.current_text || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (cellRowLabel === rowKey) {
+      const cellRowLabel = normalizeKey(cell.row_label || cell.current_text || '');
+      if (matchesRow(rowKey, cellRowLabel)) {
         // e.g. cell.id is 'tbl_0_r_1_c_1' -> get column index from cell.id
         const cMatch = cell.id.match(/_c_(\d+)$/);
         if (cMatch) {
@@ -992,6 +1059,35 @@ export async function mergeFindingsIntoDocxWithAstEngine(
                 bold: rowStr.includes('BOLD::')
               });
             }
+          }
+        }
+      }
+    }
+  }
+
+  // A.2. Narrative Fallback for Table Cells (Extract dimensions / findings from narrative paragraphs)
+  for (const pStr of paragraphFindings) {
+    const cleanP = pStr.replace(/^BOLD::\s*/, '').trim();
+    if (!cleanP) continue;
+    const isBoldP = pStr.startsWith('BOLD::');
+    const pKey = normalizeKey(cleanP);
+
+    for (const cell of tableCellNodes) {
+      if (usedNodeIds.has(cell.id)) continue;
+      const cellRowKey = normalizeKey(cell.row_label || '');
+      if (!cellRowKey) continue;
+
+      if (matchesRow(pKey, cellRowKey)) {
+        const cMatch = cell.id.match(/_c_(\d+)$/);
+        if (cMatch && parseInt(cMatch[1], 10) >= 1) {
+          const dimMatch = cleanP.match(/\b(\d+(?:\.\d+)?\s*(?:cm|mm|%|HU)?)\b/i);
+          if (dimMatch) {
+            usedNodeIds.add(cell.id);
+            mutations.push({
+              node_id: cell.id,
+              new_text: dimMatch[1].trim(),
+              bold: isBoldP
+            });
           }
         }
       }
@@ -1050,46 +1146,60 @@ function extractMedicalKeywords(text: string): Set<string> {
 
     const fColon = cleanFinding.includes(':') ? cleanFinding.split(':', 2)[0].trim().toLowerCase().replace(/[^a-zA-Z0-9]/g, '') : null;
 
-    for (const node of paragraphNodes) {
-      if (usedNodeIds.has(node.id)) continue;
+    // 1. Specialized Header Matching for Clinical Profile & Technique (FIRST PRIORITY)
+    const isClinicalFinding = cleanFinding.toLowerCase().startsWith('clinical profile') ||
+      cleanFinding.toLowerCase().startsWith('clinical history') ||
+      cleanFinding.toLowerCase().startsWith('c/o') ||
+      cleanFinding.toLowerCase().startsWith('h/o') ||
+      cleanFinding.toLowerCase().startsWith('k/c/o') ||
+      cleanFinding.toLowerCase().startsWith('indication:');
 
-      const nText = node.current_text.trim();
-      if (!nText) continue;
-      const isNodeHeading = node.type === 'section_heading' || nText.endsWith(':');
-
-      // 1. Specialized Header Matching for Clinical Profile & Technique (FIRST PRIORITY)
-      if (fColon === 'clinicalprofile' || fColon === 'clinicalhistory') {
-        if (node.type === 'clinical_profile' || nText.toLowerCase().startsWith('clinical profile') || nText.toLowerCase().startsWith('clinical history')) {
-          bestScore = 100.0;
-          bestNodeId = node.id;
-          break;
-        }
+    if (isClinicalFinding) {
+      const cpNode = paragraphNodes.find(n => n.type === 'clinical_profile' || n.current_text.toLowerCase().startsWith('clinical profile') || n.current_text.toLowerCase().startsWith('clinical history') || n.current_text.toLowerCase().startsWith('indication:'));
+      if (cpNode && !usedNodeIds.has(cpNode.id)) {
+        bestScore = 100.0;
+        bestNodeId = cpNode.id;
       }
-      if (fColon === 'technique' || fColon === 'scanningtechnique' || fColon === 'protocol') {
-        if (node.type === 'technique' || nText.toLowerCase().startsWith('technique:') || nText.toLowerCase().startsWith('scanning technique:') || nText.toLowerCase().startsWith('protocol:')) {
-          bestScore = 100.0;
-          bestNodeId = node.id;
-          break;
-        }
-      }
+    }
 
-      // 2. Section Heading Matching
-      if (isHeading && isNodeHeading) {
-        let nKey = nText.toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (nKey.includes('softtissue')) nKey = 'softtissue';
-        let fKey = cleanFinding.toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (fKey.includes('softtissue')) fKey = 'softtissue';
-        if (nKey === fKey || nKey.includes(fKey) || fKey.includes(nKey)) {
-          bestScore = 100.0;
-          bestNodeId = node.id;
-          break;
-        }
-      }
+    const isTechFinding = cleanFinding.toLowerCase().startsWith('technique:') ||
+      cleanFinding.toLowerCase().startsWith('scanning technique:') ||
+      cleanFinding.toLowerCase().startsWith('protocol:');
 
-      // Do not match narrative findings onto section headings
-      if (!isHeading && isNodeHeading && node.type !== 'clinical_profile' && node.type !== 'technique') continue;
-      // Do not match section headings onto narrative nodes
-      if (isHeading && !isNodeHeading) continue;
+    if (isTechFinding && !bestNodeId) {
+      const techNode = paragraphNodes.find(n => n.type === 'technique' || n.current_text.toLowerCase().startsWith('technique:') || n.current_text.toLowerCase().startsWith('scanning technique:') || n.current_text.toLowerCase().startsWith('protocol:'));
+      if (techNode && !usedNodeIds.has(techNode.id)) {
+        bestScore = 100.0;
+        bestNodeId = techNode.id;
+      }
+    }
+
+    if (!bestNodeId) {
+      for (const node of paragraphNodes) {
+        if (usedNodeIds.has(node.id)) continue;
+
+        const nText = node.current_text.trim();
+        if (!nText) continue;
+        const isNodeHeading = node.type === 'section_heading' || nText.endsWith(':');
+
+        // Section Heading Matching
+        if (isHeading && isNodeHeading) {
+          let nKey = nText.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (nKey.includes('softtissue')) nKey = 'softtissue';
+          let fKey = cleanFinding.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (fKey.includes('softtissue')) fKey = 'softtissue';
+          if (nKey === fKey || nKey.includes(fKey) || fKey.includes(nKey)) {
+            bestScore = 100.0;
+            bestNodeId = node.id;
+            break;
+          }
+        }
+
+        // Do not match narrative findings onto section headings or header nodes
+        if (!isHeading && isNodeHeading && node.type !== 'clinical_profile' && node.type !== 'technique') continue;
+        // Do not match section headings onto narrative nodes
+        if (isHeading && !isNodeHeading) continue;
+        if (node.type === 'clinical_profile' || node.type === 'technique') continue;
 
       // 3. Colon match (e.g. "L1-L2:", "Ventricular System:", "Clinical Profile:")
       if (fColon && nText.includes(':')) {
@@ -1147,6 +1257,22 @@ function extractMedicalKeywords(text: string): Set<string> {
         bestNodeId = node.id;
       }
     }
+
+    // Section baseline normal node overwrite (prevents contradictory normal sentence from remaining in template)
+    if (!bestNodeId && activeReportSection !== 'header') {
+      const sectionNormalNode = paragraphNodes.find(n => {
+        if (usedNodeIds.has(n.id)) return false;
+        const nSec = (n.section || '').replace(/[^a-z0-9]/g, '');
+        if (nSec !== activeReportSection) return false;
+        const nTxt = n.current_text.toLowerCase();
+        return nTxt.includes('normal') || nTxt.includes('unremarkable') || nTxt.includes('no significant') || nTxt.includes('no abnormality') || nTxt.includes('within normal limits');
+      });
+      if (sectionNormalNode) {
+        bestScore = 80.0;
+        bestNodeId = sectionNormalNode.id;
+      }
+    }
+  }
 
     if (bestNodeId) {
       usedNodeIds.add(bestNodeId);
