@@ -771,7 +771,7 @@ export async function mergeFindingsIntoDocxWithAstEngine(
     }
 
     // Split conjoined headings if present (e.g. "MRI SCAN OF RIGHT KNEE JOINTClinical profile: C/o...")
-    const conjoinedParts = trimmed.split(/(?i)(?=(?:Clinical profile:|Technique:|Bones and joints:|Meniscus:|Ligaments:|Rest of soft tissues:|IMPRESSION:|CONCLUSION:))/);
+    const conjoinedParts = trimmed.split(/(?=(?:Clinical profile:|Technique:|Bones and joints:|Meniscus:|Ligaments:|Rest of soft tissues:|IMPRESSION:|CONCLUSION:))/i);
     for (const cp of conjoinedParts) {
       const cleanSub = cp.trim().replace(/^[\s\.\*\-\u2022\u00a0\u200b]+/, '').trim();
       if (!cleanSub) continue;
