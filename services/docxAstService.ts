@@ -468,36 +468,39 @@ export async function applyAstMutationsToDocx(
       });
     }
 
-    const slotElements = impressionSlotIds.map(id => pMap.get(id)).filter(Boolean) as Element[];
-
-    // 1. Detect if any template slot has native bullet list formatting (numPr / ListParagraph)
-    let masterNumPr: Element | null = null;
-    let masterPStyle: Element | null = null;
-    for (const p of slotElements) {
-      const pPr = p.getElementsByTagName('w:pPr')[0];
-      if (pPr) {
-        const numPr = pPr.getElementsByTagName('w:numPr')[0];
-        if (numPr && !masterNumPr) {
-          masterNumPr = numPr;
-        }
-        const pStyle = pPr.getElementsByTagName('w:pStyle')[0];
-        if (pStyle && !masterPStyle) {
-          const val = pStyle.getAttribute('w:val') || pStyle.getAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val') || '';
-          if (val.toLowerCase().includes('list') || val.toLowerCase().includes('bullet')) {
-            masterPStyle = pStyle;
-          }
-        }
-      }
-    }
-
     const formatBulletParagraph = (p: Element, rawBullet: string) => {
-      const cleanBullet = rawBullet.replace(/^BOLD::\s*/, '').replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
+      const cleanBullet = cleanImpressionText(rawBullet);
 
       let pPr = p.getElementsByTagName('w:pPr')[0];
       if (!pPr) {
         pPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pPr');
         p.insertBefore(pPr, p.firstChild);
       }
+
+      // Remove any leftover numPr or pStyle from old template slots to prevent mismatched indentation
+      const oldNumPr = pPr.getElementsByTagName('w:numPr')[0];
+      if (oldNumPr) pPr.removeChild(oldNumPr);
+      const oldPStyle = pPr.getElementsByTagName('w:pStyle')[0];
+      if (oldPStyle) pPr.removeChild(oldPStyle);
+
+      // Ensure clean 0pt after spacing and single line spacing
+      let spacing = pPr.getElementsByTagName('w:spacing')[0];
+      if (!spacing) {
+        spacing = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:spacing');
+        pPr.appendChild(spacing);
+      }
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '0');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:line', '240');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:lineRule', 'auto');
+
+      // Uniform Manual Bullet with clean Hanging Indent (Left: 720 / Hanging: 360) across all platforms
+      let ind = pPr.getElementsByTagName('w:ind')[0];
+      if (!ind) {
+        ind = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:ind');
+        pPr.appendChild(ind);
+      }
+      ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:left', '720');
+      ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:hanging', '360');
 
       // Ensure bold on all runs in the impression bullet paragraph
       const rTags = p.getElementsByTagName('w:r');
@@ -507,6 +510,29 @@ export async function applyAstMutationsToDocx(
           rPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rPr');
           rTags[r_i].insertBefore(rPr, rTags[r_i].firstChild);
         }
+        let rFonts = rPr.getElementsByTagName('w:rFonts')[0];
+        if (!rFonts) {
+          rFonts = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rFonts');
+          rPr.appendChild(rFonts);
+        }
+        rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:ascii', 'Times New Roman');
+        rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:hAnsi', 'Times New Roman');
+        rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:cs', 'Times New Roman');
+
+        let sz = rPr.getElementsByTagName('w:sz')[0];
+        if (!sz) {
+          sz = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:sz');
+          rPr.appendChild(sz);
+        }
+        sz.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', '24');
+
+        let szCs = rPr.getElementsByTagName('w:szCs')[0];
+        if (!szCs) {
+          szCs = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:szCs');
+          rPr.appendChild(szCs);
+        }
+        szCs.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', '24');
+
         let bTag = rPr.getElementsByTagName('w:b')[0];
         if (!bTag) {
           bTag = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:b');
@@ -519,51 +545,11 @@ export async function applyAstMutationsToDocx(
         }
       }
 
-      if (masterNumPr || masterPStyle) {
-        // Uniform Native Word List formatting across all bullet paragraphs
-        let pStyle = pPr.getElementsByTagName('w:pStyle')[0];
-        if (!pStyle && masterPStyle) {
-          pPr.insertBefore(masterPStyle.cloneNode(true), pPr.firstChild);
-        } else if (!pStyle) {
-          pStyle = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pStyle');
-          pStyle.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', 'ListParagraph');
-          pPr.insertBefore(pStyle, pPr.firstChild);
-        }
-
-        let numPr = pPr.getElementsByTagName('w:numPr')[0];
-        if (!numPr && masterNumPr) {
-          pPr.appendChild(masterNumPr.cloneNode(true));
-        }
-
-        // Native list renders bullet point natively; write pure text without bullet glyph
-        const tTags = p.getElementsByTagName('w:t');
-        if (tTags.length > 0) {
-          tTags[0].textContent = cleanBullet;
-          tTags[0].setAttribute('xml:space', 'preserve');
-          for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
-        }
-      } else {
-        // Uniform Manual Bullet with clean Hanging Indent (Left: 720 / Hanging: 360)
-        const oldNumPr = pPr.getElementsByTagName('w:numPr')[0];
-        if (oldNumPr) pPr.removeChild(oldNumPr);
-
-        let ind = pPr.getElementsByTagName('w:ind')[0];
-        if (!ind) {
-          ind = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:ind');
-          ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:left', '720');
-          ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:hanging', '360');
-          pPr.appendChild(ind);
-        } else {
-          ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:left', '720');
-          ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:hanging', '360');
-        }
-
-        const tTags = p.getElementsByTagName('w:t');
-        if (tTags.length > 0) {
-          tTags[0].textContent = `•  ${cleanBullet}`;
-          tTags[0].setAttribute('xml:space', 'preserve');
-          for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
-        }
+      const tTags = p.getElementsByTagName('w:t');
+      if (tTags.length > 0) {
+        tTags[0].textContent = `•  ${cleanBullet}`;
+        tTags[0].setAttribute('xml:space', 'preserve');
+        for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
       }
     };
 
