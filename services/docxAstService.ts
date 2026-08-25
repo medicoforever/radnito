@@ -640,10 +640,7 @@ export async function applyAstMutationsToDocx(
       const pPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pPr');
       p.insertBefore(pPr, p.firstChild);
 
-      const isRecommendation = cleanBullet.toLowerCase().startsWith('suggested clinical correlation') ||
-                               cleanBullet.toLowerCase().startsWith('advised clinical correlation') ||
-                               cleanBullet.toLowerCase().startsWith('clinical correlation is advised') ||
-                               cleanBullet.toLowerCase().startsWith('please correlate clinically');
+      const isRecommendation = /\b(suggested|advised|clinical correlation|please correlate)\b/i.test(cleanBullet);
 
       // 1. keepLines
       const keepLines = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:keepLines');
@@ -651,7 +648,7 @@ export async function applyAstMutationsToDocx(
 
       // 2. spacing
       const spacing = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:spacing');
-      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', isRecommendation ? '60' : '0');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', isRecommendation ? '100' : '0');
       spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', isRecommendation ? '0' : '40');
       spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:line', '240');
       spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:lineRule', 'auto');
@@ -660,7 +657,7 @@ export async function applyAstMutationsToDocx(
       // 3. ind (for bullets only)
       if (!isRecommendation) {
         const ind = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:ind');
-        ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:left', '720');
+        ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:left', '360');
         ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:hanging', '360');
         pPr.appendChild(ind);
       }
@@ -682,11 +679,13 @@ export async function applyAstMutationsToDocx(
         rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:cs', 'Times New Roman');
         rPr.appendChild(rFonts);
 
-        // 2. b & bCs
-        const b = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:b');
-        rPr.appendChild(b);
-        const bCs = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:bCs');
-        rPr.appendChild(bCs);
+        // 2. b & bCs (bullets bold, recommendation normal)
+        if (!isRecommendation) {
+          const b = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:b');
+          rPr.appendChild(b);
+          const bCs = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:bCs');
+          rPr.appendChild(bCs);
+        }
 
         // 3. sz & szCs
         const sz = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:sz');
@@ -699,7 +698,7 @@ export async function applyAstMutationsToDocx(
 
       const tTags = p.getElementsByTagName('w:t');
       if (tTags.length > 0) {
-        tTags[0].textContent = isRecommendation ? cleanBullet : `•  ${cleanBullet}`;
+        tTags[0].textContent = isRecommendation ? cleanBullet : `•\t${cleanBullet}`;
         tTags[0].setAttribute('xml:space', 'preserve');
         for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
       }
