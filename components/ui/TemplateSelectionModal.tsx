@@ -327,7 +327,7 @@ const TemplateSelectionModal: React.FC<TemplateSelectionModalProps> = ({
               <span className="text-xs font-bold text-blue-950 dark:text-blue-200 flex items-center gap-2">
                 <span>📄 Configure Uploaded Word Template:</span>
                 <span className="bg-blue-200 dark:bg-blue-900 text-blue-900 dark:text-blue-100 px-2 py-0.5 rounded font-mono text-[11px]">
-                  {pendingDocx.name}.docx ({pendingDocx.lines.length} sections)
+                  {pendingDocx.name}.docx ({pendingDocx.lines?.length || 0} sections)
                 </span>
               </span>
               <button

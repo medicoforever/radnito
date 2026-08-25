@@ -866,7 +866,7 @@ export const mergeFindingsWithAst = async (
   }
 
   try {
-    const { ast, xmlDoc, zipEntries, pMap, cellMap, impressionSlotIds } = await buildDocumentAstFromDocx(selectedTemplate.docxBase64);
+    const { ast, xmlDoc, zipEntries, pMap, cellMap, impressionHeaderId, impressionSlotIds } = await buildDocumentAstFromDocx(selectedTemplate.docxBase64);
 
     // Cross-Modality Auto-Skill Discovery for AST Merger (only when skillEnabled is active)
     const secondarySkills = (skillEnabled === true)

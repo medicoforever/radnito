@@ -205,16 +205,15 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
         isSkillEnabled,
         customSkillPrompt.trim() || undefined,
         isConsultantStyleActive
-      );
-
-      setMergedFindings(result);
+      const safeResult = Array.isArray(result) ? result : [];
+      setMergedFindings(safeResult);
       setMergedDocxBlob(docxBlob || null);
 
-      if (autoDownloadDocx && result.length > 0) {
+      if (autoDownloadDocx && safeResult.length > 0) {
         try {
-          const title = activeTemplate.name || result[0] || 'Radiology_Report';
+          const title = activeTemplate.name || safeResult[0] || 'Radiology_Report';
           const cleanFileName = `${title.replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().slice(0, 10)}.docx`;
-          const blob = docxBlob || await mergeFindingsIntoDocx(activeTemplate.docxBase64, result, title);
+          const blob = docxBlob || await mergeFindingsIntoDocx(activeTemplate.docxBase64, safeResult, title);
           downloadDocxBlob(blob, cleanFileName);
           setDownloadSuccess(`Auto-downloaded "${cleanFileName}"`);
           setTimeout(() => setDownloadSuccess(null), 4000);
@@ -582,21 +581,35 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
 
           {/* Render Findings */}
           <div className="space-y-2 bg-slate-50 dark:bg-slate-900/60 p-4 rounded-xl border border-slate-200 dark:border-slate-700 font-sans text-xs sm:text-sm">
-            {mergedFindings.map((line, idx) => {
+            {Array.isArray(mergedFindings) && mergedFindings.map((rawLine, idx) => {
+              const line = typeof rawLine === 'string' ? rawLine : (rawLine ? String(rawLine) : '');
+              if (!line) return null;
               const isBold = line.startsWith('BOLD::');
-              const clean = line.replace('BOLD::', '');
-              const isImpression = clean.startsWith('IMPRESSION:');
+              const clean = isBold ? line.replace(/^BOLD::\s*/, '') : line;
+              const isImpression = clean.startsWith('IMPRESSION:') || clean.startsWith('CONCLUSION:');
 
               if (isImpression) {
-                const parts = clean.split('###').map(p => p.trim()).filter(Boolean);
+                let parts: string[] = [];
+                if (clean.includes('###')) {
+                  parts = clean.split('###').map(p => p.trim()).filter(Boolean);
+                } else {
+                  const title = clean.startsWith('CONCLUSION:') ? 'CONCLUSION:' : 'IMPRESSION:';
+                  const textAfter = clean.replace(/^(IMPRESSION|CONCLUSION):\s*(BOLD::)?\s*/i, '').trim();
+                  parts = textAfter ? [title, textAfter] : [title];
+                }
+                const headerTitle = parts[0] || 'IMPRESSION:';
+                const bulletPoints = parts.slice(1);
+
                 return (
                   <div key={idx} className="p-3 bg-amber-50 dark:bg-amber-950/40 border-l-4 border-amber-500 rounded-r-lg font-bold text-amber-950 dark:text-amber-200 mt-4 space-y-1">
-                    <div className="text-xs uppercase tracking-wider">{parts[0]}</div>
-                    <ul className="list-disc list-inside space-y-0.5 text-xs font-normal">
-                      {parts.slice(1).map((p, pIdx) => (
-                        <li key={pIdx} className="font-semibold">{p}</li>
-                      ))}
-                    </ul>
+                    <div className="text-xs uppercase tracking-wider">{headerTitle}</div>
+                    {bulletPoints.length > 0 && (
+                      <ul className="list-disc list-inside space-y-0.5 text-xs font-normal">
+                        {bulletPoints.map((p, pIdx) => (
+                          <li key={pIdx} className="font-semibold">{p}</li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 );
               }
