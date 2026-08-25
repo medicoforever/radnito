@@ -3,7 +3,7 @@ import { DEFAULT_GEMINI_PROMPT, REPROCESS_GEMINI_PROMPT, TEMPLATE_GEMINI_PROMPT,
 import { IdentifiedError } from "../types";
 import { getRandomApiKey, getFallbackApiKey, getStoredApiKeys } from './apiKeyStore';
 import { extractTextFromDocxBlob } from './docxService';
-import { buildDocumentAstFromDocx, applyAstMutationsToDocx, AstMutation, mergeFindingsIntoDocxWithAstEngine } from './docxAstService';
+import { buildDocumentAstFromDocx, applyAstMutationsToDocx, AstMutation, AstInsertion, mergeFindingsIntoDocxWithAstEngine } from './docxAstService';
 
 import { isRAGStyleMatchingEnabled, getRelevantStyleTemplates, augmentPromptWithStyleTemplates } from './reportStyleRAG';
 
@@ -1089,10 +1089,45 @@ ${customPrompt ? `\nAdditional Instructions:\n${customPrompt}` : ''}
 
       const rawFinalFindings = displayFindings.length > 0 ? displayFindings : (selectedTemplate.lines || [selectedTemplate.name]);
       const finalFindings = normalizeClinicalProfileAndTechnique(rawFinalFindings);
-      const docxBlob = await mergeFindingsIntoDocxWithAstEngine(
-        selectedTemplate.docxBase64,
-        finalFindings
-      );
+
+      // Build DOCX: Use API's structured node_id mutations directly (covers table cells),
+      // then fall back to text-based merger if the direct approach produces no mutations.
+      let docxBlob: Blob;
+      if (safeUpdates.length > 0 || rawInsertions.length > 0 || impression.length > 0) {
+        // Convert rawInsertions to typed AstInsertion[]
+        const safeInsertions: AstInsertion[] = rawInsertions
+          .filter((ins: any) => ins && (ins.text || ins.new_text))
+          .map((ins: any) => ({
+            after_node_id: ins.after_node_id,
+            text: (ins.text || ins.new_text || '').replace(/^BOLD::\s*/, ''),
+            bold: ins.bold ?? (ins.text || ins.new_text || '').startsWith('BOLD::'),
+          }));
+
+        try {
+          docxBlob = await applyAstMutationsToDocx(
+            xmlDoc,
+            zipEntries,
+            pMap,
+            cellMap,
+            safeUpdates,
+            impression,
+            impressionSlotIds,
+            impressionHeaderId,
+            safeInsertions
+          );
+        } catch (directErr) {
+          console.warn('Direct AST mutation failed, falling back to text-based merger:', directErr);
+          docxBlob = await mergeFindingsIntoDocxWithAstEngine(
+            selectedTemplate.docxBase64,
+            finalFindings
+          );
+        }
+      } else {
+        docxBlob = await mergeFindingsIntoDocxWithAstEngine(
+          selectedTemplate.docxBase64,
+          finalFindings
+        );
+      }
       return { findings: finalFindings, docxBlob };
     }
   } catch (astErr) {
