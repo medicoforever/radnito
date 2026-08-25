@@ -204,8 +204,7 @@ export async function applyAstMutationsToDocx(
   impressionItems?: string[],
   impressionSlotIds: string[] = [],
   impressionHeaderId?: string,
-  insertedFindings?: (string | AstInsertion)[],
-  displayFindings?: string[]
+  insertedFindings?: (string | AstInsertion)[]
 ): Promise<Blob> {
   const ensureBoldOnRun = (run: Element, makeBold: boolean) => {
     let rPr = run.getElementsByTagName('w:rPr')[0];
@@ -313,12 +312,7 @@ export async function applyAstMutationsToDocx(
     if (pMap.has(nid)) {
       const p = pMap.get(nid)!;
       if (!cleanText) {
-        // Remove the superseded/contradicted paragraph element and its trailing spacer cleanly from DOM
-        let next = p.nextSibling;
-        while (next && next.nodeType !== 1) next = next.nextSibling;
-        if (next && ((next as Element).localName === 'p' || (next as Element).nodeName === 'w:p') && !getElementText(next as Element).trim()) {
-          (next as Element).parentNode?.removeChild(next as Element);
-        }
+        // Remove the superseded/contradicted paragraph element cleanly from DOM (no leftover empty blank lines)
         if (p.parentNode) {
           p.parentNode.removeChild(p);
         } else {
@@ -573,7 +567,15 @@ export async function applyAstMutationsToDocx(
       }
     };
 
-    // Clean up old slot elements and intermediate empty spacer paragraphs after headerEl
+function cleanImpressionText(raw: string): string {
+  let s = raw.replace(/^BOLD::\s*/, '');
+  s = s.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '');
+  s = s.replace(/^["'\s]+|["'\s]+$/g, '');
+  s = s.replace(/\[(?:raw findings|user query|citation)[^\]]*\]/gi, '').replace(/\s{2,}/g, ' ');
+  return s.trim();
+}
+
+    // Clean up old slot elements and any existing paragraphs after headerEl
     if (headerEl && headerEl.parentNode) {
       const parent = headerEl.parentNode;
       const toRemove: Element[] = [];
@@ -582,11 +584,7 @@ export async function applyAstMutationsToDocx(
         if (sib.nodeType === 1) {
           const el = sib as Element;
           if (el.localName === 'p' || el.nodeName === 'w:p') {
-            const txt = getElementText(el).trim();
-            // Remove if it is in slotElements or an empty spacer paragraph after header
-            if (slotElements.includes(el) || !txt) {
-              toRemove.push(el);
-            }
+            toRemove.push(el);
           }
         }
         sib = sib.nextSibling;
@@ -600,8 +598,10 @@ export async function applyAstMutationsToDocx(
       let lastInserted: Element = headerEl;
       for (let i = 0; i < impressionItems.length; i++) {
         const rawItem = impressionItems[i];
-        const cleanBullet = rawItem.replace(/^BOLD::\s*/, '').replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
+        const cleanBullet = cleanImpressionText(rawItem);
         if (!cleanBullet) continue;
+        const u = cleanBullet.toUpperCase();
+        if (u === 'IMPRESSION:' || u === 'CONCLUSION:' || u === 'IMPRESSION' || u === 'CONCLUSION') continue;
 
         const newP = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:p');
         const newR = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:r');
@@ -686,94 +686,6 @@ export async function applyAstMutationsToDocx(
   }
 
 
-  // 2.5 Post-Mutation DOM Reconciliation:
-  // Remove baseline template paragraph nodes that Gemini excluded from display_findings,
-  // so the downloaded DOCX matches the HTML screen output.
-  // This only REMOVES nodes — never creates or re-styles — so template styling is 100% preserved.
-  if (displayFindings && displayFindings.length > 0) {
-    const displayTextsNorm = new Set<string>();
-    for (const df of displayFindings) {
-      const cleaned = (df || '').replace(/^BOLD::\s*/, '').trim();
-      if (!cleaned) continue;
-      if (cleaned.includes('|')) continue; // table row
-      const norm = cleaned.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (norm) displayTextsNorm.add(norm);
-    }
-
-    const mutatedNodeIds = new Set(mutations.map(m => m.node_id));
-
-    for (const [nodeId, pEl] of pMap) {
-      // Only process canonical node_ keys (skip p_ legacy aliases to avoid double-processing)
-      if (!nodeId.startsWith('node_')) continue;
-      // Protect the title node
-      if (nodeId === 'node_0') continue;
-      // Skip nodes already handled by mutations
-      if (mutatedNodeIds.has(nodeId)) continue;
-      // Skip nodes already removed from DOM (e.g. by new_text: "" mutations)
-      if (!pEl.parentNode) continue;
-      // Skip impression header and slot nodes (handled separately by impression logic)
-      if (nodeId === impressionHeaderId) continue;
-      if (impressionSlotIds.includes(nodeId)) continue;
-
-      const nodeText = getElementText(pEl).trim();
-      if (!nodeText) continue; // empty spacer paragraph, keep
-
-      const upper = nodeText.toUpperCase();
-      // Protect structural elements that should never be reconciliation-removed
-      if (upper.startsWith('IMPRESSION') || upper.startsWith('CONCLUSION')) continue;
-      if (upper.startsWith('CLINICAL PROFILE') || upper.startsWith('*CLINICAL PROFILE')) continue;
-      if (upper.startsWith('TECHNIQUE') || upper.startsWith('SCANNING TECHNIQUE') || upper.startsWith('PROTOCOL')) continue;
-      if (upper.startsWith('SERIAL ')) continue; // technique description lines
-      if (nodeText.endsWith(':')) continue; // section headings
-
-      const normNodeText = nodeText.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (!normNodeText) continue;
-
-      // If Gemini excluded this node's text from display_findings, remove it and its trailing spacer from DOCX DOM
-      if (!displayTextsNorm.has(normNodeText)) {
-        let next = pEl.nextSibling;
-        while (next && next.nodeType !== 1) next = next.nextSibling;
-        if (next && ((next as Element).localName === 'p' || (next as Element).nodeName === 'w:p') && !getElementText(next as Element).trim()) {
-          (next as Element).parentNode?.removeChild(next as Element);
-        }
-        pEl.parentNode.removeChild(pEl);
-      }
-    }
-  }
-
-  // 2.8. Normalize Paragraph Spacing & Collapse Consecutive Empty Spacers
-  const bodyEl = xmlDoc.getElementsByTagName('w:body')[0];
-  if (bodyEl) {
-    const toRemoveEmptyP: Element[] = [];
-    let prevWasEmpty = false;
-
-    for (let i = 0; i < bodyEl.childNodes.length; i++) {
-      const child = bodyEl.childNodes[i];
-      if (child.nodeType !== 1) continue;
-      const el = child as Element;
-      if (el.localName === 'p' || el.nodeName === 'w:p') {
-        const txt = getElementText(el).trim();
-        if (!txt) {
-          if (prevWasEmpty) {
-            toRemoveEmptyP.push(el);
-          } else {
-            prevWasEmpty = true;
-          }
-        } else {
-          prevWasEmpty = false;
-        }
-      } else {
-        prevWasEmpty = false;
-      }
-    }
-
-    for (const emptyEl of toRemoveEmptyP) {
-      if (emptyEl.parentNode) {
-        emptyEl.parentNode.removeChild(emptyEl);
-      }
-    }
-  }
-
   // 3. Serialize modified DOM back into DOCX zip
   const serializer = new XMLSerializer();
   const modifiedDocXml = serializer.serializeToString(xmlDoc);
@@ -835,20 +747,22 @@ export async function mergeFindingsIntoDocxWithAstEngine(
       if (trimmed.includes('###')) {
         const parts = trimmed.split('###').slice(1);
         for (const p of parts) {
-          const cleanP = p.replace(/^BOLD::\s*/, '').replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
-          if (cleanP) impressionItems.push(cleanP);
+          const cleanP = cleanImpressionText(p);
+          const u = cleanP.toUpperCase();
+          if (cleanP && u !== 'IMPRESSION:' && u !== 'CONCLUSION:' && u !== 'IMPRESSION' && u !== 'CONCLUSION') {
+            impressionItems.push(cleanP);
+          }
         }
-      } else {
-        // Fallback: extract text after "IMPRESSION:" / "CONCLUSION:" directly (handles colon-separated format)
-        const textAfter = trimmed.replace(/^(IMPRESSION|CONCLUSION):\s*(BOLD::)?\s*/i, '').trim();
-        if (textAfter) impressionItems.push(textAfter);
       }
       continue;
     }
 
     if (isInImpression) {
-      const cleanP = trimmed.replace(/^BOLD::\s*/, '').replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
-      if (cleanP) impressionItems.push(cleanP);
+      const cleanP = cleanImpressionText(trimmed);
+      const u = cleanP.toUpperCase();
+      if (cleanP && u !== 'IMPRESSION:' && u !== 'CONCLUSION:' && u !== 'IMPRESSION' && u !== 'CONCLUSION') {
+        impressionItems.push(cleanP);
+      }
       continue;
     }
 
@@ -1024,7 +938,6 @@ function extractMedicalKeywords(text: string): Set<string> {
     impressionItems,
     impressionSlotIds,
     impressionHeaderId,
-    insertions,
-    findings
+    insertions
   );
 }
