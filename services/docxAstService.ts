@@ -94,18 +94,12 @@ export async function buildDocumentAstFromDocx(docxBase64: string): Promise<{
     const txt = getElementText(p).trim();
     if (!txt) continue;
 
-    // Do NOT split paragraphs that are headings or start with "Rest of"
-    if (txt.endsWith(':') && txt.length < 60) continue;
-    if (txt.toLowerCase().startsWith('rest of')) continue;
-
     // Detect if paragraph contains embedded section heading or IMPRESSION: (e.g. "Technique: ... Bones and joints:" or "... fluid collection is seen. IMPRESSION:")
     const match = txt.match(/^(.+?)\s+(Bones and joints:|Soft tissues?:|Meniscus:|Ligaments:|Screening of [^:]+:|IMPRESSION:|CONCLUSION:)\s*(.*)$/i);
     if (match) {
       const prefix = match[1].trim();
       const heading = match[2].trim();
       const suffix = match[3].trim();
-
-      if (prefix.length < 15 || prefix.toLowerCase().endsWith('rest of')) continue;
 
       const tTags = p.getElementsByTagName('w:t');
       if (tTags.length > 0) {
@@ -327,19 +321,11 @@ export async function applyAstMutationsToDocx(
   };
 
   const applyTextToParagraphRuns = (p: Element, rawText: string, defaultBold?: boolean) => {
-    const isHeading = (rawText.endsWith(':') && rawText.length < 55) || rawText.toLowerCase().startsWith('rest of soft tissues');
+    const isHeading = rawText.endsWith(':') && rawText.length < 55;
     let pPr = p.getElementsByTagName('w:pPr')[0];
     if (!pPr) {
       pPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pPr');
       p.insertBefore(pPr, p.firstChild);
-    }
-
-    if (isHeading) {
-      let kwn = pPr.getElementsByTagName('w:keepNext')[0] || pPr.getElementsByTagName('w:keepWithNext')[0];
-      if (!kwn) {
-        kwn = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:keepNext');
-        pPr.insertBefore(kwn, pPr.firstChild);
-      }
     }
 
     let spacing = pPr.getElementsByTagName('w:spacing')[0];
@@ -350,6 +336,11 @@ export async function applyAstMutationsToDocx(
     if (isHeading) {
       spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', '120');
       spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '40');
+      let kwn = pPr.getElementsByTagName('w:keepWithNext')[0];
+      if (!kwn) {
+        kwn = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:keepWithNext');
+        pPr.appendChild(kwn);
+      }
     } else {
       spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', '0');
       spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '60');
@@ -373,42 +364,6 @@ export async function applyAstMutationsToDocx(
       newRun.appendChild(newT);
       p.appendChild(newRun);
       allRuns.push(newRun);
-    }
-
-    const colonMatch = rawText.match(/^((?:Clinical profile|Clinical history|Technique|Scanning technique|Protocol):)\s*(.*)$/i);
-    if (colonMatch) {
-      const labelText = colonMatch[1] + ' ';
-      const valText = colonMatch[2];
-
-      ensureRunFormatting(firstRun, true, true);
-      const tTags = firstRun.getElementsByTagName('w:t');
-      if (tTags.length > 0) {
-        tTags[0].textContent = labelText;
-        tTags[0].setAttribute('xml:space', 'preserve');
-        for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
-      }
-
-      if (valText) {
-        let secondRun: Element;
-        if (allRuns.length > 1) {
-          secondRun = allRuns[1];
-        } else {
-          secondRun = firstRun.cloneNode(true) as Element;
-          firstRun.parentNode?.insertBefore(secondRun, firstRun.nextSibling);
-        }
-        ensureRunFormatting(secondRun, false, false);
-        const secondTTags = secondRun.getElementsByTagName('w:t');
-        if (secondTTags.length > 0) {
-          secondTTags[0].textContent = valText;
-          secondTTags[0].setAttribute('xml:space', 'preserve');
-          for (let j = 1; j < secondTTags.length; j++) secondTTags[j].textContent = '';
-        }
-        for (let j = 2; j < allRuns.length; j++) {
-          const laterTags = allRuns[j].getElementsByTagName('w:t');
-          for (let k = 0; k < laterTags.length; k++) laterTags[k].textContent = '';
-        }
-      }
-      return;
     }
 
     const firstRun = allRuns[0];
@@ -640,7 +595,10 @@ export async function applyAstMutationsToDocx(
       const pPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pPr');
       p.insertBefore(pPr, p.firstChild);
 
-      const isRecommendation = /\b(suggested|advised|clinical correlation|please correlate)\b/i.test(cleanBullet);
+      const isRecommendation = cleanBullet.toLowerCase().startsWith('suggested clinical correlation') ||
+                               cleanBullet.toLowerCase().startsWith('advised clinical correlation') ||
+                               cleanBullet.toLowerCase().startsWith('clinical correlation is advised') ||
+                               cleanBullet.toLowerCase().startsWith('please correlate clinically');
 
       // 1. keepLines
       const keepLines = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:keepLines');
@@ -648,7 +606,7 @@ export async function applyAstMutationsToDocx(
 
       // 2. spacing
       const spacing = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:spacing');
-      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', isRecommendation ? '100' : '0');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', isRecommendation ? '60' : '0');
       spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', isRecommendation ? '0' : '40');
       spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:line', '240');
       spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:lineRule', 'auto');
@@ -657,7 +615,7 @@ export async function applyAstMutationsToDocx(
       // 3. ind (for bullets only)
       if (!isRecommendation) {
         const ind = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:ind');
-        ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:left', '360');
+        ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:left', '720');
         ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:hanging', '360');
         pPr.appendChild(ind);
       }
@@ -679,13 +637,11 @@ export async function applyAstMutationsToDocx(
         rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:cs', 'Times New Roman');
         rPr.appendChild(rFonts);
 
-        // 2. b & bCs (bullets bold, recommendation normal)
-        if (!isRecommendation) {
-          const b = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:b');
-          rPr.appendChild(b);
-          const bCs = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:bCs');
-          rPr.appendChild(bCs);
-        }
+        // 2. b & bCs
+        const b = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:b');
+        rPr.appendChild(b);
+        const bCs = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:bCs');
+        rPr.appendChild(bCs);
 
         // 3. sz & szCs
         const sz = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:sz');
@@ -698,7 +654,7 @@ export async function applyAstMutationsToDocx(
 
       const tTags = p.getElementsByTagName('w:t');
       if (tTags.length > 0) {
-        tTags[0].textContent = isRecommendation ? cleanBullet : `•\t${cleanBullet}`;
+        tTags[0].textContent = isRecommendation ? cleanBullet : `•  ${cleanBullet}`;
         tTags[0].setAttribute('xml:space', 'preserve');
         for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
       }
@@ -706,8 +662,7 @@ export async function applyAstMutationsToDocx(
 
 function cleanImpressionText(raw: string): string {
   let s = raw.replace(/^BOLD::\s*/, '');
-  s = s.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\*\d\.\)\(•]+/gu, '');
-  s = s.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\*\d\.\)\(•]+/gu, '');
+  s = s.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '');
   s = s.replace(/^["'\s]+|["'\s]+$/g, '');
   s = s.replace(/\[(?:raw findings|user query|citation)[^\]]*\]/gi, '').replace(/\s{2,}/g, ' ');
   return s.trim();
@@ -879,92 +834,8 @@ export async function mergeFindingsIntoDocxWithAstEngine(
     return false;
   };
 
-  // Auto-correct any swapped Clinical Profile and Technique lines
-  const clinicalKw = /\b(c\/o|pain|swelling|trauma|h\/o|fever|fall|rto|r\/t\/o|complaint|post-op|k\/c\/o|mass|lump|known case|operated|injury|fracture)\b/i;
-  const techKw = /\b(PD|fs|IR|T1|T2|GRE|FLAIR|DWI|ADC|CT|kVp|mA|slices|planes|axial|sagittal|coronal|STIR|FIESTA|CISS|TOF|MRA|HRCT|NCCT|CECT)\b/i;
-  const normalizedRawLines: string[] = [];
-  for (let i = 0; i < expandedRawLines.length; i++) {
-    const line = expandedRawLines[i].trim();
-    if (!line) continue;
-    const cleanLine = line.replace(/^BOLD::\s*/, '').replace(/^\*+|\*+$/g, '').trim();
-    const u = cleanLine.toUpperCase().replace(/\s+/g, ' ').trim();
-
-    // Case 1: "Clinical profile:" alone followed by "Technique: <history>"
-    if (u === 'CLINICAL PROFILE:' || u === 'CLINICAL PROFILE' || u === 'CLINICAL HISTORY:' || u === 'CLINICAL HISTORY') {
-      if (i + 1 < expandedRawLines.length) {
-        const nextClean = expandedRawLines[i + 1].trim().replace(/^BOLD::\s*/, '').replace(/^\*+|\*+$/g, '').trim();
-
-        // Sub-case A: next line is "Technique: <clinical history>"
-        if (nextClean.toLowerCase().startsWith('technique:') && clinicalKw.test(nextClean)) {
-          const colonIdx = nextClean.indexOf(':');
-          const histVal = nextClean.substring(colonIdx + 1).trim();
-          normalizedRawLines.push(`Clinical profile: ${histVal}`);
-          i++;
-
-          if (i + 1 < expandedRawLines.length) {
-            const techCandidate = expandedRawLines[i + 1].trim().replace(/^BOLD::\s*/, '').replace(/^\*+|\*+$/g, '').trim();
-            if (techKw.test(techCandidate)) {
-              const actualTech = techCandidate.replace(/^(?:Technique:\s*)+/i, '');
-              normalizedRawLines.push(`Technique: ${actualTech}`);
-              i++;
-            }
-          }
-          continue;
-        }
-
-        // Sub-case B: next line is also "Technique:" (empty), values follow on separate lines
-        const nextU = nextClean.toUpperCase().replace(/\s+/g, ' ').trim();
-        if (nextU === 'TECHNIQUE:' || nextU === 'TECHNIQUE' || nextU === 'SCANNING TECHNIQUE:') {
-          let histLine: string | null = null;
-          let techLine: string | null = null;
-          let consumed = 1;
-
-          for (let j = i + 2; j < Math.min(i + 5, expandedRawLines.length); j++) {
-            const candidate = expandedRawLines[j].trim().replace(/^BOLD::\s*/, '').replace(/^\*+|\*+$/g, '').trim();
-            if (!candidate) continue;
-            if (!histLine && clinicalKw.test(candidate) && !candidate.toLowerCase().startsWith('technique:')) {
-              histLine = candidate;
-              consumed = j - i;
-            } else if (!techLine && techKw.test(candidate) && !clinicalKw.test(candidate)) {
-              techLine = candidate.replace(/^(?:Technique:\s*)+/i, '');
-              consumed = j - i;
-            }
-          }
-
-          if (histLine) {
-            normalizedRawLines.push(`Clinical profile: ${histLine}`);
-            if (techLine) {
-              normalizedRawLines.push(`Technique: ${techLine}`);
-            }
-            i += consumed;
-            continue;
-          }
-        }
-      }
-    }
-
-    // Case 2: Line itself is "Technique: <clinical history>"
-    if (cleanLine.toLowerCase().startsWith('technique:') && clinicalKw.test(cleanLine)) {
-      const colonIdx = cleanLine.indexOf(':');
-      const histVal = cleanLine.substring(colonIdx + 1).trim();
-      normalizedRawLines.push(`Clinical profile: ${histVal}`);
-
-      if (i + 1 < expandedRawLines.length) {
-        const techCandidate = expandedRawLines[i + 1].trim().replace(/^BOLD::\s*/, '').replace(/^\*+|\*+$/g, '').trim();
-        if (techKw.test(techCandidate)) {
-          const actualTech = techCandidate.replace(/^(?:Technique:\s*)+/i, '');
-          normalizedRawLines.push(`Technique: ${actualTech}`);
-          i++;
-        }
-      }
-      continue;
-    }
-
-    normalizedRawLines.push(line);
-  }
-
-  for (let fIdx = 0; fIdx < normalizedRawLines.length; fIdx++) {
-    const rawLine = normalizedRawLines[fIdx];
+  for (let fIdx = 0; fIdx < expandedRawLines.length; fIdx++) {
+    const rawLine = expandedRawLines[fIdx];
     let trimmed = rawLine.trim();
     if (!trimmed) continue;
     if (trimmed.startsWith('+-') || trimmed.startsWith('|-') || trimmed.startsWith('+=')) continue;
@@ -974,12 +845,12 @@ export async function mergeFindingsIntoDocxWithAstEngine(
     const normLine = trimmed.replace(/^[\s\.\*\-\u2022\"'\u00a0\u200b]+/, '');
     if (normLine.toUpperCase() === 'IMPRESSION:' || normLine.toUpperCase().startsWith('IMPRESSION:') || normLine.toUpperCase() === 'CONCLUSION:' || normLine.toUpperCase().startsWith('CONCLUSION:')) {
       inImpressionSection = true;
-      rawImpressionAccumulator += '\n' + trimmed;
+      rawImpressionAccumulator += ' ' + trimmed;
       continue;
     }
 
     if (inImpressionSection) {
-      rawImpressionAccumulator += '\n' + trimmed;
+      rawImpressionAccumulator += ' ' + trimmed;
       continue;
     }
 
@@ -1021,30 +892,26 @@ export async function mergeFindingsIntoDocxWithAstEngine(
 
   // Parse all accumulated impression text into discrete clean bullet points
   if (rawImpressionAccumulator) {
-    let cleanedImp = rawImpressionAccumulator.replace(/\[(?:raw findings|user query|citation)[^\]]*\]/gi, '');
-    // Pre-split attached recommendation from bullets
-    cleanedImp = cleanedImp.replace(/(?<=\.)\s+(?=(?:Suggested|Advised|Clinical correlation|Please correlate)\b)/gi, '\n');
-    const rawParts = cleanedImp.split(/(?:###|""|"\s*"\s*|(?:\.|\))\s*"|[\r\n]+|(?<=[a-z0-9\.\)])\s*•\s*)/);
+    const cleanedImp = rawImpressionAccumulator.replace(/\[(?:raw findings|user query|citation)[^\]]*\]/gi, '');
+    const rawParts = cleanedImp.split(/(?:###|""|"\s*"\s*|(?:\.|\))\s*"|\r?\n)/);
     for (const part of rawParts) {
-      let p = cleanImpressionText(part);
-      if (!p) continue;
-
-      const u = p.toUpperCase().replace(/[^A-Z]/g, '');
-      if (u === 'IMPRESSION' || u === 'CONCLUSION' || u === 'IMPRESSIONS' || u === 'CONCLUSIONS') {
-        continue;
-      }
-      if (p.toUpperCase().startsWith('IMPRESSION:') || p.toUpperCase().startsWith('CONCLUSION:')) {
+      let p = part.replace(/^BOLD::\s*/, '');
+      p = p.replace(/^[\s\.\*\-\u2022\d\.\)\("'\u00a0\u200b]+/, '');
+      p = p.replace(/["'\s\.]+$/, '');
+      p = p.replace(/\s{2,}/g, ' ').trim();
+      const u = p.toUpperCase();
+      if (u.startsWith('IMPRESSION:') || u.startsWith('CONCLUSION:')) {
         const colonIdx = p.indexOf(':');
         if (colonIdx !== -1) {
-          let after = cleanImpressionText(p.substring(colonIdx + 1));
-          const afterU = after.toUpperCase().replace(/[^A-Z]/g, '');
-          if (after.length > 3 && afterU !== 'IMPRESSION' && afterU !== 'CONCLUSION') {
+          let after = p.substring(colonIdx + 1).trim();
+          after = after.replace(/^[\s\.\*\-\u2022\d\.\)\("'\u00a0\u200b]+/, '').replace(/["'\s\.]+$/, '').trim();
+          if (after.length > 3) {
             impressionItems.push(after.endsWith('.') ? after : `${after}.`);
           }
         }
         continue;
       }
-      if (p.length > 3) {
+      if (p.length > 3 && u !== 'IMPRESSION' && u !== 'CONCLUSION') {
         impressionItems.push(p.endsWith('.') ? p : `${p}.`);
       }
     }
@@ -1116,19 +983,14 @@ function extractMedicalKeywords(text: string): Set<string> {
 }
 
   let activeReportSection = 'header';
-  const processedFindingsText: string[] = [];
 
-  // Pass 1: Exact / Colon-Key / Section / Word Overlap Matching
+  // Pass 1: Exact / Colon-Key / Word Overlap Matching
   for (const finding of paragraphFindings) {
     const isBold = finding.startsWith('BOLD::') || finding.includes('BOLD::');
     const cleanFinding = finding.replace(/^BOLD::\s*/, '').trim();
-    if (!cleanFinding) continue;
-
     const isHeading = cleanFinding.endsWith(':');
     if (isHeading) {
-      let sKey = cleanFinding.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (sKey.includes('softtissue')) sKey = 'softtissue';
-      activeReportSection = sKey;
+      activeReportSection = cleanFinding.toLowerCase().replace(/[^a-z0-9]/g, '');
     }
     const fWords = extractMedicalKeywords(cleanFinding);
 
@@ -1144,41 +1006,12 @@ function extractMedicalKeywords(text: string): Set<string> {
       if (!nText) continue;
       const isNodeHeading = node.type === 'section_heading' || nText.endsWith(':');
 
-      // 1. Specialized Header Matching for Clinical Profile & Technique (FIRST PRIORITY)
-      if (fColon === 'clinicalprofile' || fColon === 'clinicalhistory') {
-        if (node.type === 'clinical_profile' || nText.toLowerCase().startsWith('clinical profile') || nText.toLowerCase().startsWith('clinical history')) {
-          bestScore = 100.0;
-          bestNodeId = node.id;
-          break;
-        }
-      }
-      if (fColon === 'technique' || fColon === 'scanningtechnique' || fColon === 'protocol') {
-        if (node.type === 'technique' || nText.toLowerCase().startsWith('technique:') || nText.toLowerCase().startsWith('scanning technique:') || nText.toLowerCase().startsWith('protocol:')) {
-          bestScore = 100.0;
-          bestNodeId = node.id;
-          break;
-        }
+      // Section Isolation: Narrative findings inside a section cannot match nodes in previous/other sections
+      if (activeReportSection !== 'header' && node.section && node.section !== 'header' && node.section !== activeReportSection) {
+        continue;
       }
 
-      // 2. Section Heading Matching
-      if (isHeading && isNodeHeading) {
-        let nKey = nText.toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (nKey.includes('softtissue')) nKey = 'softtissue';
-        let fKey = cleanFinding.toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (fKey.includes('softtissue')) fKey = 'softtissue';
-        if (nKey === fKey || nKey.includes(fKey) || fKey.includes(nKey)) {
-          bestScore = 100.0;
-          bestNodeId = node.id;
-          break;
-        }
-      }
-
-      // Do not match narrative findings onto section headings
-      if (!isHeading && isNodeHeading && node.type !== 'clinical_profile' && node.type !== 'technique') continue;
-      // Do not match section headings onto narrative nodes
-      if (isHeading && !isNodeHeading) continue;
-
-      // 3. Colon match (e.g. "L1-L2:", "Ventricular System:", "Clinical Profile:")
+      // 1. Colon match (e.g. "L1-L2:", "Ventricular System:", "Clinical Profile:")
       if (fColon && nText.includes(':')) {
         const nColon = nText.split(':', 2)[0].trim().toLowerCase().replace(/[^a-zA-Z0-9]/g, '');
         if (fColon === nColon && fColon.length > 0) {
@@ -1188,44 +1021,31 @@ function extractMedicalKeywords(text: string): Set<string> {
         }
       }
 
-      // 3. Exact match
+      // Do not match narrative findings onto section headings via word overlap
+      if (!isHeading && isNodeHeading) continue;
+      // Do not match section headings onto narrative nodes
+      if (isHeading && !isNodeHeading) continue;
+
+      // 2. Exact match
       if (cleanFinding.toLowerCase() === nText.toLowerCase()) {
         bestScore = 90.0;
         bestNodeId = node.id;
         break;
       }
 
-      // 4. Section Isolation with smart cross-section allowance
-      const nodeSectionNorm = (node.section || '').replace(/[^a-z0-9]/g, '');
-      const activeSectionNorm = activeReportSection.replace(/[^a-z0-9]/g, '');
-      if (activeSectionNorm !== 'header' && nodeSectionNorm && nodeSectionNorm !== 'header' && nodeSectionNorm !== activeSectionNorm) {
-        // Allow cross-section match only if keyword coverage is very high (>= 0.50)
-        const nWords = extractMedicalKeywords(nText);
-        let overlap = 0;
-        fWords.forEach(w => { if (nWords.has(w)) overlap++; });
-        if (nWords.size > 0 && overlap > 0) {
-          const coverage = overlap / nWords.size;
-          if (coverage >= 0.50 && coverage > bestScore) {
-            bestScore = coverage;
-            bestNodeId = node.id;
-          }
-        }
-        continue;
-      }
-
-      // 5. Medical Keyword Coverage match within section
+      // 3. Medical Keyword Coverage match (e.g. "Right SI joint sclerosis", "Sacroiliac narrowing" vs "SI joints and pubic symphysis appears normal")
       const nWords = extractMedicalKeywords(nText);
       let overlap = 0;
       fWords.forEach(w => { if (nWords.has(w)) overlap++; });
       if (nWords.size > 0 && overlap > 0) {
         const coverage = overlap / nWords.size;
-        if ((coverage >= 0.35 || overlap >= 2) && coverage > bestScore) {
+        if ((coverage >= 0.40 || overlap >= 2) && coverage > bestScore) {
           bestScore = coverage;
           bestNodeId = node.id;
         }
       }
 
-      // 6. Word overlap similarity (strict threshold to avoid cross-concept collisions)
+      // 4. Word overlap similarity (strict threshold to avoid cross-concept collisions)
       const union = fWords.size + nWords.size - overlap;
       const score = union > 0 && overlap > 0 ? overlap / union : 0;
 
@@ -1238,34 +1058,18 @@ function extractMedicalKeywords(text: string): Set<string> {
     if (bestNodeId) {
       usedNodeIds.add(bestNodeId);
       lastMatchedNodeId = bestNodeId;
-      processedFindingsText.push(cleanFinding);
       mutations.push({
         node_id: bestNodeId,
         new_text: finding,
         bold: isBold
       });
     } else {
-      // Suppress near-duplicate findings if already covered by an earlier finding in report
-      let isDuplicate = false;
-      for (const pf of processedFindingsText) {
-        const pfWords = extractMedicalKeywords(pf);
-        let overlap = 0;
-        fWords.forEach(w => { if (pfWords.has(w)) overlap++; });
-        if (fWords.size > 0 && (overlap / fWords.size) >= 0.70) {
-          isDuplicate = true;
-          break;
-        }
-      }
-
-      if (!isDuplicate) {
-        processedFindingsText.push(cleanFinding);
-        // Clean incidental finding insertion at its exact sequential position in report
-        insertions.push({
-          after_node_id: lastMatchedNodeId,
-          text: finding,
-          bold: isBold
-        });
-      }
+      // Clean incidental finding insertion at its exact sequential position in report
+      insertions.push({
+        after_node_id: lastMatchedNodeId,
+        text: finding,
+        bold: isBold
+      });
     }
   }
 
