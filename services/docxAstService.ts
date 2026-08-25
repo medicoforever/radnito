@@ -706,7 +706,8 @@ export async function applyAstMutationsToDocx(
 
 function cleanImpressionText(raw: string): string {
   let s = raw.replace(/^BOLD::\s*/, '');
-  s = s.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '');
+  s = s.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\*\d\.\)\(•]+/gu, '');
+  s = s.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\*\d\.\)\(•]+/gu, '');
   s = s.replace(/^["'\s]+|["'\s]+$/g, '');
   s = s.replace(/\[(?:raw findings|user query|citation)[^\]]*\]/gi, '').replace(/\s{2,}/g, ' ');
   return s.trim();
@@ -973,12 +974,12 @@ export async function mergeFindingsIntoDocxWithAstEngine(
     const normLine = trimmed.replace(/^[\s\.\*\-\u2022\"'\u00a0\u200b]+/, '');
     if (normLine.toUpperCase() === 'IMPRESSION:' || normLine.toUpperCase().startsWith('IMPRESSION:') || normLine.toUpperCase() === 'CONCLUSION:' || normLine.toUpperCase().startsWith('CONCLUSION:')) {
       inImpressionSection = true;
-      rawImpressionAccumulator += ' ' + trimmed;
+      rawImpressionAccumulator += '\n' + trimmed;
       continue;
     }
 
     if (inImpressionSection) {
-      rawImpressionAccumulator += ' ' + trimmed;
+      rawImpressionAccumulator += '\n' + trimmed;
       continue;
     }
 
@@ -1023,12 +1024,9 @@ export async function mergeFindingsIntoDocxWithAstEngine(
     let cleanedImp = rawImpressionAccumulator.replace(/\[(?:raw findings|user query|citation)[^\]]*\]/gi, '');
     // Pre-split attached recommendation from bullets
     cleanedImp = cleanedImp.replace(/(?<=\.)\s+(?=(?:Suggested|Advised|Clinical correlation|Please correlate)\b)/gi, '\n');
-    const rawParts = cleanedImp.split(/(?:###|""|"\s*"\s*|(?:\.|\))\s*"|\r?\n)/);
+    const rawParts = cleanedImp.split(/(?:###|""|"\s*"\s*|(?:\.|\))\s*"|[\r\n]+|(?<=[a-z0-9\.\)])\s*•\s*)/);
     for (const part of rawParts) {
-      let p = part.replace(/^BOLD::\s*/, '');
-      p = p.replace(/^[\s\.\*\-\u2022\d\.\)\("'\u00a0\u200b]+/, '');
-      p = p.replace(/["'\s\.]+$/, '');
-      p = p.replace(/\s{2,}/g, ' ').trim();
+      let p = cleanImpressionText(part);
       if (!p) continue;
 
       const u = p.toUpperCase().replace(/[^A-Z]/g, '');
@@ -1038,8 +1036,7 @@ export async function mergeFindingsIntoDocxWithAstEngine(
       if (p.toUpperCase().startsWith('IMPRESSION:') || p.toUpperCase().startsWith('CONCLUSION:')) {
         const colonIdx = p.indexOf(':');
         if (colonIdx !== -1) {
-          let after = p.substring(colonIdx + 1).trim();
-          after = after.replace(/^[\s\.\*\-\u2022\d\.\)\("'\u00a0\u200b]+/, '').replace(/["'\s\.]+$/, '').trim();
+          let after = cleanImpressionText(p.substring(colonIdx + 1));
           const afterU = after.toUpperCase().replace(/[^A-Z]/g, '');
           if (after.length > 3 && afterU !== 'IMPRESSION' && afterU !== 'CONCLUSION') {
             impressionItems.push(after.endsWith('.') ? after : `${after}.`);
