@@ -327,11 +327,19 @@ export async function applyAstMutationsToDocx(
   };
 
   const applyTextToParagraphRuns = (p: Element, rawText: string, defaultBold?: boolean) => {
-    const isHeading = rawText.endsWith(':') && rawText.length < 55;
+    const isHeading = (rawText.endsWith(':') && rawText.length < 55) || rawText.toLowerCase().startsWith('rest of soft tissues');
     let pPr = p.getElementsByTagName('w:pPr')[0];
     if (!pPr) {
       pPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pPr');
       p.insertBefore(pPr, p.firstChild);
+    }
+
+    if (isHeading) {
+      let kwn = pPr.getElementsByTagName('w:keepNext')[0] || pPr.getElementsByTagName('w:keepWithNext')[0];
+      if (!kwn) {
+        kwn = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:keepNext');
+        pPr.insertBefore(kwn, pPr.firstChild);
+      }
     }
 
     let spacing = pPr.getElementsByTagName('w:spacing')[0];
@@ -342,11 +350,6 @@ export async function applyAstMutationsToDocx(
     if (isHeading) {
       spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', '120');
       spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '40');
-      let kwn = pPr.getElementsByTagName('w:keepWithNext')[0];
-      if (!kwn) {
-        kwn = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:keepWithNext');
-        pPr.appendChild(kwn);
-      }
     } else {
       spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', '0');
       spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '60');
@@ -898,26 +901,34 @@ export async function mergeFindingsIntoDocxWithAstEngine(
 
   // Parse all accumulated impression text into discrete clean bullet points
   if (rawImpressionAccumulator) {
-    const cleanedImp = rawImpressionAccumulator.replace(/\[(?:raw findings|user query|citation)[^\]]*\]/gi, '');
+    let cleanedImp = rawImpressionAccumulator.replace(/\[(?:raw findings|user query|citation)[^\]]*\]/gi, '');
+    // Pre-split attached recommendation from bullets
+    cleanedImp = cleanedImp.replace(/(?<=\.)\s+(?=(?:Suggested|Advised|Clinical correlation|Please correlate)\b)/gi, '\n');
     const rawParts = cleanedImp.split(/(?:###|""|"\s*"\s*|(?:\.|\))\s*"|\r?\n)/);
     for (const part of rawParts) {
       let p = part.replace(/^BOLD::\s*/, '');
       p = p.replace(/^[\s\.\*\-\u2022\d\.\)\("'\u00a0\u200b]+/, '');
       p = p.replace(/["'\s\.]+$/, '');
       p = p.replace(/\s{2,}/g, ' ').trim();
-      const u = p.toUpperCase();
-      if (u.startsWith('IMPRESSION:') || u.startsWith('CONCLUSION:')) {
+      if (!p) continue;
+
+      const u = p.toUpperCase().replace(/[^A-Z]/g, '');
+      if (u === 'IMPRESSION' || u === 'CONCLUSION' || u === 'IMPRESSIONS' || u === 'CONCLUSIONS') {
+        continue;
+      }
+      if (p.toUpperCase().startsWith('IMPRESSION:') || p.toUpperCase().startsWith('CONCLUSION:')) {
         const colonIdx = p.indexOf(':');
         if (colonIdx !== -1) {
           let after = p.substring(colonIdx + 1).trim();
           after = after.replace(/^[\s\.\*\-\u2022\d\.\)\("'\u00a0\u200b]+/, '').replace(/["'\s\.]+$/, '').trim();
-          if (after.length > 3) {
+          const afterU = after.toUpperCase().replace(/[^A-Z]/g, '');
+          if (after.length > 3 && afterU !== 'IMPRESSION' && afterU !== 'CONCLUSION') {
             impressionItems.push(after.endsWith('.') ? after : `${after}.`);
           }
         }
         continue;
       }
-      if (p.length > 3 && u !== 'IMPRESSION' && u !== 'CONCLUSION') {
+      if (p.length > 3) {
         impressionItems.push(p.endsWith('.') ? p : `${p}.`);
       }
     }
@@ -1035,7 +1046,23 @@ function extractMedicalKeywords(text: string): Set<string> {
       // Do not match section headings onto narrative nodes
       if (isHeading && !isNodeHeading) continue;
 
-      // 2. Colon match (e.g. "L1-L2:", "Ventricular System:", "Clinical Profile:")
+      // 2. Specialized Header Matching for Clinical Profile & Technique
+      if (fColon === 'clinicalprofile' || fColon === 'clinicalhistory') {
+        if (node.type === 'clinical_profile' || nText.toLowerCase().startsWith('clinical profile') || nText.toLowerCase().startsWith('clinical history')) {
+          bestScore = 100.0;
+          bestNodeId = node.id;
+          break;
+        }
+      }
+      if (fColon === 'technique' || fColon === 'scanningtechnique' || fColon === 'protocol') {
+        if (node.type === 'technique' || nText.toLowerCase().startsWith('technique:') || nText.toLowerCase().startsWith('scanning technique:') || nText.toLowerCase().startsWith('protocol:')) {
+          bestScore = 100.0;
+          bestNodeId = node.id;
+          break;
+        }
+      }
+
+      // 3. Colon match (e.g. "L1-L2:", "Ventricular System:", "Clinical Profile:")
       if (fColon && nText.includes(':')) {
         const nColon = nText.split(':', 2)[0].trim().toLowerCase().replace(/[^a-zA-Z0-9]/g, '');
         if (fColon === nColon && fColon.length > 0) {
