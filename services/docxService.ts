@@ -252,6 +252,12 @@ export function generateDocxFromFindings(
             paragraphXmls.push(buildParagraphXml(buildRunXml(`•  ${cleanP}`, true, false, false)));
           }
         }
+      } else {
+        // Fallback: extract text after "IMPRESSION:" / "CONCLUSION:" directly
+        const textAfter = raw.replace(/^(IMPRESSION|CONCLUSION):\s*(BOLD::)?\s*/i, '').trim();
+        if (textAfter) {
+          paragraphXmls.push(buildParagraphXml(buildRunXml(`•  ${textAfter}`, true, false, false)));
+        }
       }
       continue;
     }
@@ -441,6 +447,10 @@ export async function mergeFindingsIntoDocx(
                   const cleanP = p.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
                   if (cleanP) impressionItems.push(cleanP);
                 }
+              } else {
+                // Fallback: extract text after "IMPRESSION:" / "CONCLUSION:" directly
+                const textAfter = trimmed.replace(/^(IMPRESSION|CONCLUSION):\s*(BOLD::)?\s*/i, '').trim();
+                if (textAfter) impressionItems.push(textAfter);
               }
               continue;
             }
@@ -625,45 +635,30 @@ export async function mergeFindingsIntoDocx(
             };
 
             for (let i = 0; i < impressionItems.length; i++) {
-              const rawB = impressionItems[i];
-              const cleanBullet = rawB.replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
-              const isRec = /\b(suggested|advised|clinical correlation|please correlate)\b/i.test(cleanBullet);
-              const bulletText = isRec ? cleanBullet : `•\t${cleanBullet}`;
-
-              let p: Element;
+              const cleanBullet = impressionItems[i].replace(/^[\s\u00a0\u200b\u2022\u2023\u2043\u2219\u25cf\u25cb\u25e6\u2013\u2014\-\u2022\*\d\.]+/gu, '').trim();
               if (i < postImpressionSlots.length) {
-                p = postImpressionSlots[i];
+                const p = postImpressionSlots[i];
+                const isNative = hasNativeBullet(p);
+                const bulletText = isNative ? cleanBullet : `•  ${cleanBullet}`;
+                const tTags = p.getElementsByTagName('w:t');
+                if (tTags.length > 0) {
+                  tTags[0].textContent = bulletText;
+                  tTags[0].setAttribute('xml:space', 'preserve');
+                  for (let k = 1; k < tTags.length; k++) tTags[k].textContent = '';
+                }
               } else {
                 const lastSlot = postImpressionSlots[postImpressionSlots.length - 1] || allP[impIdx];
-                p = lastSlot.cloneNode(true) as Element;
-                lastSlot.parentNode?.insertBefore(p, lastSlot.nextSibling);
-                postImpressionSlots.push(p);
-              }
-
-              let pPr = p.getElementsByTagName('w:pPr')[0];
-              if (!pPr) {
-                pPr = xmlDoc.createElementNS(W_NS, 'w:pPr');
-                p.insertBefore(pPr, p.firstChild);
-              }
-              let ind = pPr.getElementsByTagName('w:ind')[0];
-              if (!ind && !isRec) {
-                ind = xmlDoc.createElementNS(W_NS, 'w:ind');
-                pPr.appendChild(ind);
-              }
-              if (ind) {
-                if (isRec) {
-                  pPr.removeChild(ind);
-                } else {
-                  ind.setAttributeNS(W_NS, 'w:left', '360');
-                  ind.setAttributeNS(W_NS, 'w:hanging', '360');
+                const newP = lastSlot.cloneNode(true) as Element;
+                const isNative = hasNativeBullet(newP);
+                const bulletText = isNative ? cleanBullet : `•  ${cleanBullet}`;
+                const tTags = newP.getElementsByTagName('w:t');
+                if (tTags.length > 0) {
+                  tTags[0].textContent = bulletText;
+                  tTags[0].setAttribute('xml:space', 'preserve');
+                  for (let k = 1; k < tTags.length; k++) tTags[k].textContent = '';
                 }
-              }
-
-              const tTags = p.getElementsByTagName('w:t');
-              if (tTags.length > 0) {
-                tTags[0].textContent = bulletText;
-                tTags[0].setAttribute('xml:space', 'preserve');
-                for (let k = 1; k < tTags.length; k++) tTags[k].textContent = '';
+                lastSlot.parentNode?.insertBefore(newP, lastSlot.nextSibling);
+                postImpressionSlots.push(newP);
               }
             }
 
