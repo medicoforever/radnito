@@ -323,7 +323,7 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({
           acc.plain.push(cleanFinding);
           acc.html.push(`<p style="text-align:center;"><strong><u>${cleanFinding}</u></strong></p>`);
         } else if (isImpression) {
-            acc.plain.push(`${title.toUpperCase()}\n${points.map(p => `• ${p}`).join('\n')}`);
+            acc.plain.push(`${title.toUpperCase()}\n${points.map(p => `. ${p}`).join('\n')}`);
             acc.html.push(`<p><strong style="text-decoration: underline;">${title.toUpperCase()}</strong></p><ul>${points.map(p => `<li><strong>${p}</strong></li>`).join('')}</ul>`);
         } else if (isStructured) {
           acc.plain.push([title, ...points].join('\n'));
@@ -423,7 +423,7 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({
       plainText = cleanFinding;
       htmlText = `<p style="text-align:center;"><strong><u>${cleanFinding}</u></strong></p>`;
     } else if (isImpression) {
-        plainText = `${title.toUpperCase()}\n${points.map(p => `• ${p}`).join('\n')}`;
+        plainText = `${title.toUpperCase()}\n${points.map(p => `. ${p}`).join('\n')}`;
         htmlText = `<p><strong style="text-decoration: underline;">${title.toUpperCase()}</strong></p><ul>${points.map(p => `<li><strong>${p}</strong></li>`).join('')}</ul>`;
     } else if (isStructured) {
         plainText = [title, ...points].join('\n');
@@ -470,7 +470,7 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({
       const isImpression = isStructured && title.trim().toUpperCase() === 'IMPRESSION:';
 
       if (isImpression) {
-          return `${title.toUpperCase()}\n${points.map(p => `• ${p}`).join('\n')}`;
+          return `${title.toUpperCase()}\n${points.map(p => `. ${p}`).join('\n')}`;
       }
       if (isStructured) {
         return [title, ...points].join('\n');
@@ -942,8 +942,16 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({
   );
 
 
+  const handleScrollToMainPlace = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    const el = document.getElementById('single-dictation-main-top');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
   return (
-    <div className="p-4">
+    <div id="single-dictation-main-top" className="p-4">
       {multiSelectMode && (
           <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 bg-slate-800 text-white rounded-full shadow-lg flex items-center gap-4 px-5 py-2 transition-all duration-300 ease-in-out">
             <p className="text-sm font-semibold">Multi-select Mode</p>
@@ -1460,6 +1468,13 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({
         ) : continuationState.status === 'idle' ? (
           <>
             <button
+              onClick={handleScrollToMainPlace}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-lg hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50 transition-all w-full sm:w-auto flex items-center justify-center gap-2 shadow"
+              title="Move to main place (Top) for next dictation"
+            >
+              <span>? Move to Main Place / Top</span>
+            </button>
+            <button
               onClick={handleRecordNew}
               className="bg-blue-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-colors w-full sm:w-auto"
             >
@@ -1535,6 +1550,19 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({
       </div>
       {continuationState.error && (
         <p className="text-center text-red-500 dark:text-red-400 mt-4" role="alert">{continuationState.error}</p>
+      )}
+
+      {/* Floating Move to Main Place Button */}
+      {findings && findings.length > 0 && (
+        <button
+          type="button"
+          onClick={handleScrollToMainPlace}
+          className="fixed bottom-6 right-6 z-40 p-3 px-4 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-2xl border-2 border-white dark:border-slate-800 transition-all flex items-center gap-2 text-xs font-extrabold hover:scale-105"
+          title="Move to Main Place / Top"
+        >
+          <span className="text-base leading-none font-black">?</span>
+          <span className="tracking-wide">Main Place</span>
+        </button>
       )}
     </div>
   );
