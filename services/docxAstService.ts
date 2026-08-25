@@ -79,6 +79,69 @@ export async function buildDocumentAstFromDocx(docxBase64: string): Promise<{
     throw new Error('w:body element not found in Word XML.');
   }
 
+  // Normalize DOM: Split any legacy template paragraphs with conjoined section headings or embedded IMPRESSION:
+  const initialParagraphs: Element[] = [];
+  for (let i = 0; i < body.childNodes.length; i++) {
+    const node = body.childNodes[i];
+    if (node.nodeType === 1) {
+      const el = node as Element;
+      const tag = el.localName || el.nodeName.replace(/^w:/, '');
+      if (tag === 'p') initialParagraphs.push(el);
+    }
+  }
+
+  for (const p of initialParagraphs) {
+    const txt = getElementText(p).trim();
+    if (!txt) continue;
+
+    // Detect if paragraph contains embedded section heading or IMPRESSION: (e.g. "Technique: ... Bones and joints:" or "... fluid collection is seen. IMPRESSION:")
+    const match = txt.match(/^(.+?)\s+(Bones and joints:|Soft tissues?:|Meniscus:|Ligaments:|Screening of [^:]+:|IMPRESSION:|CONCLUSION:)\s*(.*)$/i);
+    if (match) {
+      const prefix = match[1].trim();
+      const heading = match[2].trim();
+      const suffix = match[3].trim();
+
+      const tTags = p.getElementsByTagName('w:t');
+      if (tTags.length > 0) {
+        tTags[0].textContent = prefix;
+        for (let j = 1; j < tTags.length; j++) tTags[j].textContent = '';
+      }
+
+      const newHeadP = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:p');
+      const headPPr = p.getElementsByTagName('w:pPr')[0];
+      if (headPPr) {
+        newHeadP.appendChild(headPPr.cloneNode(true));
+      }
+      const newR = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:r');
+      const newRPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rPr');
+      const b = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:b');
+      const u = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:u');
+      u.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', 'single');
+      newRPr.appendChild(b);
+      newRPr.appendChild(u);
+      newR.appendChild(newRPr);
+      const newT = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:t');
+      newT.textContent = heading;
+      newR.appendChild(newT);
+      newHeadP.appendChild(newR);
+
+      p.parentNode?.insertBefore(newHeadP, p.nextSibling);
+
+      if (suffix) {
+        const newSufP = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:p');
+        if (headPPr) {
+          newSufP.appendChild(headPPr.cloneNode(true));
+        }
+        const sufR = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:r');
+        const sufT = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:t');
+        sufT.textContent = suffix;
+        sufR.appendChild(sufT);
+        newSufP.appendChild(sufR);
+        p.parentNode?.insertBefore(newSufP, newHeadP.nextSibling);
+      }
+    }
+  }
+
   const ast: DocumentAstNode[] = [];
   const pMap = new Map<string, Element>();
   const cellMap = new Map<string, Element>();
