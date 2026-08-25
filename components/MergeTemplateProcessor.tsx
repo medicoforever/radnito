@@ -501,8 +501,8 @@ export const MergeTemplateProcessor: React.FC<MergeTemplateProcessorProps> = ({
           {/* Global Custom Instructions & Doctor Preferences */}
           <div className="pt-2">
             <CustomPromptInput
-              value={customNotes}
-              onChange={setCustomNotes}
+              prompt={customNotes}
+              onPromptChange={setCustomNotes}
               label="Doctor Preference Notes (Optional):"
               placeholder="e.g. 'Always mention visualized thoracic inlet', 'Format as short paragraphs'..."
             />
