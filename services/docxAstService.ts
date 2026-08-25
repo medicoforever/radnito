@@ -155,7 +155,6 @@ export async function buildDocumentAstFromDocx(docxBase64: string): Promise<{
   const impressionSlotIds: string[] = [];
 
   let nodeIndex = 0;
-  let tableCount = 0;
   let inImpressionSection = false;
   let currentSection = 'header';
 
@@ -216,7 +215,7 @@ export async function buildDocumentAstFromDocx(docxBase64: string): Promise<{
       });
       nodeIndex++;
     } else if (tag === 'tbl') {
-      const tblIndex = tableCount++;
+      const tblIndex = ast.filter(x => x.type === 'table_cell').length > 0 ? 1 : 0;
       const rows = getDirectChildren(el, 'tr');
       const headerLabels: string[] = [];
 
@@ -373,8 +372,6 @@ export async function applyAstMutationsToDocx(
       allRuns.push(newRun);
     }
 
-    const firstRun = allRuns[0];
-
     const colonMatch = rawText.match(/^((?:Clinical profile|Clinical history|Technique|Scanning technique|Protocol):)\s*(.*)$/i);
     if (colonMatch) {
       const labelText = colonMatch[1] + ' ';
@@ -411,6 +408,7 @@ export async function applyAstMutationsToDocx(
       return;
     }
 
+    const firstRun = allRuns[0];
     if (rawText.includes('BOLD::')) {
       const boldIdx = rawText.indexOf('BOLD::');
       const prefix = rawText.substring(0, boldIdx);
