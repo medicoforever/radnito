@@ -192,20 +192,25 @@ function generateLocalMergedFallback(
 
 export function normalizeClinicalProfileAndTechnique(lines: string[]): string[] {
   const out: string[] = [];
+  const clinicalKeywords = /\b(c\/o|pain|swelling|trauma|h\/o|fever|fall|rto|r\/t\/o|complaint|post-op|k\/c\/o|mass|lump|known case|operated|injury|fracture)\b/i;
+  const techKeywords = /\b(PD|fs|IR|T1|T2|GRE|FLAIR|DWI|ADC|CT|kVp|mA|slices|planes|axial|sagittal|coronal|STIR|FIESTA|CISS|TOF|MRA|HRCT|NCCT|CECT)\b/i;
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
 
     // Strip BOLD:: prefix and markdown italic markers for detection only
     const cleanLine = line.replace(/^BOLD::\s*/, '').replace(/^\*+|\*+$/g, '').trim();
-    const cleanU = cleanLine.toUpperCase();
+    const cleanU = cleanLine.toUpperCase().replace(/\s+/g, ' ').trim();
 
     // Case 1: "Clinical profile:" alone followed by "Technique: <history>"
-    if (cleanU === 'CLINICAL PROFILE:' || cleanU === 'CLINICAL PROFILE' || cleanU === 'CLINICAL HISTORY:' || cleanU === 'CLINICAL HISTORY' || cleanU === 'CLINICAL PROFILE: ' || cleanU === 'CLINICAL HISTORY: ') {
+    if (cleanU === 'CLINICAL PROFILE:' || cleanU === 'CLINICAL PROFILE' || cleanU === 'CLINICAL HISTORY:' || cleanU === 'CLINICAL HISTORY') {
       if (i + 1 < lines.length) {
         const nextRaw = lines[i + 1].trim();
         const nextClean = nextRaw.replace(/^BOLD::\s*/, '').replace(/^\*+|\*+$/g, '').trim();
-        if (nextClean.toLowerCase().startsWith('technique:') && /\b(c\/o|pain|swelling|trauma|h\/o|fever|fall|rto|r\/t\/o|complaint|post-op|k\/c\/o|mass|lump)\b/i.test(nextClean)) {
+
+        // Sub-case A: next line is "Technique: <clinical history>"
+        if (nextClean.toLowerCase().startsWith('technique:') && clinicalKeywords.test(nextClean)) {
           const colonIdx = nextClean.indexOf(':');
           const histVal = nextClean.substring(colonIdx + 1).trim();
           out.push(`Clinical profile: ${histVal}`);
@@ -213,7 +218,7 @@ export function normalizeClinicalProfileAndTechnique(lines: string[]): string[] 
 
           if (i + 1 < lines.length) {
             const techCandidate = lines[i + 1].trim().replace(/^BOLD::\s*/, '').replace(/^\*+|\*+$/g, '').trim();
-            if (/\b(PD|fs|IR|T1|T2|GRE|FLAIR|DWI|ADC|CT|kVp|mA|slices|planes|axial|sagittal|coronal)\b/i.test(techCandidate)) {
+            if (techKeywords.test(techCandidate)) {
               const actualTech = techCandidate.replace(/^(?:Technique:\s*)+/i, '');
               out.push(`Technique: ${actualTech}`);
               i++;
@@ -221,18 +226,48 @@ export function normalizeClinicalProfileAndTechnique(lines: string[]): string[] 
           }
           continue;
         }
+
+        // Sub-case B: next line is also "Technique:" (empty), values follow on separate lines
+        const nextU = nextClean.toUpperCase().replace(/\s+/g, ' ').trim();
+        if (nextU === 'TECHNIQUE:' || nextU === 'TECHNIQUE' || nextU === 'SCANNING TECHNIQUE:') {
+          // Look ahead for clinical history line and technique line
+          let histLine: string | null = null;
+          let techLine: string | null = null;
+          let consumed = 1; // already consumed the Technique: line
+
+          for (let j = i + 2; j < Math.min(i + 5, lines.length); j++) {
+            const candidate = lines[j].trim().replace(/^BOLD::\s*/, '').replace(/^\*+|\*+$/g, '').trim();
+            if (!candidate) continue;
+            if (!histLine && clinicalKeywords.test(candidate) && !candidate.toLowerCase().startsWith('technique:')) {
+              histLine = candidate;
+              consumed = j - i;
+            } else if (!techLine && techKeywords.test(candidate) && !clinicalKeywords.test(candidate)) {
+              techLine = candidate.replace(/^(?:Technique:\s*)+/i, '');
+              consumed = j - i;
+            }
+          }
+
+          if (histLine) {
+            out.push(`Clinical profile: ${histLine}`);
+            if (techLine) {
+              out.push(`Technique: ${techLine}`);
+            }
+            i += consumed;
+            continue;
+          }
+        }
       }
     }
 
     // Case 2: Line itself is "Technique: <clinical history>"
-    if (cleanLine.toLowerCase().startsWith('technique:') && /\b(c\/o|pain|swelling|trauma|h\/o|fever|fall|rto|r\/t\/o|complaint|post-op|k\/c\/o|mass|lump)\b/i.test(cleanLine)) {
+    if (cleanLine.toLowerCase().startsWith('technique:') && clinicalKeywords.test(cleanLine)) {
       const colonIdx = cleanLine.indexOf(':');
       const histVal = cleanLine.substring(colonIdx + 1).trim();
       out.push(`Clinical profile: ${histVal}`);
 
       if (i + 1 < lines.length) {
         const techCandidate = lines[i + 1].trim().replace(/^BOLD::\s*/, '').replace(/^\*+|\*+$/g, '').trim();
-        if (/\b(PD|fs|IR|T1|T2|GRE|FLAIR|DWI|ADC|CT|kVp|mA|slices|planes|axial|sagittal|coronal)\b/i.test(techCandidate)) {
+        if (techKeywords.test(techCandidate)) {
           const actualTech = techCandidate.replace(/^(?:Technique:\s*)+/i, '');
           out.push(`Technique: ${actualTech}`);
           i++;
