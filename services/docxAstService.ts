@@ -750,6 +750,23 @@ export async function mergeFindingsIntoDocxWithAstEngine(
   let inImpressionSection = false;
   let rawImpressionAccumulator = '';
 
+  const isTitleHeader = (text: string): boolean => {
+    const t = text.trim();
+    if (!t) return false;
+    if (t.endsWith(':') || t.toLowerCase().includes('clinical profile') || t.toLowerCase().includes('technique')) return false;
+
+    const cleanT = t.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (templateTitleNormalized && (cleanT === templateTitleNormalized || cleanT.includes(templateTitleNormalized) || templateTitleNormalized.includes(cleanT))) {
+      return true;
+    }
+
+    if (/^(?:MRI|CT|X-?RAY|USG|ULTRASOUND|PET-?CT|DEXA|MRA|MRV|HRCT|NCCT|CECT)\b/i.test(t) &&
+        !/\b(?:is seen|are seen|noted|reveals|show|shows|effusion|fracture|edema|tear|lesion|infarct|mass|normal|abnormal)\b/i.test(t)) {
+      return true;
+    }
+    return false;
+  };
+
   for (let fIdx = 0; fIdx < expandedRawLines.length; fIdx++) {
     const rawLine = expandedRawLines[fIdx];
     let trimmed = rawLine.trim();
@@ -776,11 +793,7 @@ export async function mergeFindingsIntoDocxWithAstEngine(
       const cleanSub = cp.trim().replace(/^[\s\.\*\-\u2022\u00a0\u200b]+/, '').trim();
       if (!cleanSub) continue;
 
-      const normSub = cleanSub.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (fIdx === 0 && templateTitleNormalized && normSub === templateTitleNormalized) {
-        continue;
-      }
-      if (templateTitleNormalized && normSub === templateTitleNormalized) {
+      if (isTitleHeader(cleanSub)) {
         continue;
       }
 
