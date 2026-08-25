@@ -269,32 +269,93 @@ export async function applyAstMutationsToDocx(
   impressionHeaderId?: string,
   insertedFindings?: (string | AstInsertion)[]
 ): Promise<Blob> {
-  const ensureBoldOnRun = (run: Element, makeBold: boolean) => {
+  const ensureRunFormatting = (run: Element, makeBold: boolean, isHeading?: boolean) => {
     let rPr = run.getElementsByTagName('w:rPr')[0];
-    if (makeBold) {
-      if (!rPr) {
-        rPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rPr');
-        run.insertBefore(rPr, run.firstChild);
-      }
+    if (!rPr) {
+      rPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rPr');
+      run.insertBefore(rPr, run.firstChild);
+    }
+    let rFonts = rPr.getElementsByTagName('w:rFonts')[0];
+    if (!rFonts) {
+      rFonts = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rFonts');
+      rPr.appendChild(rFonts);
+    }
+    rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:ascii', 'Times New Roman');
+    rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:hAnsi', 'Times New Roman');
+    rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:cs', 'Times New Roman');
+
+    let sz = rPr.getElementsByTagName('w:sz')[0];
+    if (!sz) {
+      sz = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:sz');
+      rPr.appendChild(sz);
+    }
+    sz.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', '24');
+    let szCs = rPr.getElementsByTagName('w:szCs')[0];
+    if (!szCs) {
+      szCs = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:szCs');
+      rPr.appendChild(szCs);
+    }
+    szCs.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', '24');
+
+    if (makeBold || isHeading) {
       let bTag = rPr.getElementsByTagName('w:b')[0];
       if (!bTag) {
         bTag = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:b');
         rPr.appendChild(bTag);
       }
+      let bCsTag = rPr.getElementsByTagName('w:bCs')[0];
+      if (!bCsTag) {
+        bCsTag = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:bCs');
+        rPr.appendChild(bCsTag);
+      }
+    }
+
+    if (isHeading) {
+      let uTag = rPr.getElementsByTagName('w:u')[0];
+      if (!uTag) {
+        uTag = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:u');
+        uTag.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', 'single');
+        rPr.appendChild(uTag);
+      }
     }
   };
 
   const applyTextToParagraphRuns = (p: Element, rawText: string, defaultBold?: boolean) => {
+    const isHeading = rawText.endsWith(':') && rawText.length < 55;
+    let pPr = p.getElementsByTagName('w:pPr')[0];
+    if (!pPr) {
+      pPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pPr');
+      p.insertBefore(pPr, p.firstChild);
+    }
+
+    let spacing = pPr.getElementsByTagName('w:spacing')[0];
+    if (!spacing) {
+      spacing = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:spacing');
+      pPr.appendChild(spacing);
+    }
+    if (isHeading) {
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', '120');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '40');
+      let kwn = pPr.getElementsByTagName('w:keepWithNext')[0];
+      if (!kwn) {
+        kwn = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:keepWithNext');
+        pPr.appendChild(kwn);
+      }
+    } else {
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', '0');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '60');
+    }
+    spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:line', '240');
+    spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:lineRule', 'auto');
+
     const allRuns: Element[] = [];
     for (let i = 0; i < p.childNodes.length; i++) {
       if (p.childNodes[i].nodeName === 'w:r' || (p.childNodes[i] as Element).localName === 'r') {
         allRuns.push(p.childNodes[i] as Element);
       }
     }
-    // Option B: If the table cell or paragraph is completely empty (0 runs), auto-create run inheriting parent styles!
     if (allRuns.length === 0) {
       const newRun = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:r');
-      const pPr = p.getElementsByTagName('w:pPr')[0];
       const pRPr = pPr?.getElementsByTagName('w:rPr')[0];
       if (pRPr) {
         newRun.appendChild(pRPr.cloneNode(true));
@@ -312,7 +373,7 @@ export async function applyAstMutationsToDocx(
       const boldText = rawText.substring(boldIdx + 6);
 
       if (prefix) {
-        ensureBoldOnRun(firstRun, !!defaultBold);
+        ensureRunFormatting(firstRun, !!defaultBold, isHeading);
         const tTags = firstRun.getElementsByTagName('w:t');
         if (tTags.length > 0) {
           tTags[0].textContent = prefix;
@@ -327,7 +388,7 @@ export async function applyAstMutationsToDocx(
           secondRun = firstRun.cloneNode(true) as Element;
           firstRun.parentNode?.insertBefore(secondRun, firstRun.nextSibling);
         }
-        ensureBoldOnRun(secondRun, true);
+        ensureRunFormatting(secondRun, true, isHeading);
         const secondTTags = secondRun.getElementsByTagName('w:t');
         if (secondTTags.length > 0) {
           secondTTags[0].textContent = boldText;
@@ -340,7 +401,7 @@ export async function applyAstMutationsToDocx(
           for (let k = 0; k < laterTags.length; k++) laterTags[k].textContent = '';
         }
       } else {
-        ensureBoldOnRun(firstRun, true);
+        ensureRunFormatting(firstRun, true, isHeading);
         const tTags = firstRun.getElementsByTagName('w:t');
         if (tTags.length > 0) {
           tTags[0].textContent = boldText;
@@ -353,7 +414,7 @@ export async function applyAstMutationsToDocx(
         }
       }
     } else {
-      ensureBoldOnRun(firstRun, !!defaultBold);
+      ensureRunFormatting(firstRun, !!defaultBold, isHeading);
       const tTags = firstRun.getElementsByTagName('w:t');
       if (tTags.length > 0) {
         tTags[0].textContent = rawText;
@@ -417,10 +478,19 @@ export async function applyAstMutationsToDocx(
     }
 
     const createCleanBodyParagraph = (rawText: string, isBold: boolean): Element => {
+      const isHeading = rawText.endsWith(':') && rawText.length < 55;
       const p = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:p');
       const pPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pPr');
       const spacing = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:spacing');
-      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '0');
+      if (isHeading) {
+        spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', '120');
+        spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '40');
+        const kwn = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:keepWithNext');
+        pPr.appendChild(kwn);
+      } else {
+        spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', '0');
+        spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '60');
+      }
       spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:line', '240');
       spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:lineRule', 'auto');
       pPr.appendChild(spacing);
@@ -439,12 +509,19 @@ export async function applyAstMutationsToDocx(
       szCs.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', '24');
       rPr.appendChild(szCs);
 
-      if (isBold) {
+      if (isBold || isHeading) {
         const b = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:b');
         rPr.appendChild(b);
         const bCs = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:bCs');
         rPr.appendChild(bCs);
       }
+
+      if (isHeading) {
+        const u = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:u');
+        u.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', 'single');
+        rPr.appendChild(u);
+      }
+
       pPr.appendChild(rPr);
       p.appendChild(pPr);
 
@@ -483,31 +560,8 @@ export async function applyAstMutationsToDocx(
       }
 
       if (anchorEl && anchorEl.parentNode) {
-        // Check if anchorEl is followed by an empty spacer paragraph in the template
-        let next = anchorEl.nextSibling;
-        while (next && next.nodeType !== 1) next = next.nextSibling;
-        const nextIsBlank = next && ((next as Element).localName === 'p' || (next as Element).nodeName === 'w:p') && !getElementText(next as Element).trim();
-
-        // Create a matching spacer paragraph
-        const spacerP = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:p');
-        const spacerPPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pPr');
-        const spacerSpacing = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:spacing');
-        spacerSpacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '0');
-        spacerPPr.appendChild(spacerSpacing);
-        spacerP.appendChild(spacerPPr);
-
-        if (nextIsBlank && next) {
-          // Insert after the existing blank spacer, and append a trailing blank spacer
-          anchorEl.parentNode.insertBefore(newP, (next as Element).nextSibling);
-          anchorEl.parentNode.insertBefore(spacerP, newP.nextSibling);
-        } else {
-          // Insert spacer before newP
-          anchorEl.parentNode.insertBefore(spacerP, anchorEl.nextSibling);
-          anchorEl.parentNode.insertBefore(newP, spacerP.nextSibling);
-        }
+        anchorEl.parentNode.insertBefore(newP, anchorEl.nextSibling);
       } else if (headerEl && headerEl.parentNode) {
-        const spacerP = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:p');
-        headerEl.parentNode.insertBefore(spacerP, headerEl);
         headerEl.parentNode.insertBefore(newP, headerEl);
       }
     }
