@@ -739,6 +739,16 @@ export async function mergeFindingsIntoDocxWithAstEngine(
             impressionItems.push(cleanP);
           }
         }
+      } else {
+        const colonIdx = trimmed.indexOf(':');
+        if (colonIdx !== -1) {
+          const afterColon = trimmed.substring(colonIdx + 1).trim();
+          const cleanP = cleanImpressionText(afterColon);
+          const u = cleanP.toUpperCase();
+          if (cleanP && u !== 'IMPRESSION:' && u !== 'CONCLUSION:' && u !== 'IMPRESSION' && u !== 'CONCLUSION') {
+            impressionItems.push(cleanP);
+          }
+        }
       }
       continue;
     }
