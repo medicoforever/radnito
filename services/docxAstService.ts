@@ -588,96 +588,68 @@ export async function applyAstMutationsToDocx(
     const formatBulletParagraph = (p: Element, rawBullet: string) => {
       const cleanBullet = cleanImpressionText(rawBullet);
 
-      let pPr = p.getElementsByTagName('w:pPr')[0];
-      if (!pPr) {
-        pPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pPr');
-        p.insertBefore(pPr, p.firstChild);
-      }
+      // Clean existing pPr
+      let oldPPr = p.getElementsByTagName('w:pPr')[0];
+      if (oldPPr) p.removeChild(oldPPr);
 
-      // Remove any leftover numPr or pStyle from old template slots to prevent mismatched indentation
-      const oldNumPr = pPr.getElementsByTagName('w:numPr')[0];
-      if (oldNumPr) pPr.removeChild(oldNumPr);
-      const oldPStyle = pPr.getElementsByTagName('w:pStyle')[0];
-      if (oldPStyle) pPr.removeChild(oldPStyle);
-
-      // Keep bullet lines together across page breaks (prevents mid-sentence page splitting)
-      let keepLines = pPr.getElementsByTagName('w:keepLines')[0];
-      if (!keepLines) {
-        keepLines = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:keepLines');
-        pPr.appendChild(keepLines);
-      }
-
-      // Ensure clean 0pt after spacing and single line spacing
-      let spacing = pPr.getElementsByTagName('w:spacing')[0];
-      if (!spacing) {
-        spacing = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:spacing');
-        pPr.appendChild(spacing);
-      }
-      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '0');
-      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:line', '240');
-      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:lineRule', 'auto');
+      const pPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pPr');
+      p.insertBefore(pPr, p.firstChild);
 
       const isRecommendation = cleanBullet.toLowerCase().startsWith('suggested clinical correlation') ||
                                cleanBullet.toLowerCase().startsWith('advised clinical correlation') ||
                                cleanBullet.toLowerCase().startsWith('clinical correlation is advised') ||
                                cleanBullet.toLowerCase().startsWith('please correlate clinically');
 
-      if (isRecommendation) {
-        // Concluding correlation advice without bullet glyph and standard margin
-        const oldInd = pPr.getElementsByTagName('w:ind')[0];
-        if (oldInd) pPr.removeChild(oldInd);
-      } else {
-        // Uniform Manual Bullet with clean Hanging Indent (Left: 720 / Hanging: 360) across all platforms
-        let ind = pPr.getElementsByTagName('w:ind')[0];
-        if (!ind) {
-          ind = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:ind');
-          pPr.appendChild(ind);
-        }
+      // 1. keepLines
+      const keepLines = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:keepLines');
+      pPr.appendChild(keepLines);
+
+      // 2. spacing
+      const spacing = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:spacing');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', isRecommendation ? '60' : '0');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', isRecommendation ? '0' : '40');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:line', '240');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:lineRule', 'auto');
+      pPr.appendChild(spacing);
+
+      // 3. ind (for bullets only)
+      if (!isRecommendation) {
+        const ind = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:ind');
         ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:left', '720');
         ind.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:hanging', '360');
+        pPr.appendChild(ind);
       }
 
-      // Ensure bold on all runs in the impression bullet paragraph
+      // Format all runs in strict CT_RPr order: rFonts -> b -> bCs -> sz -> szCs
       const rTags = p.getElementsByTagName('w:r');
       for (let r_i = 0; r_i < rTags.length; r_i++) {
-        let rPr = rTags[r_i].getElementsByTagName('w:rPr')[0];
-        if (!rPr) {
-          rPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rPr');
-          rTags[r_i].insertBefore(rPr, rTags[r_i].firstChild);
-        }
-        let rFonts = rPr.getElementsByTagName('w:rFonts')[0];
-        if (!rFonts) {
-          rFonts = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rFonts');
-          rPr.appendChild(rFonts);
-        }
+        const r = rTags[r_i];
+        let oldRPr = r.getElementsByTagName('w:rPr')[0];
+        if (oldRPr) r.removeChild(oldRPr);
+
+        const rPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rPr');
+        r.insertBefore(rPr, r.firstChild);
+
+        // 1. rFonts
+        const rFonts = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rFonts');
         rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:ascii', 'Times New Roman');
         rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:hAnsi', 'Times New Roman');
         rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:cs', 'Times New Roman');
+        rPr.appendChild(rFonts);
 
-        let sz = rPr.getElementsByTagName('w:sz')[0];
-        if (!sz) {
-          sz = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:sz');
-          rPr.appendChild(sz);
-        }
+        // 2. b & bCs
+        const b = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:b');
+        rPr.appendChild(b);
+        const bCs = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:bCs');
+        rPr.appendChild(bCs);
+
+        // 3. sz & szCs
+        const sz = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:sz');
         sz.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', '24');
-
-        let szCs = rPr.getElementsByTagName('w:szCs')[0];
-        if (!szCs) {
-          szCs = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:szCs');
-          rPr.appendChild(szCs);
-        }
+        rPr.appendChild(sz);
+        const szCs = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:szCs');
         szCs.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', '24');
-
-        let bTag = rPr.getElementsByTagName('w:b')[0];
-        if (!bTag) {
-          bTag = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:b');
-          rPr.appendChild(bTag);
-        }
-        let bCsTag = rPr.getElementsByTagName('w:bCs')[0];
-        if (!bCsTag) {
-          bCsTag = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:bCs');
-          rPr.appendChild(bCsTag);
-        }
+        rPr.appendChild(szCs);
       }
 
       const tTags = p.getElementsByTagName('w:t');
@@ -706,10 +678,10 @@ function cleanImpressionText(raw: string): string {
         headPPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pPr');
         headerEl.insertBefore(headPPr, headerEl.firstChild);
       }
-      let kwn = headPPr.getElementsByTagName('w:keepWithNext')[0];
+      let kwn = headPPr.getElementsByTagName('w:keepWithNext')[0] || headPPr.getElementsByTagName('w:keepNext')[0];
       if (!kwn) {
-        kwn = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:keepWithNext');
-        headPPr.appendChild(kwn);
+        kwn = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:keepNext');
+        headPPr.insertBefore(kwn, headPPr.firstChild);
       }
       const toRemove: Element[] = [];
       let sib = headerEl.nextSibling;
@@ -738,28 +710,6 @@ function cleanImpressionText(raw: string): string {
 
         const newP = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:p');
         const newR = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:r');
-        const newRPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rPr');
-        
-        const rFonts = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rFonts');
-        rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:ascii', 'Times New Roman');
-        rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:hAnsi', 'Times New Roman');
-        rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:cs', 'Times New Roman');
-        newRPr.appendChild(rFonts);
-
-        const sz = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:sz');
-        sz.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', '24');
-        newRPr.appendChild(sz);
-        const szCs = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:szCs');
-        szCs.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', '24');
-        newRPr.appendChild(szCs);
-
-        // Always bold impression bullet text
-        const b = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:b');
-        newRPr.appendChild(b);
-        const bCs = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:bCs');
-        newRPr.appendChild(bCs);
-
-        newR.appendChild(newRPr);
         const newT = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:t');
         newR.appendChild(newT);
         newP.appendChild(newR);
@@ -768,7 +718,8 @@ function cleanImpressionText(raw: string): string {
         parent.insertBefore(newP, lastInserted.nextSibling);
         lastInserted = newP;
       }
-    } else {
+    }
+  } else {
       // If neither slot nor header exists, append IMPRESSION: header and bullets to w:body
       const body = xmlDoc.getElementsByTagName('w:body')[0];
       if (body) {
@@ -816,7 +767,6 @@ function cleanImpressionText(raw: string): string {
         }
       }
     }
-  }
 
 
   // 3. Serialize modified DOM back into DOCX zip
