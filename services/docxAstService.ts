@@ -130,6 +130,28 @@ export async function buildDocumentAstFromDocx(docxBase64: string): Promise<{
     const txt = getElementText(p).trim();
     if (!txt) continue;
 
+    // Detect if paragraph is a section heading and apply generous 240 dxa spacing before it
+    const isSectionHeading = txt.endsWith(':') && txt.length < 55 && !txt.toLowerCase().startsWith('clinical profile') && !txt.toLowerCase().startsWith('technique') && !txt.toLowerCase().startsWith('protocol');
+    if (isSectionHeading) {
+      let pPr = p.getElementsByTagName('w:pPr')[0];
+      if (!pPr) {
+        pPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pPr');
+        p.insertBefore(pPr, p.firstChild);
+      }
+      let spacing = pPr.getElementsByTagName('w:spacing')[0];
+      if (!spacing) {
+        spacing = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:spacing');
+        pPr.appendChild(spacing);
+      }
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', '240');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '80');
+      let kwn = pPr.getElementsByTagName('w:keepWithNext')[0];
+      if (!kwn) {
+        kwn = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:keepWithNext');
+        pPr.appendChild(kwn);
+      }
+    }
+
     // Detect if paragraph contains embedded section heading or IMPRESSION: (e.g. "Technique: ... Bones and joints:" or "... fluid collection is seen. IMPRESSION:")
     const match = txt.match(/^(.+?)\s+(Bones and joints:|Soft tissues?:|Meniscus:|Ligaments:|Screening of [^:]+:|IMPRESSION:|CONCLUSION:)\s*(.*)$/i);
     if (match) {
@@ -395,8 +417,8 @@ export async function applyAstMutationsToDocx(
       pPr.appendChild(spacing);
     }
     if (isHeading) {
-      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', '120');
-      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '40');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', '240');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '80');
       let kwn = pPr.getElementsByTagName('w:keepWithNext')[0];
       if (!kwn) {
         kwn = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:keepWithNext');
@@ -404,9 +426,9 @@ export async function applyAstMutationsToDocx(
       }
     } else {
       spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', '0');
-      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '60');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '100');
     }
-    spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:line', '240');
+    spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:line', '260');
     spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:lineRule', 'auto');
 
     const allRuns: Element[] = [];
@@ -620,15 +642,15 @@ export async function applyAstMutationsToDocx(
       const pPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pPr');
       const spacing = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:spacing');
       if (isHeading) {
-        spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', '120');
-        spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '40');
+        spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', '240');
+        spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '80');
         const kwn = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:keepWithNext');
         pPr.appendChild(kwn);
       } else {
         spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', '0');
-        spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '60');
+        spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '100');
       }
-      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:line', '240');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:line', '260');
       spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:lineRule', 'auto');
       pPr.appendChild(spacing);
 
@@ -740,9 +762,9 @@ export async function applyAstMutationsToDocx(
 
       // 2. spacing
       const spacing = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:spacing');
-      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', isRecommendation ? '120' : '0');
-      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', isRecommendation ? '0' : '40');
-      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:line', '240');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', isRecommendation ? '160' : '0');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', isRecommendation ? '0' : '80');
+      spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:line', '260');
       spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:lineRule', 'auto');
       pPr.appendChild(spacing);
 
