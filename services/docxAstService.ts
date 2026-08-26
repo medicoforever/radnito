@@ -402,12 +402,37 @@ export async function applyAstMutationsToDocx(
 
     const firstRun = allRuns[0];
 
-    const colonMatch = rawText.match(/^((?:Clinical profile|Clinical history|Technique|Scanning technique|Protocol):)\s*(.*)$/i);
-    if (colonMatch) {
-      const labelText = colonMatch[1] + ' ';
-      const valText = colonMatch[2];
+    // Detect if rawText or existing paragraph has an inline colon label (e.g. "RV diameter: 5.0 cm", "LV diameter: 5.0 cm", "Clinical profile: ...", "Azygous vein: 0.6 cm")
+    const inlineLabelMatch = rawText.match(/^([A-Za-z0-9\s\/\-\(\)\.]+?:)\s*(.*)$/);
+    let labelText = '';
+    let valText = '';
+    let hasInlineLabel = false;
+    let isLabelUnderlined = false;
 
-      ensureRunFormatting(firstRun, true, true);
+    if (inlineLabelMatch && inlineLabelMatch[1].length < 45 && !rawText.endsWith(':')) {
+      labelText = inlineLabelMatch[1].trim() + ' ';
+      valText = inlineLabelMatch[2].trim();
+      hasInlineLabel = true;
+      const u = labelText.toUpperCase();
+      if (u.startsWith('CLINICAL PROFILE') || u.startsWith('CLINICAL HISTORY') || u.startsWith('TECHNIQUE') || u.startsWith('PROTOCOL')) {
+        isLabelUnderlined = true;
+      }
+    } else {
+      const origPText = getElementText(p).trim();
+      const origLabelMatch = origPText.match(/^([A-Za-z0-9\s\/\-\(\)\.]+?:)\s*(.*)$/);
+      if (origLabelMatch && origLabelMatch[1].length < 45 && !rawText.endsWith(':') && origLabelMatch[1].toLowerCase() !== rawText.toLowerCase()) {
+        labelText = origLabelMatch[1].trim() + ' ';
+        valText = rawText.trim();
+        hasInlineLabel = true;
+        const u = labelText.toUpperCase();
+        if (u.startsWith('CLINICAL PROFILE') || u.startsWith('CLINICAL HISTORY') || u.startsWith('TECHNIQUE') || u.startsWith('PROTOCOL')) {
+          isLabelUnderlined = true;
+        }
+      }
+    }
+
+    if (hasInlineLabel) {
+      ensureRunFormatting(firstRun, true, isLabelUnderlined);
       const tTags = firstRun.getElementsByTagName('w:t');
       if (tTags.length > 0) {
         tTags[0].textContent = labelText;
@@ -423,10 +448,12 @@ export async function applyAstMutationsToDocx(
           secondRun = firstRun.cloneNode(true) as Element;
           firstRun.parentNode?.insertBefore(secondRun, firstRun.nextSibling);
         }
-        ensureRunFormatting(secondRun, false, false);
+        const valIsBold = !!defaultBold || valText.startsWith('BOLD::');
+        const cleanVal = valText.replace(/^BOLD::\s*/, '').trim();
+        ensureRunFormatting(secondRun, valIsBold, false);
         const secondTTags = secondRun.getElementsByTagName('w:t');
         if (secondTTags.length > 0) {
-          secondTTags[0].textContent = valText;
+          secondTTags[0].textContent = cleanVal;
           secondTTags[0].setAttribute('xml:space', 'preserve');
           for (let j = 1; j < secondTTags.length; j++) secondTTags[j].textContent = '';
         }
@@ -498,6 +525,18 @@ export async function applyAstMutationsToDocx(
       }
     }
   };
+
+  // Remove floating table positioning (w:tblpPr) from all tables so they render inline in exact sequential flow
+  const allDocTables = xmlDoc.getElementsByTagName('w:tbl');
+  for (let i = 0; i < allDocTables.length; i++) {
+    const tblPr = allDocTables[i].getElementsByTagName('w:tblPr')[0];
+    if (tblPr) {
+      const tblpPr = tblPr.getElementsByTagName('w:tblpPr')[0];
+      if (tblpPr && tblpPr.parentNode) {
+        tblpPr.parentNode.removeChild(tblpPr);
+      }
+    }
+  }
 
   // 1. Apply Paragraph and Table Cell mutations with clean DOM node removal for cleared paragraphs
   for (const mut of mutations) {
