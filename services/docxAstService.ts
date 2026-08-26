@@ -730,6 +730,48 @@ export async function applyAstMutationsToDocx(
       }
     };
 
+    // If headerEl still does not exist in template DOM, create it in w:body before sectPr or at end of body
+    if (!headerEl) {
+      const body = xmlDoc.getElementsByTagName('w:body')[0];
+      if (body) {
+        const sectPr = body.getElementsByTagName('w:sectPr')[0];
+        const headP = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:p');
+        const headPPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:pPr');
+        const spacing = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:spacing');
+        spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:before', '240');
+        spacing.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:after', '40');
+        headPPr.appendChild(spacing);
+        const kwn = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:keepWithNext');
+        headPPr.appendChild(kwn);
+        headP.appendChild(headPPr);
+
+        const headR = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:r');
+        const headRPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rPr');
+        const rFonts = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rFonts');
+        rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:ascii', 'Times New Roman');
+        rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:hAnsi', 'Times New Roman');
+        rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:cs', 'Times New Roman');
+        headRPr.appendChild(rFonts);
+        const headB = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:b');
+        const headU = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:u');
+        headU.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', 'single');
+        headRPr.appendChild(headB);
+        headRPr.appendChild(headU);
+        headR.appendChild(headRPr);
+        const headT = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:t');
+        headT.textContent = 'IMPRESSION:';
+        headR.appendChild(headT);
+        headP.appendChild(headR);
+
+        if (sectPr) {
+          body.insertBefore(headP, sectPr);
+        } else {
+          body.appendChild(headP);
+        }
+        headerEl = headP;
+      }
+    }
+
     // Clean up old slot elements and any existing paragraphs after headerEl
     if (headerEl && headerEl.parentNode) {
       const parent = headerEl.parentNode;
@@ -745,6 +787,30 @@ export async function applyAstMutationsToDocx(
         kwn = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:keepNext');
         headPPr.insertBefore(kwn, headPPr.firstChild);
       }
+
+      // Ensure headerEl has a clean unified run with bold and underline for IMPRESSION:
+      const existingRuns = headerEl.getElementsByTagName('w:r');
+      while (existingRuns.length > 0) {
+        headerEl.removeChild(existingRuns[0]);
+      }
+      const headR = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:r');
+      const headRPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rPr');
+      const rFonts = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:rFonts');
+      rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:ascii', 'Times New Roman');
+      rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:hAnsi', 'Times New Roman');
+      rFonts.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:cs', 'Times New Roman');
+      headRPr.appendChild(rFonts);
+      const headB = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:b');
+      const headU = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:u');
+      headU.setAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:val', 'single');
+      headRPr.appendChild(headB);
+      headRPr.appendChild(headU);
+      headR.appendChild(headRPr);
+      const headT = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'w:t');
+      headT.textContent = 'IMPRESSION:';
+      headR.appendChild(headT);
+      headerEl.appendChild(headR);
+
       const toRemove: Element[] = [];
       let sib = headerEl.nextSibling;
       while (sib) {
