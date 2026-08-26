@@ -75,11 +75,11 @@ export const isTextBlob = (blob: Blob, fileName?: string): boolean => {
 
 // User's strictly configured model list in exact order down to gemini-2.5-flash (excluding gemini-3.5-flash-lite)
 export const USER_CONFIGURED_MODELS = [
+  'gemini-2.5-flash',
   'gemini-3.5-flash',
   'gemini-3.7-flash',
   'gemini-3-flash-preview',
   'gemini-3.6-flash',
-  'gemini-2.5-flash',
 ];
 
 /**
@@ -346,37 +346,31 @@ const responseSchema = {
 };
 
 export const getValidModelName = (model?: string): string => {
-  if (!model) return 'gemini-3.5-flash';
+  if (!model) return 'gemini-2.5-flash';
   const m = model.toLowerCase().trim();
   
   if (m.includes('3.5-flash-lite') || m === 'gemini-3.5-flash-lite') {
-    return 'gemini-3.5-flash-lite';
+    return 'gemini-2.5-flash';
   }
   if (m.includes('3.5') || m === 'gemini-3.5-flash') {
-    return 'gemini-3.5-flash';
+    return 'gemini-2.5-flash';
   }
   if (m.includes('3.7') || m === 'gemini-3.7-flash') {
-    return 'gemini-3.7-flash';
+    return 'gemini-2.5-flash';
   }
   if (m.includes('3.6') || m === 'gemini-3.6-flash') {
-    return 'gemini-3.6-flash';
-  }
-  if (m.includes('3.5-flash-lite') || m === 'gemini-3.5-flash-lite') {
-    return 'gemini-3.5-flash-lite';
-  }
-  if (m.includes('3.5') || m === 'gemini-3.5-flash') {
-    return 'gemini-3.5-flash';
+    return 'gemini-2.5-flash';
   }
   if (m.includes('3-flash') || m === 'gemini-3-flash-preview') {
-    return 'gemini-3-flash-preview';
+    return 'gemini-2.5-flash';
   }
   if (m.includes('3.1-pro') || m === 'gemini-3.1-pro-preview') {
-    return 'gemini-3.1-pro-preview';
+    return 'gemini-2.5-flash';
   }
   if (m === 'gemini-2.5-flash' || m === 'gemini-2.5-pro' || m === 'gemini-2.0-flash' || m === 'gemini-2.0-flash-lite') {
     return m;
   }
-  return model;
+  return 'gemini-2.5-flash';
 };
 
 const audioTranscriptCache = new WeakMap<Blob, string>();

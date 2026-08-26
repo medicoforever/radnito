@@ -88,6 +88,33 @@ export async function buildDocumentAstFromDocx(docxBase64: string): Promise<{
     throw new Error('w:body element not found in Word XML.');
   }
 
+  // 1. Remove floating table positioning (w:tblpPr) from all tables so they flow inline sequentially
+  const allTablesInDoc = xmlDoc.getElementsByTagName('w:tbl');
+  for (let i = 0; i < allTablesInDoc.length; i++) {
+    const tblPr = allTablesInDoc[i].getElementsByTagName('w:tblPr')[0];
+    if (tblPr) {
+      const tblpPr = tblPr.getElementsByTagName('w:tblpPr')[0];
+      if (tblpPr && tblpPr.parentNode) {
+        tblpPr.parentNode.removeChild(tblpPr);
+      }
+    }
+  }
+
+  // 2. Remove redundant empty paragraphs (<w:p></w:p>) that create huge vertical gaps
+  const emptyPList: Element[] = [];
+  const allDocP = xmlDoc.getElementsByTagName('w:p');
+  for (let i = 0; i < allDocP.length; i++) {
+    const p = allDocP[i];
+    if (p.parentNode && (p.parentNode.nodeName === 'w:tc' || (p.parentNode as Element).localName === 'tc')) continue;
+    const txt = (p.textContent || '').trim();
+    if (!txt) {
+      emptyPList.push(p);
+    }
+  }
+  emptyPList.forEach(p => {
+    if (p.parentNode) p.parentNode.removeChild(p);
+  });
+
   // Normalize DOM: Split any legacy template paragraphs with conjoined section headings or embedded IMPRESSION:
   const initialParagraphs: Element[] = [];
   for (let i = 0; i < body.childNodes.length; i++) {
