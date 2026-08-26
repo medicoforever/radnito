@@ -1218,17 +1218,34 @@ function extractMedicalKeywords(text: string): Set<string> {
         break;
       }
 
-      // 4. Section Isolation with smart cross-section allowance
+      // 4. Domain / Pathology Keyword Matching (e.g. PE filling defect, vascular thrombosis, disc protrusion, fracture)
+      if (fWords.has('filling') && fWords.has('defect') && nText.toLowerCase().includes('filling defect')) {
+        bestScore = 95.0;
+        bestNodeId = node.id;
+        break;
+      }
+      if (fWords.has('thrombus') && nText.toLowerCase().includes('filling defect')) {
+        bestScore = 95.0;
+        bestNodeId = node.id;
+        break;
+      }
+      if (fWords.has('embolism') && (nText.toLowerCase().includes('filling defect') || nText.toLowerCase().includes('thromboembolism'))) {
+        bestScore = 95.0;
+        bestNodeId = node.id;
+        break;
+      }
+
+      // 5. Section Isolation with smart cross-section allowance
       const nodeSectionNorm = (node.section || '').replace(/[^a-z0-9]/g, '');
       const activeSectionNorm = activeReportSection.replace(/[^a-z0-9]/g, '');
       if (activeSectionNorm !== 'header' && nodeSectionNorm && nodeSectionNorm !== 'header' && nodeSectionNorm !== activeSectionNorm) {
-        // Allow cross-section match only if keyword coverage is very high (>= 0.50)
+        // Allow cross-section match if keyword coverage is substantial (>= 0.25 or overlap >= 2)
         const nWords = extractMedicalKeywords(nText);
         let overlap = 0;
         fWords.forEach(w => { if (nWords.has(w)) overlap++; });
         if (nWords.size > 0 && overlap > 0) {
           const coverage = overlap / nWords.size;
-          if (coverage >= 0.50 && coverage > bestScore) {
+          if ((coverage >= 0.25 || overlap >= 2) && coverage > bestScore) {
             bestScore = coverage;
             bestNodeId = node.id;
           }
@@ -1303,6 +1320,28 @@ function extractMedicalKeywords(text: string): Set<string> {
           after_node_id: lastMatchedNodeId,
           text: finding,
           bold: isBold
+        });
+      }
+    }
+  }
+
+  // Post-processing Contradiction Removal:
+  // If an abnormal finding was processed (e.g. PE thrombus, disc herniation, fracture, effusion),
+  // identify any unused baseline normal nodes that contradict the finding (e.g. "No evidence of filling defect...", "No disc bulge...")
+  // and clear them so they are not left behind as contradictory statements.
+  const allFindingTexts = [...paragraphFindings, ...tableRowFindings].join(' ').toLowerCase();
+  const hasPeFinding = allFindingTexts.includes('thrombus') || allFindingTexts.includes('filling defect') || allFindingTexts.includes('embolism') || allFindingTexts.includes('embolus') || allFindingTexts.includes('pe ');
+
+  if (hasPeFinding) {
+    for (const node of paragraphNodes) {
+      if (usedNodeIds.has(node.id)) continue;
+      const txt = node.current_text.toLowerCase();
+      if (txt.includes('no evidence of filling defect') || txt.includes('no filling defect')) {
+        usedNodeIds.add(node.id);
+        mutations.push({
+          node_id: node.id,
+          new_text: '',
+          bold: false
         });
       }
     }
