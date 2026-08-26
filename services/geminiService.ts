@@ -6,6 +6,7 @@ import { extractTextFromDocxBlob } from './docxService';
 import { buildDocumentAstFromDocx, applyAstMutationsToDocx, AstMutation, AstInsertion, mergeFindingsIntoDocxWithAstEngine } from './docxAstService';
 
 import { isRAGStyleMatchingEnabled, getRelevantStyleTemplates, augmentPromptWithStyleTemplates } from './reportStyleRAG';
+import { findCrossModalitySkills } from './templateCatalog';
 
 export const getAiClient = (lastFailedKey?: string) => {
   const keys = getStoredApiKeys();
